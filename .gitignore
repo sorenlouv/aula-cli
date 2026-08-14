@@ -1,0 +1,17 @@
+node_modules/
+*.log
+
+# Never commit a session — it grants full read access to the Aula account.
+.env
+session.json
+
+# Downloaded attachments: photos of, and letters about, children.
+attachments/
+
+# Anything containing real family data — captured payloads, live-response
+# fixtures, personal notes, anything Claude writes that mentions the actual
+# family — belongs in data/ and never enters git. Only data/README.md, which
+# documents the convention, is tracked.
+data/*
+!data/README.md
+

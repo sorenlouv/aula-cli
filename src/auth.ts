@@ -1,0 +1,170 @@
+/**
+ * Where the client's credentials come from.
+ *
+ * There are two ways to be authenticated against Aula, and they are not
+ * alternatives so much as successive generations:
+ *
+ *   - **token** — what `bun src/cli.ts login` produces. A real MitID login
+ *     ending in OAuth tokens that refresh themselves, so a session survives
+ *     unattended for as long as the refresh token lives. They are written to
+ *     `~/.aula/tokens.json`, AES-256-GCM encrypted, on every platform.
+ *   - **cookie** — a session cookie lifted out of a browser by hand. Dies after
+ *     a few hours and cannot be renewed without a human. Kept because it is a
+ *     useful escape hatch when the login flow itself is what is broken.
+ */
+
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { AulaSessionError, loadCookie, SESSION_PATH } from './session.ts';
+import { AulaCookieJar, AulaHttpClient, EncryptedFileTokenStore } from './vendor/aula-auth/index.ts';
+import type { StoredTokenRecord, TokenStore } from './vendor/aula-auth/index.ts';
+import { TokenStoreError, withFreshTokens } from './vendor/aula-auth/index.ts';
+
+export const AULA_DIR = process.env.AULA_DIR ?? join(homedir(), '.aula');
+export const COOKIE_JAR_PATH = join(AULA_DIR, 'cookies.json');
+export const TOKEN_PATH = join(AULA_DIR, 'tokens.json');
+
+/**
+ * The AES key file sits next to the ciphertext it opens, so on its own the
+ * encryption is only "not readable by grep" — the real protection is the 0700
+ * directory. Setting `$AULA_TOKEN_KEY` (64 hex characters, or any passphrase)
+ * moves the key out of the filesystem entirely and makes the file useless
+ * without it.
+ */
+const KEY_PATH = join(AULA_DIR, '.token-key');
+export const KEY_ENV = 'AULA_TOKEN_KEY';
+
+export type Auth =
+  | { kind: 'token'; accessToken: string; username: string; cookie?: string }
+  | { kind: 'cookie'; cookie: string };
+
+/**
+ * `~/.aula` holds the long-lived refresh token, the key that decrypts it, the
+ * cookie jar and the response cache. 0700 so no other account on the machine
+ * can read any of it — and re-applied on every call, because a directory that
+ * predates this code may well be 0755.
+ */
+export function ensureAulaDir(): string {
+  mkdirSync(AULA_DIR, { recursive: true, mode: 0o700 });
+  chmodSync(AULA_DIR, 0o700);
+  return AULA_DIR;
+}
+
+/**
+ * One token store, on every platform.
+ *
+ * This used to be the macOS keychain, which meant `login` simply refused to run
+ * anywhere else — no devbox, no Linux, no Pi. `EncryptedFileTokenStore` came
+ * across in the same vendored package, is AES-256-GCM, and is already covered
+ * by its own tests, so there is no reason to carry two implementations.
+ */
+export function tokenStore(): TokenStore {
+  ensureAulaDir();
+  return new EncryptedFileTokenStore({
+    filePath: TOKEN_PATH,
+    keyFilePath: KEY_PATH,
+    envVarName: KEY_ENV,
+  });
+}
+
+const HOW_TO_LOGIN = `
+Run a MitID login:
+  bun run login
+
+Or, if the login flow itself is the problem, fall back to a browser cookie:
+  bun src/cli.ts session set '<cookie>'
+`.trim();
+
+export function loginInstructions(): string {
+  return HOW_TO_LOGIN;
+}
+
+/**
+ * Resolve credentials, most explicit first.
+ *
+ * `$AULA_COOKIE` wins over stored tokens on purpose: it is how you pin the
+ * client to one specific session while debugging, and a stored login silently
+ * overriding that would be maddening.
+ */
+export async function resolveAuth(): Promise<Auth> {
+  const fromEnv = process.env.AULA_COOKIE?.trim();
+  if (fromEnv) return { kind: 'cookie', cookie: loadCookie() };
+
+  const record = await loadFreshTokens();
+  if (record) {
+    const cookie = await loadCookieHeader();
+    return {
+      kind: 'token',
+      accessToken: record.tokens.access_token,
+      username: record.username,
+      ...(cookie ? { cookie } : {}),
+    };
+  }
+
+  if (existsSync(SESSION_PATH)) return { kind: 'cookie', cookie: loadCookie() };
+
+  throw new AulaSessionError(
+    `Not logged in — no MitID tokens in ${TOKEN_PATH}, no $AULA_COOKIE, ` +
+      `and no ${SESSION_PATH}.\n\n${HOW_TO_LOGIN}`,
+  );
+}
+
+/**
+ * The stored login, with the access token refreshed if it is close to expiry.
+ * Returns undefined when there is no stored login at all.
+ *
+ * A refresh writes the new tokens straight back to the store, so the next
+ * command starts from the fresh pair rather than repeating the round-trip.
+ */
+export async function loadFreshTokens(): Promise<StoredTokenRecord | undefined> {
+  const store = tokenStore();
+  let existing: StoredTokenRecord | null;
+  try {
+    existing = await store.load();
+  } catch (err) {
+    // A token file that will not decrypt is emphatically *not* "no login" —
+    // reporting it as such sends you off to redo MitID for what is a key
+    // problem, and the fresh login then fails to write for the same reason.
+    if (err instanceof TokenStoreError) {
+      throw new AulaSessionError(
+        `${TOKEN_PATH} exists but could not be read: ${err.message}\n\n` +
+          `If $${KEY_ENV} is set it must be the same value the tokens were written with. ` +
+          `Otherwise delete the file and run \`bun run login\` again.`,
+      );
+    }
+    throw err;
+  }
+  if (!existing) return undefined;
+  return withFreshTokens({ store, http: new AulaHttpClient() });
+}
+
+// ------------------------------------------------------------------- cookies
+
+/**
+ * Aula still wants cookies alongside the token: the calendar read is a POST and
+ * needs `Csrfp-Token`. Login therefore keeps its jar, and the data client
+ * replays it.
+ */
+export async function loadCookieHeader(): Promise<string | undefined> {
+  if (!existsSync(COOKIE_JAR_PATH)) return undefined;
+  try {
+    const jar = await AulaCookieJar.deserialize(readFileSync(COOKIE_JAR_PATH, 'utf8'));
+    const header = await jar.cookieHeader('https://www.aula.dk/');
+    return header || undefined;
+  } catch {
+    // A corrupt jar is not worth failing a read over — the token still authenticates.
+    return undefined;
+  }
+}
+
+export async function saveCookieJar(jar: AulaCookieJar): Promise<string> {
+  ensureAulaDir();
+  mkdirSync(dirname(COOKIE_JAR_PATH), { recursive: true, mode: 0o700 });
+  writeFileSync(COOKIE_JAR_PATH, await jar.serialize(), { mode: 0o600 });
+  return COOKIE_JAR_PATH;
+}
+
+export function clearCookieJar(): void {
+  if (existsSync(COOKIE_JAR_PATH)) writeFileSync(COOKIE_JAR_PATH, '', { mode: 0o600 });
+}

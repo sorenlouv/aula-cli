@@ -1,0 +1,866 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { listAttachments, safeFilename } from './attachments.ts';
+import {
+  AulaApiError,
+  AulaAuthError,
+  AulaClient,
+  CALENDAR_MAX_SPAN_DAYS,
+  READ_METHOD_PATTERN,
+  READ_ONLY_METHODS,
+  assertReadOnly,
+  formatAulaDate,
+} from './client.ts';
+import { htmlToText, preview } from './html.ts';
+import {
+  normaliseCommonFile,
+  normaliseSchedule,
+  parseKeyValues,
+  selectCommonFile,
+  parseSince,
+  presenceStatus,
+  presenceStatusDanish,
+  resolveWeek,
+  upcomingBirthdays,
+} from './cli-helpers.ts';
+
+const COOKIE = 'PHPSESSID=test; Csrfp-Token=test-csrf';
+
+/**
+ * A stub only ever needs to be callable. `typeof fetch` additionally carries
+ * Bun's `preconnect`, which no test wants to implement.
+ */
+type FetchStub = (input: string | Request | URL, init?: RequestInit) => Promise<Response>;
+
+/** Swaps global fetch for the duration of one test. */
+function withFetch<T>(handler: FetchStub, fn: () => Promise<T>): Promise<T> {
+  const original = globalThis.fetch;
+  globalThis.fetch = handler as unknown as typeof fetch;
+  return fn().finally(() => {
+    globalThis.fetch = original;
+  });
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+const OK_PROFILES = { status: { code: 0 }, data: { profiles: [] } };
+
+test('the guard refuses every write method Aula exposes', () => {
+  const writeMethods = [
+    'messaging.sendMessage',
+    'messaging.createThread',
+    'messaging.markThreadAsRead',
+    'messaging.deleteThread',
+    'posts.createPost',
+    'posts.updatePost',
+    'posts.deletePost',
+    'posts.addComment',
+    'calendar.updateEventResponse',
+    'calendar.createEvent',
+    'presence.registerVacation',
+  ];
+  for (const method of writeMethods) {
+    assert.throws(
+      () => assertReadOnly(method, 'GET'),
+      AulaApiError,
+      `${method} must be refused`,
+    );
+  }
+});
+
+test('the guard allows POST only for the calendar read', () => {
+  assert.doesNotThrow(() => assertReadOnly('calendar.getEventsByProfileIdsAndResourceIds', 'POST'));
+  assert.throws(() => assertReadOnly('messaging.getThreads', 'POST'), AulaApiError);
+});
+
+test('every allowlisted method is a getter, so the allowlist cannot drift into writes', () => {
+  assert.ok(READ_ONLY_METHODS.size > 5, 'expected the allowlist to be populated');
+  for (const method of READ_ONLY_METHODS) {
+    assert.match(
+      method,
+      READ_METHOD_PATTERN,
+      `"${method}" is in the read-only allowlist but is not a getter`,
+    );
+  }
+});
+
+test('a refused method never opens a socket', async () => {
+  let called = 0;
+  await withFetch(
+    async () => {
+      called++;
+      return jsonResponse(OK_PROFILES);
+    },
+    async () => {
+      assert.throws(() => assertReadOnly('posts.createPost', 'GET'));
+      assert.equal(called, 0, 'no request should have been sent');
+    },
+  );
+});
+
+// Aula rejects `Authorization: Bearer` outright, so token auth has to travel in
+// the query string. Getting this wrong authenticates nothing and looks exactly
+// like an expired session.
+test('token auth sends the access token as a query parameter, not a Bearer header', async () => {
+  let url = '';
+  let headers = new Headers();
+  let call = 0;
+  await withFetch(
+    async (input, init) => {
+      call++;
+      if (call === 1) return jsonResponse(OK_PROFILES); // version probe
+      url = String(input);
+      headers = new Headers(init?.headers);
+      return jsonResponse({ status: { code: 0 }, data: [] });
+    },
+    async () => {
+      const client = new AulaClient({
+        auth: { kind: 'token', accessToken: 'tok-abc', username: 'mikk42a1' },
+      });
+      await client.getDailyPresence([11]);
+      assert.match(url, /access_token=tok-abc/);
+      assert.equal(headers.get('authorization'), null, 'must not send a Bearer header');
+    },
+  );
+});
+
+// The calendar read is a POST and Aula wants a CSRF token with it, which only
+// exists in the cookie jar — so token auth still replays cookies when it has
+// them, even though they are not what authenticates the call.
+test('token auth still sends cookies when a jar was captured at login', async () => {
+  let headers = new Headers();
+  let call = 0;
+  await withFetch(
+    async (_input, init) => {
+      call++;
+      if (call === 1) return jsonResponse(OK_PROFILES);
+      headers = new Headers(init?.headers);
+      return jsonResponse({ status: { code: 0 }, data: [] });
+    },
+    async () => {
+      const client = new AulaClient({
+        auth: { kind: 'token', accessToken: 'tok', username: 'u', cookie: COOKIE },
+      });
+      await client.getCalendarEvents({
+        childInstitutionProfileIds: [1],
+        start: new Date(),
+        end: new Date(),
+      });
+      assert.match(headers.get('cookie') ?? '', /PHPSESSID=test/);
+      assert.equal(headers.get('csrfp-token'), 'test-csrf');
+    },
+  );
+});
+
+// Aula answers an over-long calendar window with a bare 403 — the same status
+// it uses for a wrong id set. Without this the user is told to check their ids,
+// which is not the problem and not fixable.
+test('an over-long calendar window is refused locally, with the real reason', async () => {
+  let requests = 0;
+  await withFetch(
+    async () => {
+      requests++;
+      return jsonResponse(OK_PROFILES);
+    },
+    async () => {
+      const client = new AulaClient({ cookie: COOKIE });
+      const start = new Date('2026-08-13T00:00:00Z');
+      const tooLong = new Date(start.getTime() + (CALENDAR_MAX_SPAN_DAYS + 1) * 86_400_000);
+      await assert.rejects(
+        () => client.getCalendarEvents({ childInstitutionProfileIds: [1], start, end: tooLong }),
+        (err: unknown) => {
+          assert.ok(err instanceof AulaApiError);
+          assert.match(err.message, /longer than 50 days/);
+          assert.doesNotMatch(err.message, /id set/, 'must not blame the ids');
+          return true;
+        },
+      );
+      assert.equal(requests, 0, 'should not spend a request to learn this');
+    },
+  );
+});
+
+test('a calendar window at the limit is still attempted', async () => {
+  let called = 0;
+  await withFetch(
+    async () => {
+      called++;
+      return jsonResponse(called === 1 ? OK_PROFILES : { status: { code: 0 }, data: [] });
+    },
+    async () => {
+      const client = new AulaClient({ cookie: COOKIE });
+      const start = new Date('2026-08-13T00:00:00Z');
+      const atLimit = new Date(start.getTime() + CALENDAR_MAX_SPAN_DAYS * 86_400_000);
+      await client.getCalendarEvents({ childInstitutionProfileIds: [1], start, end: atLimit });
+      assert.ok(called > 1, 'the boundary itself must not be refused');
+    },
+  );
+});
+
+// Fælles Filer, trimmed from a live response. The `file.file` nesting is
+// Aula's own — the outer object is the attachment record, the inner one the
+// stored blob with the presigned URL.
+const COMMON_FILE = {
+  id: 125633,
+  title: '2e skema uge 33-43 2026',
+  created: '2026-06-22T09:14:00+00:00',
+  groupRestrictions: [{ id: 1520003, name: '2E' }],
+  institution: { institutionCode: '100001', institutionName: 'Eksempelskolen' },
+  file: {
+    id: 41472385,
+    name: '2e Uge 33-43 2026.pdf',
+    status: 'available',
+    creator: { name: 'Lone Lærke Larsen', institutionName: 'Eksempelskolen' },
+    file: { id: 41472385, name: '2e Uge 33-43 2026.pdf', url: 'https://media-prod.aula.dk/signed' },
+  },
+};
+
+// getCommonFiles rejects the request with a bare status 40 — and an empty
+// errorInformation — if orderField or orderDirection are missing, giving no clue
+// which parameter was at fault. It also filters on institution *codes*, not on
+// any of the profile ids the rest of the API uses.
+test('getCommonFiles sends the parameters Aula silently requires', async () => {
+  let url = '';
+  let call = 0;
+  await withFetch(
+    async (input) => {
+      call++;
+      if (call === 1) return jsonResponse(OK_PROFILES);
+      url = String(input);
+      return jsonResponse({ status: { code: 0 }, data: { commonFiles: [], totalAmount: 0 } });
+    },
+    async () => {
+      const client = new AulaClient({ cookie: COOKIE });
+      await client.getCommonFiles({ institutionCodes: ['100001', 'E10002'] });
+      const query = new URL(url).searchParams;
+      assert.equal(query.get('orderField'), 'title', 'the only value Aula accepts');
+      assert.ok(query.get('orderDirection'), 'orderDirection is mandatory too');
+      assert.deepEqual(query.getAll('institutionCodes[]'), ['100001', 'E10002']);
+      assert.ok(query.get('limit'), 'limit is mandatory');
+      assert.equal(query.get('index'), '0');
+    },
+  );
+});
+
+test('a shared file is read off the right level of Aula\'s double nesting', () => {
+  const f = normaliseCommonFile(COMMON_FILE);
+  assert.equal(f.title, '2e skema uge 33-43 2026');
+  assert.equal(f.filename, '2e Uge 33-43 2026.pdf');
+  assert.equal(f.url, 'https://media-prod.aula.dk/signed', 'url lives on the inner file');
+  assert.equal(f.uploadedBy, 'Lone Lærke Larsen');
+  assert.equal(f.status, 'available');
+  assert.deepEqual(f.groups, ['2E']);
+});
+
+test('a shared file still awaiting its virus scan reports no url', () => {
+  const pending = normaliseCommonFile({
+    ...COMMON_FILE,
+    file: { ...COMMON_FILE.file, status: 'pending', file: null },
+  });
+  assert.equal(pending.url, null);
+  assert.equal(pending.status, 'pending');
+});
+
+// The shelf carries near-identical names across years. Quietly downloading last
+// year's timetable would look like success.
+test('an ambiguous shared-file reference is refused, not guessed', () => {
+  const files = [
+    normaliseCommonFile({ ...COMMON_FILE, id: 1, title: 'Ferieplan for skoleåret 25-26' }),
+    normaliseCommonFile({ ...COMMON_FILE, id: 2, title: 'Ferieplan for skoleåret 26-27' }),
+  ];
+  assert.throws(
+    () => selectCommonFile(files, 'Ferieplan'),
+    (err: unknown) => {
+      assert.match((err as Error).message, /matches 2 files/);
+      assert.match((err as Error).message, /\[1\]/, 'should list the candidates');
+      return true;
+    },
+  );
+  // Narrowing, and addressing by id, both resolve it.
+  assert.equal(selectCommonFile(files, '26-27').id, 2);
+  assert.equal(selectCommonFile(files, '2').id, 2);
+});
+
+test('a shared file matches on filename as well as title', () => {
+  const files = [normaliseCommonFile(COMMON_FILE)];
+  assert.equal(selectCommonFile(files, 'Uge 33-43').id, 125633);
+  assert.throws(() => selectCommonFile(files, 'nonexistent'), /No shared file matches/);
+});
+
+test('cookie auth never adds an access_token parameter', async () => {
+  let url = '';
+  let call = 0;
+  await withFetch(
+    async (input) => {
+      call++;
+      if (call === 1) return jsonResponse(OK_PROFILES);
+      url = String(input);
+      return jsonResponse({ status: { code: 0 }, data: [] });
+    },
+    async () => {
+      const client = new AulaClient({ cookie: COOKIE });
+      await client.getDailyPresence([11]);
+      assert.doesNotMatch(url, /access_token/);
+    },
+  );
+});
+
+// A dead MitID login and a dead pasted cookie need different fixes, and this
+// message is the whole of what the user (or Claude) gets to act on.
+test('an expired credential is explained in terms of the credential that expired', async () => {
+  const expired = async () => jsonResponse({ status: { code: 448 }, data: null }, 403);
+
+  await withFetch(expired, async () => {
+    const client = new AulaClient({
+      auth: { kind: 'token', accessToken: 'tok', username: 'u' },
+    });
+    await assert.rejects(() => client.getProfiles(), (err: unknown) => {
+      assert.match((err as Error).message, /bun run login/);
+      return true;
+    });
+  });
+
+  await withFetch(expired, async () => {
+    const client = new AulaClient({ cookie: COOKIE });
+    await assert.rejects(() => client.getProfiles(), (err: unknown) => {
+      assert.match((err as Error).message, /session set/);
+      return true;
+    });
+  });
+});
+
+test('status 448 is reported as an expired session, not a permission problem', async () => {
+  await withFetch(
+    async () => jsonResponse({ status: { code: 448 }, data: null }, 403),
+    async () => {
+      const client = new AulaClient({ cookie: COOKIE });
+      await assert.rejects(() => client.getProfiles(), (err: unknown) => {
+        assert.ok(err instanceof AulaAuthError, 'should be an auth error');
+        assert.match(err.message, /session/i);
+        return true;
+      });
+    },
+  );
+});
+
+test('status 403 is reported as an id-set problem, and does not claim the session expired', async () => {
+  let call = 0;
+  await withFetch(
+    async () => {
+      call++;
+      // First call is the API-version probe, which must succeed.
+      return call === 1 ? jsonResponse(OK_PROFILES) : jsonResponse({ status: { code: 403 }, data: null }, 403);
+    },
+    async () => {
+      const client = new AulaClient({ cookie: COOKIE });
+      await assert.rejects(
+        () => client.getCalendarEvents({ childInstitutionProfileIds: [1], start: new Date(), end: new Date() }),
+        (err: unknown) => {
+          assert.ok(err instanceof AulaApiError, 'should be an API error, not an auth error');
+          assert.ok(!(err instanceof AulaAuthError));
+          assert.match(err.message, /institution-profile id set/i);
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test('an HTML login page is detected as an expired session', async () => {
+  await withFetch(
+    async () => new Response('<html><body>Log ind</body></html>', { status: 200 }),
+    async () => {
+      const client = new AulaClient({ cookie: COOKIE });
+      await assert.rejects(() => client.getProfiles(), AulaAuthError);
+    },
+  );
+});
+
+test('a retired API version is probed around instead of failing', async () => {
+  const seen: string[] = [];
+  await withFetch(
+    async (input) => {
+      const url = String(input);
+      seen.push(url);
+      // v24 is retired; v23 answers.
+      if (url.includes('/v23/')) return jsonResponse(OK_PROFILES);
+      return jsonResponse({ status: { code: 10 }, data: null });
+    },
+    async () => {
+      const client = new AulaClient({ cookie: COOKIE, apiVersion: 24 });
+      await client.getProfiles();
+      assert.equal(client.apiVersion, 23);
+      assert.ok(seen.some((u) => u.includes('/v23/')));
+    },
+  );
+});
+
+test('array query parameters use the PHP-style repeated-key form Aula expects', async () => {
+  let captured = '';
+  let call = 0;
+  await withFetch(
+    async (input) => {
+      call++;
+      if (call === 1) return jsonResponse(OK_PROFILES);
+      captured = String(input);
+      return jsonResponse({ status: { code: 0 }, data: [] });
+    },
+    async () => {
+      const client = new AulaClient({ cookie: COOKIE });
+      await client.getDailyPresence([11, 22]);
+      assert.match(captured, /childIds%5B%5D=11/);
+      assert.match(captured, /childIds%5B%5D=22/);
+    },
+  );
+});
+
+test('calendar dates use Aula\'s non-ISO format', () => {
+  const formatted = formatAulaDate(new Date(2026, 7, 12, 9, 5, 3));
+  assert.match(formatted, /^2026-08-12 09:05:03\.0000[+-]\d{4}$/);
+});
+
+test('htmlToText flattens Aula message markup', () => {
+  assert.equal(htmlToText('Hej<br />Toke'), 'Hej\nToke');
+  assert.equal(htmlToText('<div>Tusind tak.</div>\n<div>God sommer</div>'), 'Tusind tak.\nGod sommer');
+  assert.equal(htmlToText('m&oslash;de p&aring; fredag &amp; l&oslash;rdag'), 'møde på fredag & lørdag');
+  assert.equal(htmlToText('<ul><li>Et</li><li>To</li></ul>'), '- Et\n- To');
+  assert.equal(htmlToText('&#127774; sol'), '🌞 sol');
+  assert.equal(htmlToText(null), '');
+});
+
+// These four fragments are copied verbatim out of live Aula responses; they are
+// the shapes its editor actually emits.
+test('htmlToText handles the markup Aula really produces', () => {
+  // Pretty-printed <p> blocks: paragraphs stay separated.
+  assert.equal(
+    htmlToText('<div>\n<p>Kære forældre</p>\n<p>PPR tilbyder <strong>hjælp</strong>.</p>\n</div>'),
+    'Kære forældre\n\nPPR tilbyder hjælp.',
+  );
+  // `<div> </div>` is how the editor writes a deliberate blank line.
+  assert.equal(
+    htmlToText('<div><strong>Hej Mikkel</strong></div>\n<div> </div>\n<div>Jeg håber…</div>'),
+    'Hej Mikkel\n\nJeg håber…',
+  );
+  // Consecutive <br> is the other way it writes one.
+  assert.equal(htmlToText('Kære alle.<br /><br />I dag har vi leget.'), 'Kære alle.\n\nI dag har vi leget.');
+  // Plain divs are single line breaks, not paragraph breaks.
+  assert.equal(htmlToText('<div>Linje et</div>\n<div>Linje to</div>'), 'Linje et\nLinje to');
+});
+
+test('htmlToText never leaves more than one blank line', () => {
+  assert.equal(htmlToText('<p>a</p><br /><br /><br /><p>b</p>'), 'a\n\nb');
+});
+
+test('htmlToText keeps link targets that carry the real information', () => {
+  assert.equal(htmlToText('<a href="https://x.dk/a">Tilmelding</a>'), 'Tilmelding (https://x.dk/a)');
+  assert.equal(htmlToText('<a href="https://x.dk/a">https://x.dk/a</a>'), 'https://x.dk/a');
+});
+
+test('preview collapses whitespace and truncates', () => {
+  assert.equal(preview('a\n\n  b'), 'a b');
+  assert.equal(preview('abcdef', 4), 'abc…');
+});
+
+test('parseSince understands relative and absolute forms', () => {
+  const sevenDays = parseSince('7d');
+  const delta = Date.now() - sevenDays.getTime();
+  assert.ok(Math.abs(delta - 7 * 86_400_000) < 5_000);
+  assert.equal(parseSince('2026-08-01').toISOString().slice(0, 10), '2026-08-01');
+  assert.ok(Math.abs(Date.now() - parseSince('14').getTime() - 14 * 86_400_000) < 5_000);
+  assert.throws(() => parseSince('not-a-date'));
+});
+
+// -------------------------------------------------------- the raw escape hatch
+
+test('the raw escape hatch reaches unwrapped reads but still refuses writes', () => {
+  // Not in the named allowlist, but unmistakably a read.
+  assert.doesNotThrow(() => assertReadOnly('gallery.getAlbums', 'GET', { allowAnyGetter: true }));
+  assert.doesNotThrow(() => assertReadOnly('posts.hasUnreadPosts', 'GET', { allowAnyGetter: true }));
+  assert.doesNotThrow(() => assertReadOnly('presence.isCheckedIn', 'GET', { allowAnyGetter: true }));
+
+  for (const method of [
+    'messaging.sendMessage',
+    'posts.createPost',
+    'calendar.updateEventResponse',
+    'presence.updatePresenceTemplate',
+    'profiles.getContactlist; DROP TABLE',
+    'getEverything',
+  ]) {
+    assert.throws(
+      () => assertReadOnly(method, 'GET', { allowAnyGetter: true }),
+      AulaApiError,
+      `${method} must still be refused`,
+    );
+  }
+});
+
+test('the raw escape hatch cannot POST, not even to an allowlisted read', () => {
+  assert.throws(() => assertReadOnly('gallery.getAlbums', 'POST', { allowAnyGetter: true }), AulaApiError);
+  assert.throws(
+    () => assertReadOnly('messaging.getThreads', 'POST', { allowAnyGetter: true }),
+    AulaApiError,
+  );
+});
+
+// ------------------------------------------------------------ new endpoints
+
+/** Answers the version probe, then hands the next call to `handler`. */
+function withProbedFetch<T>(
+  handler: (url: string) => unknown,
+  fn: (urls: string[]) => Promise<T>,
+): Promise<T> {
+  const urls: string[] = [];
+  let call = 0;
+  return withFetch(
+    async (input) => {
+      call++;
+      if (call === 1) return jsonResponse(OK_PROFILES);
+      const url = String(input);
+      urls.push(url);
+      return jsonResponse({ status: { code: 0 }, data: handler(url) });
+    },
+    () => fn(urls),
+  );
+}
+
+test('presence templates use filterInstitutionProfileIds, not childIds', async () => {
+  await withProbedFetch(
+    () => ({ presenceWeekTemplates: [] }),
+    async (urls) => {
+      const client = new AulaClient({ cookie: COOKIE });
+      await client.getPresenceTemplates({
+        childInstitutionProfileIds: [4242, 4343],
+        fromDate: '2026-08-10',
+        toDate: '2026-08-16',
+      });
+      const params = new URL(urls[0] as string).searchParams;
+      assert.equal(params.get('method'), 'presence.getPresenceTemplates');
+      assert.deepEqual(params.getAll('filterInstitutionProfileIds[]'), ['4242', '4343']);
+      assert.equal(params.get('fromDate'), '2026-08-10');
+      assert.equal(params.get('toDate'), '2026-08-16');
+    },
+  );
+});
+
+test('the contact list is paged from 1 and stops on an empty page', async () => {
+  await withProbedFetch(
+    (url) => {
+      const page = Number(new URL(url).searchParams.get('page'));
+      return page <= 2 ? [{ profileId: page, fullName: `Barn ${page}`, role: 'child' }] : [];
+    },
+    async (urls) => {
+      const client = new AulaClient({ cookie: COOKIE });
+      const first = await client.getContactList({ groupId: 65240 });
+      const params = new URL(urls[0] as string).searchParams;
+      assert.equal(params.get('method'), 'profiles.getContactlist');
+      assert.equal(params.get('groupId'), '65240');
+      assert.equal(params.get('page'), '1', 'this endpoint is 1-based, unlike the rest');
+      assert.equal(params.get('filter'), 'child');
+      assert.equal(first.length, 1);
+    },
+  );
+});
+
+test('groups and widget tokens hit the endpoints they claim to', async () => {
+  await withProbedFetch(
+    (url) => (url.includes('aulaToken') ? 'jwt-token' : [{ profileId: 7, groups: [] }]),
+    async (urls) => {
+      const client = new AulaClient({ cookie: COOKIE });
+      await client.getGroupsByContext([4242]);
+      assert.deepEqual(
+        new URL(urls[0] as string).searchParams.getAll('childInstitutionProfileIds[]'),
+        ['4242'],
+      );
+
+      assert.equal(await client.getWidgetToken('0004'), 'jwt-token');
+      assert.equal(new URL(urls[1] as string).searchParams.get('widgetId'), '0004');
+    },
+  );
+});
+
+test('empty id sets short-circuit instead of asking Aula for nothing', async () => {
+  await withProbedFetch(
+    () => [],
+    async (urls) => {
+      const client = new AulaClient({ cookie: COOKIE });
+      assert.deepEqual(await client.getDailyPresence([]), []);
+      assert.deepEqual(await client.getGroupsByContext([]), []);
+      assert.deepEqual(
+        await client.getPresenceTemplates({
+          childInstitutionProfileIds: [],
+          fromDate: '2026-08-10',
+          toDate: '2026-08-16',
+        }),
+        {},
+      );
+      assert.equal(urls.length, 0, 'no requests should have been sent');
+    },
+  );
+});
+
+// -------------------------------------------------------------- presence enum
+
+test('presence statuses match the values Aula actually renders', () => {
+  // Regression guard: this mapping was off by one, which turned "på tur" into
+  // "present" and "ferie/fri" into "sick".
+  assert.equal(presenceStatusDanish(0), 'Ikke kommet');
+  assert.equal(presenceStatusDanish(1), 'Syg');
+  assert.equal(presenceStatusDanish(2), 'Ferie/fri');
+  assert.equal(presenceStatusDanish(3), 'Kommet/til stede');
+  assert.equal(presenceStatusDanish(4), 'På tur');
+  assert.equal(presenceStatusDanish(5), 'Sover');
+  assert.equal(presenceStatusDanish(8), 'Gået');
+  assert.equal(presenceStatus(3), 'present');
+  assert.equal(presenceStatus(99), 'status 99');
+});
+
+test('a komme/gå template is flattened whichever henteform it uses', () => {
+  const { days } = normaliseSchedule(
+    {
+      presenceWeekTemplates: [
+        {
+          institutionProfile: { id: 4242, name: 'Alma' },
+          dayTemplates: [
+            // "Hentes af" — times nested under `pickup`.
+            {
+              date: '2026-08-11',
+              activityType: 0,
+              pickup: { entryTime: '08:00', exitTime: '15:30', exitWith: 'Farmor' },
+            },
+            // "Selvbestemmer" — a window rather than a time.
+            {
+              date: '2026-08-10',
+              activityType: 1,
+              selfDecider: { entryTime: '08:15', exitStartTime: '14:00', exitEndTime: '16:00' },
+            },
+            // "Sendes hjem" — no exitWith at all.
+            {
+              date: '2026-08-12',
+              activityType: 2,
+              sendHome: { entryTime: '08:00', exitTime: '14:45' },
+              comment: 'Går til fodbold',
+            },
+          ],
+        },
+      ],
+    },
+    { from: '2026-08-10', to: '2026-08-16' },
+  );
+
+  assert.deepEqual(
+    days.map((d) => d.date),
+    ['2026-08-10', '2026-08-11', '2026-08-12'],
+    'sorted by date, not by the order Aula returned',
+  );
+  assert.equal(days[0]?.exitTime, '14:00–16:00');
+  assert.equal(days[0]?.henteform, 'may leave alone within a window');
+  assert.equal(days[1]?.exitWith, 'Farmor');
+  assert.equal(days[1]?.child, 'Alma');
+  assert.equal(days[2]?.exitWith, null);
+  assert.equal(days[2]?.comment, 'Går til fodbold');
+});
+
+// ------------------------------------------------------------------ birthdays
+
+test('birthdays are ordered by how soon they are, wrapping the year', () => {
+  const today = new Date();
+  // Built from local parts: `toISOString` would shift the day for any timezone
+  // east of Greenwich, which is exactly where this tool is used.
+  const localDate = (offsetDays: number) => {
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + offsetDays);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `2016-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
+
+  const rows = upcomingBirthdays([
+    { fullName: 'Sent', birthday: localDate(-1), group: '5A' },
+    { fullName: 'Snart', birthday: localDate(3), group: '5A' },
+    // No birthday shared — dropped rather than rendered as "unknown".
+    { fullName: 'Ukendt', group: '5A' },
+  ]);
+
+  assert.deepEqual(
+    rows.map((r) => r.name),
+    ['Snart', 'Sent'],
+  );
+  assert.equal(rows[0]?.inDays, 3);
+  assert.ok((rows[1]?.inDays ?? 0) > 300, 'a birthday just past wraps to next year');
+});
+
+// ---------------------------------------------------------------- CLI parsing
+
+test('resolveWeek accepts an explicit week, --next, or defaults to this week', () => {
+  assert.equal(resolveWeek('2026-W33', false), '2026-W33');
+  assert.match(resolveWeek(undefined, false), /^\d{4}-W\d{2}$/);
+  assert.notEqual(resolveWeek(undefined, true), resolveWeek(undefined, false));
+  assert.throws(() => resolveWeek('week 33', false));
+});
+
+test('raw key=value pairs collapse repeats into an array', () => {
+  assert.deepEqual(parseKeyValues(['groupId=5', 'filter=child']), { groupId: '5', filter: 'child' });
+  assert.deepEqual(parseKeyValues(['childIds=1', 'childIds=2', 'childIds=3']), {
+    childIds: ['1', '2', '3'],
+  });
+  // A value may itself contain "=", so only the first one splits.
+  assert.deepEqual(parseKeyValues(['q=a=b']), { q: 'a=b' });
+  assert.throws(() => parseKeyValues(['nope']));
+});
+
+// --------------------------------------------------------------- attachments
+
+test('attachments are indexed across all three kinds Aula models', () => {
+  const found = listAttachments([
+    { name: 'seddel.pdf', file: { name: 'seddel.pdf', url: 'https://cf/1' } },
+    { name: 'foto.jpg', media: { name: 'foto.jpg', url: 'https://cf/2' } },
+    { name: 'Tilmelding', link: { name: 'Tilmelding', url: 'https://x.dk' } },
+    // No target at all — skipped, so the indices stay contiguous.
+    { name: 'broken' },
+  ]);
+  assert.deepEqual(
+    found.map((a) => [a.index, a.kind]),
+    [
+      [0, 'file'],
+      [1, 'media'],
+      [2, 'link'],
+    ],
+  );
+});
+
+test('attachment filenames cannot escape the download directory', () => {
+  assert.equal(safeFilename('../../.ssh/authorized_keys'), 'ssh_authorized_keys');
+  assert.equal(safeFilename('..'), 'attachment');
+  assert.equal(safeFilename('/etc/passwd'), 'etc_passwd');
+  assert.equal(safeFilename('Ugeplan uge 33.pdf'), 'Ugeplan uge 33.pdf');
+  assert.equal(safeFilename('....'), 'attachment');
+  assert.equal(safeFilename(''), 'attachment');
+});
+
+// --------------------------------------------------------- session bootstrap
+
+/**
+ * Aula's session rules, which the plain stub above does not model and which are
+ * the whole reason `digest` used to fail.
+ *
+ * A request arriving without `PHPSESSID` gets a fresh PHP session. That session
+ * can read the two profile endpoints and nothing else: every module endpoint
+ * answers HTTP 403 + status code 10 until `getProfileContext` has run *inside
+ * that same session* and activated a profile. See AGENTS.md.
+ */
+function sessionEnforcingAula(): { handler: FetchStub; sessions: number } & { sent: string[] } {
+  const activated = new Set<string>();
+  const sent: string[] = [];
+  let minted = 0;
+
+  const handler: FetchStub = async (input, init) => {
+    const url = new URL(String(input));
+    const method = url.searchParams.get('method') ?? '';
+    sent.push(method);
+    // Latency is load-bearing, not decoration. A stub that resolves in the same
+    // microtask lets the handshake finish before the racing reads are issued,
+    // which hides the bug this test exists for — the first version of this test
+    // passed against the broken client for exactly that reason.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const cookies = String((init?.headers as Record<string, string>)?.Cookie ?? '');
+    let sid = /PHPSESSID=([^;]+)/.exec(cookies)?.[1];
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (!sid) {
+      sid = `S${++minted}`;
+      headers['set-cookie'] = `PHPSESSID=${sid}; Path=/`;
+    }
+
+    if (method === 'profiles.getProfilesByLogin') {
+      return new Response(JSON.stringify(OK_PROFILES), { status: 200, headers });
+    }
+    if (method === 'profiles.getProfileContext') {
+      activated.add(sid);
+      return new Response(
+        JSON.stringify({ status: { code: 0 }, data: { userId: 'mikk42a1', institutionProfiles: [] } }),
+        { status: 200, headers },
+      );
+    }
+    if (!activated.has(sid)) {
+      return new Response(JSON.stringify({ status: { code: 10 }, data: null }), {
+        status: 403,
+        headers,
+      });
+    }
+    return new Response(JSON.stringify({ status: { code: 0 }, data: { threads: [], notifications: [], groups: [] } }), {
+      status: 200,
+      headers,
+    });
+  };
+
+  return { handler, sessions: minted, sent };
+}
+
+/**
+ * The regression that 275 passing tests missed.
+ *
+ * `buildDigest` fans six reads out at once. While the handshake was tracked by
+ * booleans set *before* their awaits, exactly one of those reads waited for it
+ * and the rest went out against a session with no activated profile — so the
+ * command that the skill runs for nearly every question failed with status code
+ * 10, or with `Invalid CSRF Token` on the calendar POST, roughly half the time.
+ */
+test('concurrent reads all wait for the session bootstrap', async () => {
+  const aula = sessionEnforcingAula();
+  await withFetch(aula.handler, async () => {
+    const client = new AulaClient({
+      auth: { kind: 'token', accessToken: 'tok', username: 'mikkelex' },
+    });
+    // Six at once, as buildDigest issues them. None may reach the wire before
+    // getProfileContext has activated a profile in the jar's session.
+    await Promise.all([
+      client.getThreads(0),
+      client.getNotifications(),
+      client.getGroupsByContext([11]),
+      client.getThreads(1),
+      client.getNotifications(),
+      client.getGroupsByContext([22]),
+    ]);
+  });
+
+  // One handshake for the fan-out, not one per caller and not none.
+  assert.equal(
+    aula.sent.filter((m) => m === 'profiles.getProfileContext').length,
+    1,
+    'the bootstrap should be performed exactly once and shared',
+  );
+});
+
+test('a failed bootstrap is not sticky for the life of the client', async () => {
+  const sent: string[] = [];
+  let failNext = true;
+  const handler: FetchStub = async (input) => {
+    const method = new URL(String(input)).searchParams.get('method') ?? '';
+    sent.push(method);
+    if (method === 'profiles.getProfileContext' && failNext) {
+      failNext = false;
+      return jsonResponse({ status: { code: 500 }, data: null }, 500);
+    }
+    if (method === 'profiles.getProfilesByLogin') return jsonResponse(OK_PROFILES);
+    return jsonResponse({ status: { code: 0 }, data: { threads: [] } });
+  };
+
+  await withFetch(handler, async () => {
+    const client = new AulaClient({
+      auth: { kind: 'token', accessToken: 'tok', username: 'mikkelex' },
+    });
+    await assert.rejects(() => client.getThreads(0));
+    await client.getThreads(0);
+  });
+
+  // The retry has to re-run the handshake rather than sail past a memo that a
+  // failed attempt left behind. Two attempts, so two bootstraps.
+  assert.equal(
+    sent.filter((m) => m === 'profiles.getProfileContext').length,
+    2,
+    'a bootstrap that threw must be retried, not remembered as done',
+  );
+});
