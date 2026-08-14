@@ -1,0 +1,40 @@
+{
+  "name": "aula-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only client for the Aula (aula.dk) internal API, designed to be driven by Claude.",
+  "license": "MIT",
+  "author": "Søren Louv-Jansen",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sorenlouv/aula-cli.git"
+  },
+  "engines": {
+    "bun": ">=1.3"
+  },
+  "bin": {
+    "aula": "./src/cli.ts"
+  },
+  "scripts": {
+    "aula": "bun src/cli.ts",
+    "login": "bun src/cli.ts login",
+    "logout": "bun src/cli.ts logout",
+    "status": "bun src/cli.ts status",
+    "whoami": "bun src/cli.ts whoami",
+    "doctor": "bun src/cli.ts doctor --text",
+    "test": "bun test src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "@types/qrcode-terminal": "^0.12.2",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "flat-cache": "^6.1.23",
+    "qrcode-terminal": "^0.12.0",
+    "tough-cookie": "^6.0.2"
+  }
+}

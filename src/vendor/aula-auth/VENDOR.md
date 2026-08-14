@@ -1,0 +1,53 @@
+# Vendored: `@aula-mcp/aula-auth`
+
+The MitID login flow — SRP, PKCE, OAuth and the SAML broker chain — copied from
+[Casperjuel/aula-mcp](https://github.com/Casperjuel/aula-mcp).
+
+| | |
+| --- | --- |
+| Upstream path | `packages/aula-auth/src/` |
+| Commit | `0a2ba721f96980db0110faedcc9af3e8589af728` |
+| Commit date | 2026-06-09 |
+| License | MIT — see [LICENSE](LICENSE), Copyright (c) 2026 Casper Juel |
+
+## Why this is a copy rather than a dependency
+
+The upstream package is `private: true` and source-only (`main: ./src/index.ts`,
+no build). It cannot be installed from npm, and a `file:` dependency would put
+raw TypeScript under `node_modules`, which some runtimes refuse to transpile.
+Copying it keeps this repo self-contained: nothing outside it is needed at
+runtime.
+
+## Local changes
+
+Changes are allowed; record each one here so `vendor-diff.sh` output stays
+readable as intentional-vs-drift.
+
+- **Deleted `keychain-token-store.ts` and its test**, and dropped the export
+  from `index.ts`. Upstream keeps two `TokenStore` implementations and picks
+  between them at runtime; this project keeps only `EncryptedFileTokenStore`.
+  The keychain one is macOS-only — `isSupported()` is `process.platform ===
+  'darwin'` — so carrying it meant `login` simply refused to run on a Linux
+  devbox, and it made two encryption stories where one will do. Nothing else in
+  the vendored tree referenced it.
+
+Everything else is byte-identical to upstream, and typechecks and passes its own
+tests unmodified under this project's stricter `tsconfig.json`.
+
+## Checking for upstream drift
+
+```bash
+scripts/vendor-diff.sh [path-to-aula-mcp-checkout]
+```
+
+It **diffs only** — it never copies over local files. Read the diff, take what
+is wanted by hand, and note it above.
+
+## Tests
+
+The 12 `*.test.ts` files came across with the source and run as part of
+`bun test src/`. They are the only local coverage of the crypto and protocol
+code in here, so keep them running rather than excluding them.
+`token-store.test.ts` in particular is what covers the encryption the CLI now
+depends on for every login; [`src/auth.test.ts`](../../auth.test.ts) covers the
+wiring around it.

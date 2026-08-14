@@ -1,0 +1,77 @@
+/**
+ * What the previous runs already showed.
+ *
+ * The brief is read a couple of times a week, not daily, so "what is new since
+ * I last looked" is more useful than "what happened in the last 14 days". That
+ * needs memory between runs, which is all this is.
+ */
+
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
+
+export const BRIEF_DIR = join(homedir(), '.aula', 'brief');
+const STATE_PATH = join(BRIEF_DIR, 'state.json');
+
+export type BriefState = {
+  /** Source keys already shown, mapped to when they were first seen. */
+  seen: Record<string, string>;
+  lastRunAt: string | null;
+  /** Kept so a failed compose can fall back to the last layout that worked. */
+  lastGoodHtmlPath: string | null;
+};
+
+const EMPTY: BriefState = { seen: {}, lastRunAt: null, lastGoodHtmlPath: null };
+
+export function loadState(path = STATE_PATH): BriefState {
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<BriefState>;
+    return {
+      seen: parsed.seen ?? {},
+      lastRunAt: parsed.lastRunAt ?? null,
+      lastGoodHtmlPath: parsed.lastGoodHtmlPath ?? null,
+    };
+  } catch {
+    // A missing or corrupt state file must never stop a brief being produced —
+    // the worst case is that everything is marked new for one run.
+    return { ...EMPTY };
+  }
+}
+
+export function saveState(state: BriefState, path = STATE_PATH): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+}
+
+/**
+ * Marks every key seen, returning the subset that had not been seen before.
+ *
+ * Deliberately records the keys *as it reports them*: a run that crashes later
+ * would otherwise re-flag everything as new next time, which is harmless, while
+ * the opposite — marking seen and then failing to show them — would hide items
+ * permanently. So this is called only once the page has been written.
+ */
+export function markSeen(state: BriefState, keys: string[], now = new Date()): Set<string> {
+  const fresh = new Set<string>();
+  const stamp = now.toISOString();
+  for (const key of keys) {
+    if (!state.seen[key]) {
+      state.seen[key] = stamp;
+      fresh.add(key);
+    }
+  }
+  return fresh;
+}
+
+export function whichAreNew(state: BriefState, keys: string[]): Set<string> {
+  return new Set(keys.filter((key) => !state.seen[key]));
+}
+
+/** Drops entries older than `days` so the file cannot grow without bound. */
+export function pruneState(state: BriefState, days = 120, now = new Date()): void {
+  const cutoff = now.getTime() - days * 86_400_000;
+  for (const [key, at] of Object.entries(state.seen)) {
+    const stamp = Date.parse(at);
+    if (Number.isFinite(stamp) && stamp < cutoff) delete state.seen[key];
+  }
+}
