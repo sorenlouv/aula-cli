@@ -77,9 +77,9 @@ export async function promptSecret(question: string): Promise<string> {
           case '\r':
           case '\n':
             return done(() => resolve(value));
-          case '': // Ctrl-C
+          case '\x03': // Ctrl-C
             return done(() => reject(new Error('Cancelled.')));
-          case '': // Backspace
+          case '\x7f': // Backspace
           case '\b':
             value = value.slice(0, -1);
             break;

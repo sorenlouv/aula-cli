@@ -79,6 +79,13 @@ describe('classifyAudience', () => {
       'institution',
     );
   });
+
+  test('an unknown audience is not a municipal one', () => {
+    // Aula leaves sharedWithGroups off often enough that this decides whether
+    // real school content is shown. `every` on an empty list says yes to
+    // anything, which put these posts in the one tier that is never rendered.
+    expect(classifyAudience([], classGroups)).toBe('institution');
+  });
 });
 
 describe('rank', () => {
@@ -164,6 +171,37 @@ describe('rank', () => {
     const brief = rank(input(items), signalsFromRules(input(items), TODAY));
     expect(brief.signals).toHaveLength(1);
     expect(brief.signals[0]?.mergedSourceKeys).toHaveLength(1);
+  });
+
+  test('two obligations in one post both survive, on their own dates', () => {
+    // Every rule hit inherits the item's title, so a title-only dedupe key
+    // collapsed these into one and the 25/8 deadline disappeared — not even
+    // into unusedSources, because the source counted as used.
+    const items = [
+      item({
+        key: 'post:20',
+        title: 'Nyt fra Myretuen',
+        text: 'Husk at tilmelde jer sommerfesten senest d. 20/8. I skal også udfylde kontaktsedlen d. 25/8.',
+        audience: 'class',
+      }),
+    ];
+    const brief = rank(input(items), signalsFromRules(input(items), TODAY));
+    expect(brief.signals.map((s) => s.dueAt).sort()).toEqual(['2026-08-20', '2026-08-25']);
+  });
+
+  test('an event and its application deadline are two dates, not one', () => {
+    // rules.ts deliberately emits the second date in a sentence so the later
+    // one is not lost; the ranker has to keep that promise.
+    const items = [
+      item({
+        key: 'post:21',
+        title: 'Informationsaften',
+        text: 'Vi holder informationsaften d. 25. august og ansøgningsfrist d. 1. september.',
+        audience: 'class',
+      }),
+    ];
+    const brief = rank(input(items), signalsFromRules(input(items), TODAY));
+    expect(brief.signals.map((s) => s.dueAt).sort()).toEqual(['2026-08-25', '2026-09-01']);
   });
 
   test('action tier is capped, and the overflow drops a tier rather than vanishing', () => {

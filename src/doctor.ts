@@ -77,9 +77,13 @@ export async function runDoctor(
     return { value: ctx, detail: `userId=${ctx.userId ?? 'missing'}, ${widgets} widget(s) configured` };
   });
 
-  if (!profiles || !context) {
+  if (!profiles || profiles.length === 0 || !context) {
     // Without both of these there are no ids to call anything else with, and a
-    // screen of "skipped" would bury the one failure that matters.
+    // screen of "skipped" would bury the one failure that matters. An empty
+    // profile list counts as missing: it is truthy, so letting it through here
+    // meant buildFamily threw on profiles[0] and doctor died without printing
+    // the report — losing the warning it had just recorded about that very
+    // state, which is the one thing it exists to tell you.
     return finish(checks, client, opts);
   }
 

@@ -163,4 +163,4 @@ async function cached(
 }
 
 export type { IntegrationContext, WeekPlan, WeekPlanItem } from './types.ts';
-export { isoWeekString, isoWeekToMonday, isoDate, weekOffset } from './types.ts';
+export { isoWeekString, isoWeekToMonday, isoDate, localIsoDate, weekOffset } from './types.ts';

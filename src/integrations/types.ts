@@ -118,6 +118,21 @@ export function isoDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+/**
+ * `YYYY-MM-DD` on the calendar the user is actually looking at.
+ *
+ * Denmark is UTC+1/+2, so `isoDate` is a day behind between midnight and
+ * 01:00/02:00 local. Anything that means "today" to a reader — the date on the
+ * brief, the day a deadline falls on — has to use this; `isoDate` stays for
+ * date parameters sent to Aula, which are UTC by contract.
+ */
+export function localIsoDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 /** The ISO week `offset` weeks from `from`. `weekOffset(1)` is next week. */
 export function weekOffset(offset: number, from: Date = new Date()): string {
   return isoWeekString(new Date(from.getTime() + offset * 7 * 86_400_000));

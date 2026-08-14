@@ -5,7 +5,7 @@
  */
 
 import type { AulaClient } from './../client.ts';
-import { isoDate } from './../integrations/index.ts';
+import { localIsoDate } from './../integrations/index.ts';
 import {
   buildDigest,
   collectAlbums,
@@ -49,6 +49,11 @@ export function classifyAudience(groups: string[], classGroupNames: Set<string>)
   for (const name of classGroupNames) {
     if (normalised.includes(name.trim().toLowerCase())) return 'class';
   }
+  // An unknown audience is not a municipal one. Aula omits `sharedWithGroups`
+  // often enough that this matters, and `every` on an empty list would answer
+  // yes — landing the post in the one tier the page never shows. Absence of
+  // evidence has to fail towards showing school content, not hiding it.
+  if (normalised.length === 0) return 'institution';
   // Cross-institution distribution lists. These reach every family in the
   // municipality and are never about one of our children.
   if (normalised.every((g) => MUNICIPAL.test(g))) return 'municipal';
@@ -231,7 +236,10 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
 
   return {
     generatedAt: now.toISOString(),
-    today: isoDate(now),
+    // Local, not UTC: the rules layer dates deadlines against the Danish
+    // calendar, and a run just after midnight would otherwise head the page
+    // with yesterday and republish over yesterday's archive.
+    today: localIsoDate(now),
     isoWeek: opts.isoWeek,
     windowDays: opts.days,
     family: {
