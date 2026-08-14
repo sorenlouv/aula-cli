@@ -231,13 +231,18 @@ export function rank(input: BriefInput, signals: Signal[]): RankedBrief {
   );
   const preferred = scored.filter((s) => s.origin === 'model' || !modelSources.has(s.sourceKey));
 
-  // Then within a source. A thread yields one hit per dated sentence, so an
-  // invitation quoting both "skrevet d. 11/8" and "mødet er d. 18/9" produces
-  // two signals for one meeting. The higher-scoring one wins, which is the
-  // future date rather than the date the message was written.
+  // Then within a source, but only for hits that are actually the same thing.
+  // Every rule hit from one item inherits that item's title, so keying on the
+  // title alone collapsed a post's *distinct* obligations — "tilmeld senest
+  // 20/8" and "udfyld kontaktsedlen 25/8" became one, and the 25/8 deadline
+  // was lost without even surfacing as an unused source. The date and kind are
+  // what make two hits different, so they belong in the key. The cost is that
+  // one meeting quoted with two dates ("skrevet d. 11/8", "mødet er d. 18/9")
+  // now yields two signals rather than one; the stale date scores low and
+  // sinks, which is the cheaper failure of the two.
   const bySource = new Map<string, RankedSignal>();
   for (const signal of preferred.sort((a, b) => b.score - a.score)) {
-    const key = `${signal.sourceKey}|${signal.title}`;
+    const key = `${signal.sourceKey}|${signal.title}|${signal.kind}|${signal.dueAt ?? ''}`;
     if (!bySource.has(key)) bySource.set(key, signal);
   }
 

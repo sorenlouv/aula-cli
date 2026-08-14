@@ -281,13 +281,28 @@ export async function extractSignals(
   }
 
   const body = JSON.stringify(payload);
+
+  // A model that could not run is not a model that found nothing, and the
+  // difference has to survive: swallowing it here made a missing `claude`
+  // binary indistinguishable from a quiet day, with no note on the page saying
+  // the brief was built by the rules alone. runBrief catches this and degrades,
+  // so letting it through still produces a brief — it just produces an honest
+  // one. Nothing is written to the cache on this path either; a 06:30 outage
+  // must not pin a degraded brief for the rest of the day.
+  const answer = await runClaude(INSTRUCTIONS, body, { timeoutMs: opts.timeoutMs ?? 240_000 });
+
   let parsed: unknown;
   try {
-    parsed = parseJsonLoosely(await runClaude(INSTRUCTIONS, body, { timeoutMs: opts.timeoutMs ?? 240_000 }));
+    parsed = parseJsonLoosely(answer);
   } catch {
-    // Unparseable output is treated as an empty extraction, so the rules layer
-    // still produces a brief rather than the run failing outright.
-    parsed = {};
+    // The model answered, but not with JSON. The rules layer still carries the
+    // brief; reporting it as a problem beats passing it off as an empty result.
+    return {
+      topline: null,
+      signals: [],
+      childSummaries: {},
+      problems: ['modellens svar kunne ikke læses som JSON'],
+    };
   }
   let result = validateExtraction(input, parsed);
 

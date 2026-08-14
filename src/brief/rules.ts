@@ -10,6 +10,7 @@
  * date shown without the sentence it came from cannot be checked at a glance.
  */
 
+import { localIsoDate } from './../integrations/index.ts';
 import type { SignalKind, Urgency } from './types.ts';
 
 /**
@@ -99,12 +100,7 @@ export function splitSentences(text: string): string[] {
   return out;
 }
 
-function iso(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
+const iso = localIsoDate;
 
 /**
  * Picks the year for a day/month with none given.

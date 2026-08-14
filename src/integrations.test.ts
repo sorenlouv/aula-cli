@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import type { AulaClient } from './client.ts';
 import * as easyiq from './integrations/easyiq.ts';
 import * as skoleportal from './integrations/easyiq-skoleportal.ts';
-import { NoProviderError, readCapability } from './integrations/index.ts';
+import { isoDate, localIsoDate, NoProviderError, readCapability } from './integrations/index.ts';
 import * as meebook from './integrations/meebook.ts';
 import * as minUddannelse from './integrations/min-uddannelse.ts';
 import * as systematic from './integrations/systematic.ts';
@@ -429,4 +429,18 @@ test("MinUddannelse's two opgave widget ids are not read twice", async () => {
       assert.equal(calls.length, 1);
     },
   );
+});
+
+test('localIsoDate reads the calendar the user is on, not UTC', () => {
+  // Denmark is UTC+1/+2, so between midnight and 01:00/02:00 the two disagree.
+  // The brief dates itself and names its archive file from this, and getting it
+  // from isoDate meant a post-midnight run was headed with yesterday and
+  // republished over yesterday's page.
+  const justAfterMidnight = new Date('2026-08-14T00:30:00+02:00');
+  assert.equal(localIsoDate(justAfterMidnight), '2026-08-14');
+  assert.equal(isoDate(justAfterMidnight), '2026-08-13');
+
+  // Away from the boundary they agree.
+  const midday = new Date('2026-08-14T12:00:00+02:00');
+  assert.equal(localIsoDate(midday), isoDate(midday));
 });
