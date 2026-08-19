@@ -9,6 +9,10 @@
 > for a one-off, and the scheduled run passes neither. The forwarding argument in
 > [Delivery](#delivery-and-portability) is kept below as the reasoning that led
 > there, but it no longer describes what runs.
+>
+> **The hosted copy is opt-in and off unless configured.** Where a URL is
+> configured, the same run redeploys the page to it — see
+> [The hosted copy](#the-hosted-copy).
 
 Plan for a generated, self-contained HTML page covering Alma, Viggo and
 Ida: what needs acting on, what is coming, and what merely happened.
@@ -317,6 +321,67 @@ parent means the content — including the thread about Alma — passes through
 Gmail or Meta, which is a different exposure from the local-only default chosen
 earlier. The other parent being the author of half those messages makes that
 unremarkable, but it is a deliberate change rather than a silent one.
+
+## The hosted copy
+
+Local files answer "what do I need to know this morning" on the Mac. They do not
+answer it on a phone, and a `file://` link is not something you can send. So
+where a target URL is configured, the run also redeploys `artifact.html` to it,
+and the shared link shows today's brief instead of the day it was first
+published.
+
+**Off unless asked for.** Nothing leaves the machine until a URL exists in
+`AULA_ARTIFACT_URL` or `~/.aula/brief/artifact-url`. This is the one part of the
+pipeline that contradicts the local-only default chosen at the start — the page
+can carry sensitive information about a child, health details included — so it
+is a deliberate act of
+configuration, never something a clone of this repository inherits. `--no-deploy`
+skips it for a single run.
+
+Four things about this leg are not obvious:
+
+**It has to go through `claude -p`.** The Artifact publisher is a Claude tool,
+not an HTTP endpoint. A launchd job cannot call it directly; it can only spawn
+`claude` and let it make the call. That is also why `deploy.ts` is separate from
+`publish.ts`: writing files always works, while this needs the network, a model
+and claude.ai credentials, and must degrade to a note rather than fail the run.
+
+**And that tool is not offered to every session.** `claude` exposes it only to a
+session announcing `CLAUDE_CODE_ENTRYPOINT=claude-desktop`. This was measured,
+not assumed: strip the environment to nothing but that variable and the tool is
+there; leave a session otherwise complete — logged in, every model call working
+— and remove it, and the tool reports as missing. It cost a full scheduled run
+to find, because the interactive test that "verified" the approach was a child
+of a desktop session and had inherited the marker; the first launchd run failed
+where the identical command by hand had just succeeded. `deploy.ts` therefore
+sets it on that one subprocess rather than on the agent, so the extraction and
+layout calls keep the environment they already had.
+
+This is an undocumented lever and may stop working on any `claude` update. The
+failure mode is loud and harmless — the deploy reports the tool as unavailable,
+the note lands in the run's output, and the local brief is untouched.
+
+**No Aula text reaches that subprocess.** The page is assembled from posts and
+messages written by other people. If any of it were interpolated into the prompt
+— or readable by an agent holding a publishing tool — a sentence in a school post
+would be in a position to steer what gets published. So the prompt carries only a
+path and a URL this project produced itself, `Artifact` is the only tool granted,
+and a test asserts the prompt contains no Danish characters outside the values it
+interpolated.
+
+**It publishes with `force`, on purpose.** The publisher treats a version
+conflict as something to merge, which is right when two people edit one page and
+wrong here: the brief is generated whole each morning and wholly replaces the day
+before, nothing else writes to the URL, and there is no edit to preserve. The
+conflict is also not an exception but the steady state — every run is a *fresh*
+session that has by definition never seen the version it replaces, so without
+`force` the deploy would fail every single day rather than occasionally.
+
+The reply from that subprocess is treated as a report, not as proof: the deploy
+counts as successful only if the target URL comes back with no error beside it.
+The exit code deliberately gets no veto, because `claude` runs plugin hooks after
+the turn is over and a hook that cannot start kills the process long after the
+publish has landed.
 
 ## Phasing
 

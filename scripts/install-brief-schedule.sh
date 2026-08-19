@@ -18,6 +18,11 @@ BUN="$(command -v bun)"
 # The brief's model calls run `claude`, which launchd's bare PATH may not
 # reach — resolve its directory now and bake it into the agent's PATH.
 CLAUDE_DIR="$(dirname "$(command -v claude 2>/dev/null || echo /usr/local/bin/claude)")"
+# And `claude` itself shells out to `node` for plugin hooks. Under a version
+# manager node lives in a versioned directory that no default PATH contains, so
+# a missing node does not fail the hook quietly — it kills claude with 143 after
+# the work is done, and the brief loses the model's output. Resolve it too.
+NODE_DIR="$(dirname "$(command -v node 2>/dev/null || echo /usr/local/bin/node)")"
 LOG_DIR="$HOME/.aula/brief"
 
 HOUR="${BRIEF_HOUR:-6}"
@@ -44,7 +49,7 @@ cat > "$PLIST" <<PLIST_EOF
   <key>WorkingDirectory</key><string>$REPO</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>$CLAUDE_DIR:$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PATH</key><string>$CLAUDE_DIR:$NODE_DIR:$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>HOME</key><string>$HOME</string>
   </dict>
   <key>StartCalendarInterval</key>
@@ -66,6 +71,7 @@ launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 
 echo "Installed $LABEL — weekdays at $(printf '%02d:%02d' "$HOUR" "$MINUTE")."
+echo "  node:   $NODE_DIR (re-run this after a node version change)"
 echo "  plist:  $PLIST"
 echo "  log:    $LOG_DIR/launchd.log"
 echo "  run now:    launchctl kickstart -k gui/$(id -u)/$LABEL"

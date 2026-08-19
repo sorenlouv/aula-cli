@@ -129,6 +129,7 @@ Common options:
   --explain                    Print the score breakdown behind the ranking
   --open                       Open the finished page in the browser
   --pdf, --png                 Also write a PDF / PNG (off by default)
+  --no-deploy                  Do not update the hosted artifact this run
   --no-cache                   Ignore the response cache and go to Aula
   --cache-ttl <seconds>        How long a cached response stays usable (default 600)
   --username <name>            MitID username for login
@@ -181,6 +182,7 @@ async function main(): Promise<number> {
       out: { type: 'string' },
       // brief
       'no-llm': { type: 'boolean', default: false },
+      'no-deploy': { type: 'boolean', default: false },
       explain: { type: 'boolean', default: false },
       open: { type: 'boolean', default: false },
       pdf: { type: 'boolean', default: false },
@@ -523,6 +525,7 @@ async function main(): Promise<number> {
         days,
         isoWeek: week,
         useModel: !values['no-llm'],
+        deploy: !values['no-deploy'],
         useCache: !values['no-cache'],
         pdf: values.pdf === true,
         png: values.png === true,
@@ -541,6 +544,7 @@ async function main(): Promise<number> {
           pdf: run.published.pdfPath,
           png: run.published.pngPath,
           layout: run.origin,
+          deployed: run.deployment.status === 'ok' ? run.deployment.url : null,
           topline: run.topline,
           signals: run.brief.signals.filter((s) => s.tier !== 'hidden').length,
           hidden: run.brief.signals.filter((s) => s.tier === 'hidden').length,
@@ -985,6 +989,7 @@ function renderBrief(result: {
   pdf: string | null;
   png: string | null;
   layout: string;
+  deployed: string | null;
   topline: string | null;
   signals: number;
   hidden: number;
@@ -998,6 +1003,7 @@ function renderBrief(result: {
   ];
   if (result.pdf) lines.push(`PDF:  ${result.pdf}`);
   if (result.png) lines.push(`PNG:  ${result.png}`);
+  if (result.deployed) lines.push(`Delt: ${result.deployed}`);
   if (result.notes.length) lines.push('', ...result.notes.map((n) => `! ${n}`));
   return lines.join('\n');
 }
