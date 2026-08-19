@@ -115,9 +115,35 @@ cron line does the same job:
 30 6 * * 1-5 cd /path/to/aula-cli && bun src/cli.ts brief --text
 ```
 
+The agent bakes in the directories holding `bun`, `claude` and `node`, because
+launchd starts with a bare PATH. **Re-run the installer after changing node
+version** — `claude` shells out to node for plugin hooks, and a node it cannot
+find kills it with exit 143 after the work is done, which costs the brief its
+model output.
+
 Design and reasoning: [BRIEF.md](BRIEF.md).
 
-## 7. Try it
+## 7. Optional: publish the brief to a URL
+
+By default the brief never leaves the machine. If you want to read it on a phone
+or send the link, publish it once from a Claude session in this repository —
+"publish ~/.aula/brief/artifact.html as an artifact" — then save the URL it
+returns:
+
+```bash
+echo 'https://claude.ai/code/artifact/<uuid>' > ~/.aula/brief/artifact-url
+```
+
+From then on every run redeploys the page to that same URL, so the link always
+shows today's brief. `--no-deploy` skips it once; deleting the file turns it off.
+`AULA_ARTIFACT_URL` overrides the file for a single run.
+
+Think about this one before turning it on. The page contains whatever the school
+and daycare wrote about your children — for some families that includes health
+information. Artifacts are private to your account until you choose to share the
+link, but this is still the only part of the tool that sends anything anywhere.
+
+## 8. Try it
 
 Ask Claude things like:
 
@@ -135,6 +161,15 @@ Ask Claude things like:
   which vendor and why.
 - **The login flow itself is broken** — there is a browser-cookie fallback;
   see [Cookie fallback](README.md#cookie-fallback) in the README.
+- **The brief runs but loses the model's wording** — check
+  `~/.aula/brief/launchd.log` for `exited 143` and a `command not found`. A
+  plugin hook could not find its interpreter on launchd's bare PATH; re-run
+  `scripts/install-brief-schedule.sh` to bake the current directories back in.
+- **The hosted link is stale while the local page is current** — the same log
+  carries the reason on the `Artifact blev ikke opdateret:` line. `claude`
+  offers the Artifact tool only to sessions announcing themselves as the
+  desktop app, which `deploy.ts` handles; if a `claude` update changes that,
+  this is the line that will say so.
 
 ## Uninstall
 

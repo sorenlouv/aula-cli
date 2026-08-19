@@ -1,7 +1,7 @@
 /**
  * The `aula brief` pipeline.
  *
- *   collect → extract (rules ∪ model) → rank → compose → validate → publish
+ *   collect → extract (rules ∪ model) → rank → compose → validate → publish → deploy
  *
  * Every stage after `collect` degrades rather than throws. A brief that is
  * missing the model's phrasing is still useful; a brief that failed to appear
@@ -12,6 +12,7 @@ import type { AulaClient } from '../client.ts';
 import { isoWeekString } from '../integrations/types.ts';
 import { collect } from './collect.ts';
 import { composePage, fallbackPage } from './compose.ts';
+import { deployArtifact, type DeployResult } from './deploy.ts';
 import { extractSignals } from './llm.ts';
 import { publish, type PublishResult } from './publish.ts';
 import { rank, signalsFromRules } from './rank.ts';
@@ -27,6 +28,7 @@ export type BriefOptions = {
   outDir?: string;
   pdf?: boolean;
   png?: boolean;
+  deploy?: boolean;
   now?: Date;
 };
 
@@ -36,8 +38,16 @@ export type BriefRun = {
   origin: 'model' | 'fallback';
   violations: Violation[];
   published: PublishResult;
+  deployment: DeployResult;
   notes: string[];
 };
+
+/**
+ * Stable on purpose. The page is republished to the same URL every day, and a
+ * title that carried the date would read as a different page each time — the
+ * date is in the page itself.
+ */
+const TITLE = 'Aula AI oversigt';
 
 export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Promise<BriefRun> {
   const now = opts.now ?? new Date();
@@ -112,15 +122,26 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   // ---------------------------------------------------------------- publish
   const published = await publish(body, {
     day: input.today,
-    // Stable on purpose. The page is republished to the same URL every day, and
-    // a title that carried the date would read as a different page each time.
-    // The date is in the page itself.
-    title: 'Aula AI oversigt',
+    title: TITLE,
     ...(opts.outDir ? { dir: opts.outDir } : {}),
     ...(opts.pdf === true ? { pdf: true } : {}),
     ...(opts.png === true ? { png: true } : {}),
   });
   notes.push(...published.warnings);
+
+  // Local first, hosted second. The file on disk is the brief; the artifact is
+  // a convenience on top of it, so a deploy that fails is a note on an
+  // otherwise good run rather than a failed one.
+  let deployment: DeployResult = { status: 'skipped', reason: 'slået fra med --no-deploy' };
+  if (opts.deploy !== false) {
+    deployment = await deployArtifact(published.artifactPath, {
+      title: TITLE,
+      ...(opts.outDir ? { dir: opts.outDir } : {}),
+    });
+    if (deployment.status === 'failed') {
+      notes.push(`Artifact blev ikke opdateret: ${deployment.reason}`);
+    }
+  }
 
   // Recorded only once the page exists, so a crash re-shows rather than hides.
   markSeen(state, input.items.map((item) => item.key), now);
@@ -129,5 +150,5 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   state.lastGoodHtmlPath = published.htmlPath;
   saveState(state);
 
-  return { brief, topline, origin, violations, published, notes };
+  return { brief, topline, origin, violations, published, deployment, notes };
 }

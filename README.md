@@ -84,7 +84,7 @@ bun src/cli.ts refresh-stepup
 
 | Command | Purpose |
 | --- | --- |
-| `brief [--open] [--explain] [--no-llm] [--pdf] [--png]` | The "Aula AI oversigt" — a generated HTML page in `~/.aula/brief`. See [BRIEF.md](BRIEF.md) |
+| `brief [--open] [--explain] [--no-llm] [--pdf] [--png] [--no-deploy]` | The "Aula AI oversigt" — a generated HTML page in `~/.aula/brief`. See [BRIEF.md](BRIEF.md) |
 | `digest [--days 14]` | Threads, posts, calendar, presence, weekly plans and an `attention` block in one payload |
 | `whoami` | Guardian, children, institutions, widgets, and the resolved id sets |
 | `messages [--full] [--unread]` | Message threads, newest first |
@@ -357,10 +357,20 @@ project reads everything they read, minus the one write.
 The data is personal and concerns children. Both credentials grant full read
 access to the account, and the MitID **refresh token is long-lived**.
 
-**What leaves your machine.** Aula data is stored and processed locally. The one
-exception is `aula brief`, which sends a trimmed excerpt of recent Aula content
-to Anthropic — through your own installed `claude` CLI, so on your account, as
-your model calls. Nothing else is transmitted, and there is no telemetry.
+**What leaves your machine.** Aula data is stored and processed locally. There
+is no telemetry. `aula brief` is the one command that transmits anything, and it
+can do so in two ways:
+
+- **Model calls, always.** It sends a trimmed excerpt of recent Aula content to
+  Anthropic through your own installed `claude` CLI — so on your account, as
+  your model calls. `--no-llm` skips them.
+- **The hosted copy, only if you configure one.** If `~/.aula/brief/artifact-url`
+  or `AULA_ARTIFACT_URL` names an artifact, the finished page is uploaded there
+  each run so the link stays current. With neither set — the default, and what a
+  fresh clone does — nothing is uploaded. `--no-deploy` skips it for one run.
+
+Read [SETUP.md](SETUP.md#7-optional-publish-the-brief-to-a-url) before turning
+the second one on: the page holds whatever the school wrote about your children.
 
 Everything lives in `~/.aula`, which is `0700`, with every file `0600`: the
 encrypted tokens, the key that opens them (unless `$AULA_TOKEN_KEY` is set), the
