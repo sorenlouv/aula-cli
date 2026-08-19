@@ -7,10 +7,15 @@
  */
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { AULA_DIR } from '../auth.ts';
 
-export const BRIEF_DIR = join(homedir(), '.aula', 'brief');
+/**
+ * Under $AULA_DIR when that is set, like every other stored path — so a
+ * sandboxed run cannot read the real install's state or, worse, its deploy
+ * target and start publishing test pages to the family's hosted brief.
+ */
+export const BRIEF_DIR = join(AULA_DIR, 'brief');
 const STATE_PATH = join(BRIEF_DIR, 'state.json');
 
 export type BriefState = {
