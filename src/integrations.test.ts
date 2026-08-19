@@ -436,11 +436,22 @@ test('localIsoDate reads the calendar the user is on, not UTC', () => {
   // The brief dates itself and names its archive file from this, and getting it
   // from isoDate meant a post-midnight run was headed with yesterday and
   // republished over yesterday's page.
-  const justAfterMidnight = new Date('2026-08-14T00:30:00+02:00');
-  assert.equal(localIsoDate(justAfterMidnight), '2026-08-14');
-  assert.equal(isoDate(justAfterMidnight), '2026-08-13');
+  //
+  // `bun test` defaults TZ to UTC when the environment sets none, and the
+  // machine running this could be anywhere anyway — pin the zone the scenario
+  // is about rather than inheriting whatever the runner happens to use.
+  const tz = process.env.TZ;
+  process.env.TZ = 'Europe/Copenhagen';
+  try {
+    const justAfterMidnight = new Date('2026-08-14T00:30:00+02:00');
+    assert.equal(localIsoDate(justAfterMidnight), '2026-08-14');
+    assert.equal(isoDate(justAfterMidnight), '2026-08-13');
 
-  // Away from the boundary they agree.
-  const midday = new Date('2026-08-14T12:00:00+02:00');
-  assert.equal(localIsoDate(midday), isoDate(midday));
+    // Away from the boundary they agree.
+    const midday = new Date('2026-08-14T12:00:00+02:00');
+    assert.equal(localIsoDate(midday), isoDate(midday));
+  } finally {
+    if (tz === undefined) delete process.env.TZ;
+    else process.env.TZ = tz;
+  }
 });
