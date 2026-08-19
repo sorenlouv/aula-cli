@@ -38,7 +38,7 @@ bun install
 Optional sanity check — the test suite needs no credentials and no network:
 
 ```bash
-bun test src/
+bun run test
 ```
 
 ## 3. Log in with MitID
