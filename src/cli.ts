@@ -84,7 +84,7 @@ Options for new:
   --out <dir>                  Write somewhere other than ~/.aula/brief
 
 For Claude — the aula skill drives these to answer questions; humans rarely
-type them (details: README.md):
+type them:
   digest                       Everything relevant in one payload
   whoami                       Guardian, children, institutions, widgets, id sets
   messages / thread <id>       Message threads / one thread with every message
@@ -131,52 +131,63 @@ async function main(): Promise<number> {
   const argv = process.argv.slice(2);
   const command = argv[0];
 
-  if (!command || command === 'help' || command === '--help' || command === '-h') {
+  if (!command || command === 'help' || argv.includes('--help') || argv.includes('-h')) {
     console.log(USAGE);
     return 0;
   }
 
-  const { values, positionals } = parseArgs({
-    args: argv.slice(1),
-    allowPositionals: true,
-    strict: true,
-    options: {
-      text: { type: 'boolean', default: false },
-      full: { type: 'boolean', default: false },
-      unread: { type: 'boolean', default: false },
-      important: { type: 'boolean', default: false },
-      next: { type: 'boolean', default: false },
-      limit: { type: 'string' },
-      since: { type: 'string' },
-      child: { type: 'string' },
-      days: { type: 'string' },
-      page: { type: 'string' },
-      week: { type: 'string' },
-      widget: { type: 'string' },
-      group: { type: 'string' },
-      role: { type: 'string' },
-      from: { type: 'string' },
-      to: { type: 'string' },
-      out: { type: 'string' },
-      // new / open / schedule
-      'no-llm': { type: 'boolean', default: false },
-      'no-deploy': { type: 'boolean', default: false },
-      'no-open': { type: 'boolean', default: false },
-      web: { type: 'boolean', default: false },
-      remove: { type: 'boolean', default: false },
-      at: { type: 'string' },
-      explain: { type: 'boolean', default: false },
-      pdf: { type: 'boolean', default: false },
-      png: { type: 'boolean', default: false },
-      // caching
-      'no-cache': { type: 'boolean', default: false },
-      'cache-ttl': { type: 'string' },
-      // login
-      username: { type: 'string' },
-      method: { type: 'string' },
-      debug: { type: 'boolean', default: false },
-    },
-  });
+  // The thunk keeps parseArgs' inference over the options literal; a wrapper
+  // taking the config as a parameter would widen `values` to string | boolean.
+  const parse = () =>
+    parseArgs({
+      args: argv.slice(1),
+      allowPositionals: true,
+      strict: true,
+      options: {
+        text: { type: 'boolean', default: false },
+        full: { type: 'boolean', default: false },
+        unread: { type: 'boolean', default: false },
+        important: { type: 'boolean', default: false },
+        next: { type: 'boolean', default: false },
+        limit: { type: 'string' },
+        since: { type: 'string' },
+        child: { type: 'string' },
+        days: { type: 'string' },
+        page: { type: 'string' },
+        week: { type: 'string' },
+        widget: { type: 'string' },
+        group: { type: 'string' },
+        role: { type: 'string' },
+        from: { type: 'string' },
+        to: { type: 'string' },
+        out: { type: 'string' },
+        // new / open / schedule
+        'no-llm': { type: 'boolean', default: false },
+        'no-deploy': { type: 'boolean', default: false },
+        'no-open': { type: 'boolean', default: false },
+        web: { type: 'boolean', default: false },
+        remove: { type: 'boolean', default: false },
+        at: { type: 'string' },
+        explain: { type: 'boolean', default: false },
+        pdf: { type: 'boolean', default: false },
+        png: { type: 'boolean', default: false },
+        // caching
+        'no-cache': { type: 'boolean', default: false },
+        'cache-ttl': { type: 'string' },
+        // login
+        username: { type: 'string' },
+        method: { type: 'string' },
+        debug: { type: 'boolean', default: false },
+      },
+    });
+
+  let parsed: ReturnType<typeof parse>;
+  try {
+    parsed = parse();
+  } catch (err) {
+    throw new UsageError(`${(err as Error).message}\nRun \`aula --help\` for the commands and options.`);
+  }
+  const { values, positionals } = parsed;
 
   const asText = values.text === true;
   const limit = values.limit ? Number(values.limit) : undefined;
@@ -1007,7 +1018,7 @@ function emit<T>(value: T, asText: boolean, render: (value: T) => string): numbe
 
 /**
  * Fælles Filer filters on institution *codes*, not on any of the profile ids —
- * a fourth addressing scheme on top of the three in the README.
+ * a fourth addressing scheme on top of the three in API.md.
  */
 async function collectCommonFiles(
   client: AulaClient,

@@ -128,7 +128,7 @@ export function runSchedule(opts: { remove: boolean; at?: string }): number {
         console.error('No scheduler integration for this platform. The cron equivalent:');
         console.error(`  ${at.minute} ${at.hour} * * 1-5 cd ${REPO} && bun src/cli.ts new --text`);
       }
-      return 1;
+      return 0;
     }
   }
 }

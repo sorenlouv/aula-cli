@@ -49,7 +49,10 @@ status.
 | `448` | 403 | Not authenticated — credentials expired |
 
 Retired versions answer *every* call with `10`, so the client probes for a live
-version rather than dying on a hardcoded constant.
+version rather than dying on a hardcoded constant. The probe warns when the
+default is stale; `AULA_API_VERSION=<N>` pins the version and skips it (the
+warning also surfaces once in the test run, from the stubbed Aula — that is the
+probe working, not a failure).
 
 ## The three id spaces
 
