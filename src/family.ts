@@ -19,10 +19,12 @@ export type Family = {
     /** One institution-profile id per institution the guardian belongs to. */
     institutionProfileIds: number[];
   };
-  children: Array<Child & { institutionName: string }>;
+  children: Array<Child & { institutionName: string; institutionType?: string }>;
   institutions: Array<{
     institutionCode: string;
     institutionName: string;
+    /** `'School'`, `'Daycare'`, … from `getProfileContext` — see integrations. */
+    institutionType?: string;
     institutionProfileId: number;
     groups: Array<{ id: number; name: string }>;
   }>;
@@ -67,6 +69,14 @@ export function buildFamily(
     if (child.institutionName) nameByCode.set(child.institutionCode, child.institutionName);
   }
 
+  // The institution *type* lives only on the context's institutions list, so
+  // it is joined onto each child here — it is what keeps daycare children away
+  // from the weekly-plan vendors.
+  const typeByCode = new Map<string, string>();
+  for (const inst of context.institutions ?? []) {
+    if (inst.institutionType) typeByCode.set(inst.institutionCode, inst.institutionType);
+  }
+
   const children = (profile.children ?? []).map((child) => ({
     ...child,
     institutionName:
@@ -74,6 +84,9 @@ export function buildFamily(
       child.institutionProfile?.institutionName ??
       nameByCode.get(child.institutionCode) ??
       child.institutionCode,
+    ...(typeByCode.has(child.institutionCode)
+      ? { institutionType: typeByCode.get(child.institutionCode) as string }
+      : {}),
   }));
 
   const guardianInstitutionProfileIds = (profile.institutionProfiles ?? []).map((ip) => ip.id);
@@ -82,6 +95,7 @@ export function buildFamily(
   const institutions = (context.institutions ?? []).map((inst) => ({
     institutionCode: inst.institutionCode,
     institutionName: inst.institutionName ?? nameByCode.get(inst.institutionCode) ?? inst.institutionCode,
+    ...(inst.institutionType ? { institutionType: inst.institutionType } : {}),
     institutionProfileId: inst.institutionProfileId,
     groups: (inst.groups ?? []).map((g) => ({ id: g.id, name: g.name })),
   }));
@@ -187,6 +201,7 @@ export function integrationContext(
       id: child.id,
       name: child.name,
       userId: child.userId === undefined || child.userId === null ? '' : String(child.userId),
+      ...(child.institutionType ? { institutionType: child.institutionType } : {}),
     })),
     institutionCodes: family.institutionCodes,
     ...(opts.fromDate ? { fromDate: opts.fromDate } : {}),

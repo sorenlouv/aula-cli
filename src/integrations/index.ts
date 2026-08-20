@@ -68,6 +68,22 @@ export class NoProviderError extends Error {
 }
 
 /**
+ * Every capability here is a school product, and a child at an institution
+ * Aula labels `'Daycare'` has no weekly plan anywhere. Vendors asked about a
+ * child they have never heard of do not decline cleanly — SkolePortal answers
+ * HTTP 500, Meebook answers per-child error prose — and that then reads as an
+ * outage on a page that promises every shown failure is real. So daycare
+ * children are not asked about at all.
+ *
+ * Only an affirmative `'Daycare'` label excludes. An unknown or missing type
+ * stays in, because over-asking a vendor is recoverable noise while silently
+ * dropping a school child is the failure this project exists to prevent.
+ */
+export function schoolChildren(ctx: IntegrationContext): IntegrationContext['children'] {
+  return ctx.children.filter((c) => (c.institutionType ?? '').toLowerCase() !== 'daycare');
+}
+
+/**
  * Read one capability from every detected widget that serves it.
  *
  * Plural because it genuinely can be: a family with a child at a Meebook
@@ -86,6 +102,10 @@ export async function readCapability(
   );
   if (widgets.length === 0) throw new NoProviderError(capability, detected);
 
+  const children = schoolChildren(ctx);
+  if (children.length === 0) throw new NoProviderError(capability, detected);
+  const scoped = { ...ctx, children };
+
   // MinUddannelse ships two ids for one opgaveliste (0030 superseded 0023);
   // an institution that advertises both would otherwise be read twice.
   const byProvider = new Map<string, DetectedWidget>();
@@ -97,7 +117,7 @@ export async function readCapability(
     [...byProvider.values()].map(async (widget) => {
       const fetcher = FETCHERS[widget.widgetId];
       if (!fetcher) throw new NoProviderError(capability, detected);
-      return cached(widget.widgetId, ctx, cache, () => fetcher(ctx, tokens, widget.widgetId));
+      return cached(widget.widgetId, scoped, cache, () => fetcher(scoped, tokens, widget.widgetId));
     }),
   );
 }
@@ -119,7 +139,23 @@ export async function readWidget(
       `No integration for widget "${widgetId}". Supported: ${SUPPORTED_WIDGET_IDS.join(', ')}.`,
     );
   }
-  return cached(widgetId, ctx, cache, () => fetcher(ctx, tokens, widgetId));
+  const children = schoolChildren(ctx);
+  if (children.length === 0) {
+    const info = WIDGETS[widgetId];
+    return {
+      provider: info?.provider ?? 'unavailable',
+      capability: info?.capability ?? 'ugeplan',
+      widgetId,
+      isoWeek: ctx.isoWeek,
+      items: [],
+      warnings: [
+        'None of the selected children attend a school-type institution, and this ' +
+          'is a school product — the vendor was not asked.',
+      ],
+    };
+  }
+  const scoped = { ...ctx, children };
+  return cached(widgetId, scoped, cache, () => fetcher(scoped, tokens, widgetId));
 }
 
 /**

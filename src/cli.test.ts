@@ -253,6 +253,24 @@ test('open --web without a configured hosted copy says how to get one', () => {
   assert.match(result.stderr, /SETUP\.md/);
 });
 
+// The reported bug this guards against: SkolePortal answered HTTP 500 for the
+// daycare children it had never heard of, and the brief presented that as an
+// outage. Daycare children must simply never reach a weekly-plan vendor.
+test('weekly plans are fetched for school children only, with no warning for the rest', () => {
+  const box = sandbox();
+  const plans = json(box.run('ugeplan', '--no-cache'));
+  assert.deepEqual(
+    plans[0].items.map((i: any) => i.childName),
+    ['Alma Eksempelsen'],
+  );
+  assert.equal(plans[0].warnings, undefined, 'a child with no plan is not a warning');
+  assert.deepEqual(
+    box.requests().filter((r) => r.startsWith('meebook')),
+    ['meebook alma0101'],
+    'the daycare child must not appear in the vendor query',
+  );
+});
+
 test('a failed read is not cached', () => {
   const box = sandbox({ FAKE_AULA_FAIL: 'posts.getAllPosts' });
   assert.notEqual(box.run('posts').code, 0);
