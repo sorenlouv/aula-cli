@@ -43,7 +43,7 @@ import { join } from 'node:path';
 import { FlatCache } from 'flat-cache';
 import { AULA_DIR, ensureAulaDir } from './auth.ts';
 
-export const CACHE_DIR = join(AULA_DIR, 'cache');
+const CACHE_DIR = join(AULA_DIR, 'cache');
 const CACHE_ID = 'responses';
 export const CACHE_PATH = join(CACHE_DIR, CACHE_ID);
 

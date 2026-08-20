@@ -23,8 +23,8 @@ import {
   exchangeAuthorizationCode,
   oauthUrls,
   parseAuthorizationCallback,
-  refreshAccessToken,
 } from './aula-oauth.ts';
+import { randomBase64Url } from './crypto.ts';
 import {
   AulaSamlError,
   buildMitidCompletionForm,
@@ -36,7 +36,7 @@ import {
   parseIdentitySelectionPage,
   parseMitidVerificationToken,
 } from './aula-saml-flow.ts';
-import { AulaAuthError } from './errors.ts';
+import { AulaAuthFlowError } from './errors.ts';
 import { extractHiddenInputs, extractMetaRefreshUrl } from './html.ts';
 import { AulaHttpClient, type AulaResponse } from './http.ts';
 import type { Logger } from './logger.ts';
@@ -45,7 +45,6 @@ import { type AppAuthCallbacks, MitidClient, parseAuxResponse } from './mitid-cl
 import type { AvailableAuthenticators } from './mitid-types.ts';
 import { mitidUrls } from './mitid-urls.ts';
 import { generatePkce } from './pkce.ts';
-import { generateState } from './state.ts';
 
 export type AulaAuthMethod = 'APP' | 'CODE_TOKEN';
 
@@ -70,20 +69,14 @@ export interface AulaLoginOptions extends AulaLoginCredentials {
   selectIdentity?: IdentitySelector;
   /** UI callbacks for the APP poll loop (QR / OTP rendering). */
   appCallbacks?: AppAuthCallbacks;
-  /** Abort signal — cancels the poll loop. */
-  signal?: AbortSignal;
-  /** Override poll cadence + deadline. */
-  pollIntervalMs?: number;
-  maxPollMs?: number;
 }
 
 export interface AulaLoginClientOptions {
   http?: AulaHttpClient;
   logger?: Logger;
-  oauth?: Partial<AulaOAuthConfig>;
 }
 
-export class AulaLoginError extends AulaAuthError {
+export class AulaLoginError extends AulaAuthFlowError {
   override readonly name: string = 'AulaLoginError';
 }
 
@@ -92,7 +85,7 @@ export class AulaLoginError extends AulaAuthError {
  * lapsed and a fresh interactive login is required. Callers should fall
  * back to the full login() flow.
  */
-export class AulaSilentSsoFailedError extends AulaAuthError {
+export class AulaSilentSsoFailedError extends AulaAuthFlowError {
   override readonly name: string = 'AulaSilentSsoFailedError';
 }
 
@@ -104,7 +97,7 @@ export class AulaLoginClient {
   constructor(options: AulaLoginClientOptions = {}) {
     this.http = options.http ?? new AulaHttpClient({ logger: options.logger ?? silentLogger });
     this.logger = options.logger ?? silentLogger;
-    this.oauth = { ...DEFAULT_OAUTH_CONFIG, ...(options.oauth ?? {}) };
+    this.oauth = DEFAULT_OAUTH_CONFIG;
   }
 
   /** Run the full MitID-backed login. Returns Aula OAuth tokens. */
@@ -124,7 +117,7 @@ export class AulaLoginClient {
 
     // 1. PKCE + state + authorize URL.
     const pkce = generatePkce();
-    const state = generateState(16);
+    const state = randomBase64Url(16);
     const authorizeUrl = buildAuthorizeUrl({
       config: this.oauth,
       state,
@@ -162,11 +155,7 @@ export class AulaLoginClient {
     this.assertMethodAvailable(method, available);
 
     if (method === 'APP') {
-      await mitid.authenticateWithApp(opts.appCallbacks ?? {}, {
-        ...(opts.signal ? { signal: opts.signal } : {}),
-        ...(opts.pollIntervalMs ? { pollIntervalMs: opts.pollIntervalMs } : {}),
-        ...(opts.maxPollMs ? { maxPollMs: opts.maxPollMs } : {}),
-      });
+      await mitid.authenticateWithApp(opts.appCallbacks ?? {});
     } else {
       // Asserted non-null above when method === 'CODE_TOKEN'.
       const prompt = codeTokenPrompt;
@@ -212,11 +201,6 @@ export class AulaLoginClient {
     return tokens;
   }
 
-  /** Refresh tokens. Returns new tokens (caller decides whether to persist). */
-  async refresh(refreshToken: string): Promise<AulaTokens> {
-    return refreshAccessToken(this.http, this.oauth, refreshToken, this.logger);
-  }
-
   /**
    * Attempt a silent OIDC re-authorize using whatever cookies are
    * already in the HTTP client's jar. Walks the authorize chain and
@@ -232,7 +216,7 @@ export class AulaLoginClient {
    */
   async attemptSilentReauthorize(): Promise<AulaTokens> {
     const pkce = generatePkce();
-    const state = generateState(16);
+    const state = randomBase64Url(16);
     const authorizeUrl = buildAuthorizeUrl({
       config: this.oauth,
       state,
@@ -515,7 +499,6 @@ export class AulaLoginClient {
     } else {
       throw new AulaSamlError(
         `Broker SAML POST failed (status ${samlRes.status}): ${samlRes.body.slice(0, 300)}`,
-        { htmlSnippet: samlRes.body.slice(0, 500) },
       );
     }
 
@@ -523,7 +506,6 @@ export class AulaLoginClient {
     if (!params.sessionCode || !params.execution) {
       throw new AulaSamlError(
         `Broker page missing session_code/execution params (url=${brokerPageRes.url})`,
-        { htmlSnippet: brokerPageRes.body.slice(0, 500) },
       );
     }
 
@@ -552,7 +534,6 @@ export class AulaLoginClient {
     if (postRes.status < 300 || postRes.status >= 400) {
       throw new AulaSamlError(
         `post-broker-login expected redirect, got ${postRes.status} (url=${postRes.url})`,
-        { htmlSnippet: postRes.body.slice(0, 500) },
       );
     }
     const afterLoc = postRes.headers.get('location');

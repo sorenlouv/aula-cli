@@ -19,7 +19,6 @@ import { type WidgetTokens, widgetFetch } from '../widgets.ts';
 import type { IntegrationContext, WeekPlan, WeekPlanItem } from './types.ts';
 
 const MEEBOOK_URL = 'https://app.meebook.com/aulaapi/relatedweekplan/all';
-export const MEEBOOK_WIDGET = '0004';
 
 type MeebookTask = {
   id?: number;
@@ -46,7 +45,7 @@ const NO_SUBJECT = 'Ingen fag tilknyttet';
 export async function getWeekPlan(
   ctx: IntegrationContext,
   tokens: WidgetTokens,
-  widgetId: string = MEEBOOK_WIDGET,
+  widgetId: string,
 ): Promise<WeekPlan> {
   const warnings: string[] = [];
 
@@ -62,13 +61,6 @@ export async function getWeekPlan(
     params.append('childFilter[]', child.userId);
   }
   for (const code of ctx.institutionCodes) params.append('institutionFilter[]', code);
-
-  if (ctx.sessionIdIsFallback) {
-    warnings.push(
-      'No MitID username on the stored login; Meebook may reject the fallback ' +
-        'session id. Log in again with `bun run login`.',
-    );
-  }
 
   const people = await tokens.withToken(widgetId, async (token) => {
     return ((await widgetFetch<MeebookPerson[]>({

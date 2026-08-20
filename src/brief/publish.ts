@@ -29,7 +29,7 @@ const PRINT_HOOK = `
   });
 `;
 
-export function wrapDocument(bodyHtml: string, title: string): string {
+function wrapDocument(bodyHtml: string, title: string): string {
   return `<!doctype html>
 <html lang="da">
 <head>
@@ -53,7 +53,7 @@ ${bodyHtml}
  * `<body>`, so this contributes only what goes *inside* them. The `<title>` is
  * kept at the top because only the first 8KB is scanned for it.
  */
-export function artifactDocument(bodyHtml: string, title: string): string {
+function artifactDocument(bodyHtml: string, title: string): string {
   return `<title>${title}</title>
 <style>${BRIEF_CSS}</style>
 ${bodyHtml}

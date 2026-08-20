@@ -19,13 +19,14 @@ export type IntegrationContext = {
    */
   guardianId: string;
   /**
-   * The MitID username. Meebook (`sessionuuid` header) and Systematic
-   * (`sessionId` query) want *this*, not the Aula user id — the one place
-   * the two differ.
+   * The MitID username. Meebook (`sessionuuid` header), Systematic
+   * (`sessionId` query) and SkolePortal's ugeplan (`x-login` header) want
+   * *this*, not the Aula user id — the one place the two id spaces differ.
    *
    * It is not derivable from the API: it is what the user types into MitID,
    * so `login` records it on the stored token record. Without a record it
-   * falls back to `guardianId`, which those two vendors may reject.
+   * falls back to `guardianId`, which those vendors may reject — the
+   * dispatcher warns then, keyed on the registry's `needsMitidUsername`.
    */
   sessionId: string;
   /** Whether `sessionId` is the real MitID username or the fallback. */

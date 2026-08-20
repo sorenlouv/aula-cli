@@ -11,7 +11,8 @@ import { test } from 'node:test';
 import type { AulaClient } from './client.ts';
 import * as easyiq from './integrations/easyiq.ts';
 import * as skoleportal from './integrations/easyiq-skoleportal.ts';
-import { isoDate, localIsoDate, NoProviderError, readCapability } from './integrations/index.ts';
+import { NoProviderError, readCapability, readWidget } from './integrations/index.ts';
+import { isoDate, localIsoDate } from './integrations/types.ts';
 import * as meebook from './integrations/meebook.ts';
 import * as minUddannelse from './integrations/min-uddannelse.ts';
 import * as systematic from './integrations/systematic.ts';
@@ -91,7 +92,7 @@ test('Meebook is keyed on UniLogin, not the numeric child id', async () => {
       },
     ],
     async (calls, tokens) => {
-      const plan = await meebook.getWeekPlan(CTX, tokens);
+      const plan = await meebook.getWeekPlan(CTX, tokens, '0004');
       const params = query(calls[0]?.url ?? '');
 
       assert.deepEqual(params.getAll('childFilter[]'), ['alma1234', 'vigg5678']);
@@ -123,7 +124,7 @@ test("Meebook's browser-SSO prerequisite is surfaced verbatim, not swallowed", a
       { name: 'Viggo', weekPlan: [{ date: 'mandag', tasks: [{ type: 'task', content: 'Læs' }] }] },
     ],
     async (_calls, tokens) => {
-      const plan = await meebook.getWeekPlan(CTX, tokens);
+      const plan = await meebook.getWeekPlan(CTX, tokens, '0004');
       assert.equal(plan.items.length, 1, 'the working child still comes through');
       assert.match(plan.warnings?.join('\n') ?? '', /First time you use this function/);
     },
@@ -131,11 +132,19 @@ test("Meebook's browser-SSO prerequisite is surfaced verbatim, not swallowed", a
 });
 
 test('a missing MitID username is warned about rather than failing silently', async () => {
+  // Through the dispatcher, because that is where the warning now lives — on
+  // the registry's needsMitidUsername flag, where an adapter cannot skip it.
   await withVendor(
     () => [],
     async (_calls, tokens) => {
-      const plan = await meebook.getWeekPlan({ ...CTX, sessionIdIsFallback: true }, tokens);
+      const plan = await readWidget('0004', { ...CTX, sessionIdIsFallback: true }, tokens);
       assert.match(plan.warnings?.join('\n') ?? '', /MitID username/);
+      const lektier = await readWidget('0029', { ...CTX, sessionIdIsFallback: true }, tokens);
+      assert.equal(
+        lektier.warnings,
+        undefined,
+        'a vendor keyed on the guardian id must not carry the warning',
+      );
     },
   );
 });
@@ -145,7 +154,7 @@ test('a child with no UniLogin is reported rather than quietly skipped', async (
     () => [],
     async (calls, tokens) => {
       const ctx = { ...CTX, children: [{ id: 1, name: 'Ukendt', userId: '' }] };
-      const plan = await meebook.getWeekPlan(ctx, tokens);
+      const plan = await meebook.getWeekPlan(ctx, tokens, '0004');
       assert.deepEqual(query(calls[0]?.url ?? '').getAll('childFilter[]'), []);
       assert.match(plan.warnings?.join('\n') ?? '', /no UniLogin/);
     },
@@ -169,7 +178,7 @@ test('MinUddannelse takes numeric child ids and the Aula guardian id', async () 
       ],
     }),
     async (calls, tokens) => {
-      const plan = await minUddannelse.getOpgaver(CTX, tokens);
+      const plan = await minUddannelse.getOpgaver(CTX, tokens, '0030');
       const params = query(calls[0]?.url ?? '');
 
       assert.equal(params.get('childFilter'), '4242,4343', 'numeric ids, comma separated');
@@ -202,7 +211,7 @@ test('a MinUddannelse ugebrev is flattened from HTML to text', async () => {
       ],
     }),
     async (_calls, tokens) => {
-      const plan = await minUddannelse.getUgebrev(CTX, tokens);
+      const plan = await minUddannelse.getUgebrev(CTX, tokens, '0029');
       assert.equal(plan.capability, 'ugebrev');
       assert.equal(plan.items[0]?.content, 'Kære forældre\n\nHusk gummistøvler.');
       assert.equal(plan.items[0]?.childName, 'Viggo Eksempelsen');
@@ -227,7 +236,7 @@ test('EasyIQ posts one request per child and maps itemType 5 to a note', async (
       ],
     }),
     async (calls, tokens) => {
-      const plan = await easyiq.getWeekPlan(CTX, tokens);
+      const plan = await easyiq.getWeekPlan(CTX, tokens, '0001');
 
       assert.equal(calls.length, 2, 'one call per child');
       assert.equal(calls[0]?.method, 'POST');
@@ -268,6 +277,7 @@ test('SkolePortal authenticates per child, then reads that login', async () => {
       const plan = await skoleportal.getWeekPlan(
         { ...CTX, children: [CTX.children[0] as never] },
         tokens,
+        '0128',
       );
 
       const auth = calls.find((c) => c.url.includes('AuthenticateAulaUser'));
@@ -303,7 +313,7 @@ test('Lektier enumerates children and maps them by UniLogin', async () => {
       return [{ StartTimeISO: '2026-08-12T00:00:00', ChapterTitle: 'Matematik', Description: 'Side 4' }];
     },
     async (calls, tokens) => {
-      const plan = await skoleportal.getLektier(CTX, tokens);
+      const plan = await skoleportal.getLektier(CTX, tokens, '0142');
 
       const auth = calls.find((c) => c.url.includes('AuthenticateAulaUser'));
       assert.match(String(auth?.headers.referer), /LektierWidget$/);
@@ -346,6 +356,7 @@ test('Huskelisten uses the Aula-Authorization header and a date range', async ()
       const plan = await systematic.getReminders(
         { ...CTX, fromDate: '2026-08-10', toDate: '2026-08-24' },
         tokens,
+        '0062',
       );
       const params = query(calls[0]?.url ?? '');
 

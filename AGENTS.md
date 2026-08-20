@@ -98,10 +98,10 @@ Which ids each endpoint accepts is **not** consistent:
 re-deriving at a call site — that is the whole reason it exists.
 
 A fourth identity: the **MitID username** (`mikkelex`) is not the Aula guardian id
-(`mikk42a1`). Meebook and Systematic key their session on the MitID one and
-reject the Aula one. It appears nowhere in the API — it is what the human types
-into MitID — so `login` records it on the stored token record, which is the one
-place it exists.
+(`mikk42a1`). Meebook, Systematic and EasyIQ SkolePortal's ugeplan key their
+session on the MitID one and reject the Aula one. It appears nowhere in the API —
+it is what the human types into MitID — so `login` records it on the stored token
+record, which is the one place it exists.
 
 ## Fælles Filer (`commonFiles.getCommonFiles`)
 
@@ -160,9 +160,9 @@ Three separate traps in one endpoint:
   across two codes that refresh together.
 - There is **no session-teardown endpoint**. An abandoned login leaves a live
   session on MitID's side, and the next attempt trips the parallel-session
-  detector (CAP008). The `AbortSignal` only stops local polling — it tells MitID
-  nothing. This can only be waited out: reject the pending prompt in the app,
-  close aula.dk tabs, wait 60s+.
+  detector (CAP008). Killing the CLI mid-login only stops local polling — it
+  tells MitID nothing. This can only be waited out: reject the pending prompt in
+  the app, close aula.dk tabs, wait 60s+.
 - The login jar holds cookies for `login.aula.dk`, `broker.unilogin.dk` and
   `nemlog-in.mitid.dk` — **nothing for `www.aula.dk`**. Do not expect it to
   contain an API session; that comes from the bootstrap above.

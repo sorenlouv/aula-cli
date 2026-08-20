@@ -1,36 +1,13 @@
 import { describe, expect, test } from 'bun:test';
+import { briefInput, sourceItem } from '../testing/brief-fixtures.ts';
 import { buildDateSupport, dueAtSupported, findDateClaims, unsupportedDateClaims } from './dates.ts';
 import type { BriefInput, SourceItem } from './types.ts';
 
-const item = (key: string, text: string, at: string | null = '2026-08-10T11:00:00+00:00'): SourceItem => ({
-  key,
-  kind: 'post',
-  title: 'Opslag',
-  text,
-  at,
-  author: 'Palle',
-  authorRole: 'employee',
-  groups: [],
-  childNames: [],
-  audience: 'class',
-  important: false,
-  url: null,
-  attachments: [],
-});
+const item = (key: string, text: string, at: string | null = '2026-08-10T11:00:00+00:00'): SourceItem =>
+  sourceItem({ key, text, at });
 
 // 2026-08-13 is a Thursday; 2026-08-10 (the default item timestamp) a Monday.
-const input = (items: SourceItem[]): BriefInput => ({
-  generatedAt: '2026-08-13T06:30:00Z',
-  today: '2026-08-13',
-  isoWeek: '2026-W33',
-  windowDays: 14,
-  family: { guardian: 'Mikkel', children: [], isSteppedUp: true },
-  items,
-  health: [],
-  albums: [],
-  notificationCount: 0,
-  newMediaCount: 0,
-});
+const input = (items: SourceItem[]): BriefInput => briefInput({ items });
 
 describe('findDateClaims', () => {
   test('finds weekdays through Danish inflections', () => {

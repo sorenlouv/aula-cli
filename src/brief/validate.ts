@@ -1,17 +1,20 @@
 /**
  * The invariants, checked against the generated HTML.
  *
- * These used to be guaranteed by a fixed renderer. Letting the model design the
- * page means they have to be *verified* instead — and verification is strictly
- * better, because it also catches the fallback path and any future renderer.
+ * Since the plan-based rework, `buildPage` is the only renderer and satisfies
+ * these by construction — so today this is a regression net, not a gate the
+ * model can fail. It stays because the invariants are the product: a template
+ * edit that drops `data-source-id`, or a plan path that lets a hidden signal
+ * through, must fail loudly here rather than ship quietly.
  *
  * The dangerous failure is not an ugly page. It is a page that looks perfectly
  * fine and silently left out the meeting.
  */
 
+import { escapeHtml } from '../html.ts';
 import type { RankedBrief } from './types.ts';
 
-export type Violation = { rule: string; detail: string };
+type Violation = { rule: string; detail: string };
 
 const EXTERNAL_RESOURCE =
   /<img\b|<script\b[^>]*\bsrc=|<link\b|@import|url\(\s*['"]?https?:/i;
@@ -48,7 +51,9 @@ export function validatePage(html: string, brief: RankedBrief): Violation[] {
   } else {
     for (const note of brief.input.health.filter((h) => h.level === 'warn')) {
       // Match on a distinctive fragment; the composer may reword around it.
-      const stem = note.message.split(' — ')[0]?.slice(0, 40) ?? note.message.slice(0, 40);
+      // Escaped, because the page carries the escaped form — a vendor error
+      // with an `&` in its first characters must not read as a missing warning.
+      const stem = escapeHtml(note.message.split(' — ')[0]?.slice(0, 40) ?? note.message.slice(0, 40));
       if (!html.includes(stem)) {
         violations.push({ rule: 'datastatus', detail: `advarsel mangler: "${stem}…"` });
       }

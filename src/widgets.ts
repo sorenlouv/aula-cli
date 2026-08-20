@@ -35,6 +35,13 @@ export type WidgetInfo = {
   name: string;
   provider: Provider;
   capability: Capability;
+  /**
+   * This vendor keys its session on the MitID username rather than the Aula
+   * guardian id. The dispatcher warns when only the fallback id is available —
+   * see `integrations/index.ts` — so the flag lives here, on the registry,
+   * where an adapter cannot forget it.
+   */
+  needsMitidUsername?: true;
 };
 
 /**
@@ -47,16 +54,29 @@ export type WidgetInfo = {
  */
 export const WIDGETS: Readonly<Record<string, WidgetInfo>> = Object.freeze({
   '0001': { name: 'EasyIQ Ugeplan', provider: 'easyiq', capability: 'ugeplan' },
-  '0004': { name: 'Meebook Ugeplan', provider: 'meebook', capability: 'ugeplan' },
+  '0004': {
+    name: 'Meebook Ugeplan',
+    provider: 'meebook',
+    capability: 'ugeplan',
+    needsMitidUsername: true,
+  },
   '0023': { name: 'MinUddannelse Opgaveliste', provider: 'minuddannelse', capability: 'opgaver' },
   '0029': { name: 'MinUddannelse Ugebrev', provider: 'minuddannelse', capability: 'ugebrev' },
   '0030': { name: 'MinUddannelse Opgaveliste', provider: 'minuddannelse', capability: 'opgaver' },
-  '0062': { name: 'Huskelisten', provider: 'systematic', capability: 'huskelisten' },
+  '0062': {
+    name: 'Huskelisten',
+    provider: 'systematic',
+    capability: 'huskelisten',
+    needsMitidUsername: true,
+  },
   '0128': {
     name: 'EasyIQ SkolePortal Ugeplan',
     provider: 'easyiq_skoleportal',
     capability: 'ugeplan',
+    needsMitidUsername: true,
   },
+  // Lektier deliberately lacks the flag: its `x-login` is the Aula guardian
+  // id, not the MitID username — see getLektier in easyiq-skoleportal.ts.
   '0142': { name: 'EasyIQ Lektier', provider: 'easyiq_lektier', capability: 'lektier' },
 });
 

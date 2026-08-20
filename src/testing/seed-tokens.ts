@@ -9,10 +9,11 @@ import { tokenStore } from '../auth.ts';
 
 await tokenStore().save({
   version: 1,
-  // Overridable so a test can model a *different* login in the same store.
+  // Overridable so a test can model a *different* login in the same store,
+  // or assert on a known token value without reading the encrypted file.
   username: process.env.SEED_USERNAME ?? 'mikkelex',
   tokens: {
-    access_token: 'test-access-token',
+    access_token: process.env.SEED_ACCESS_TOKEN ?? 'test-access-token',
     refresh_token: 'test-refresh-token',
     token_type: 'Bearer',
     expires_in: 3600,

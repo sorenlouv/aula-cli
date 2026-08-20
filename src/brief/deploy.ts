@@ -22,11 +22,16 @@
  *   were interpolated into the instructions — or readable by an agent holding a
  *   publishing tool — a sentence in a school post would be in a position to
  *   steer what gets published. So the prompt carries only a path and a URL this
- *   module produced itself, and `Artifact` is the only tool granted.
+ *   module produced itself, and `Artifact` is the only tool granted. That takes
+ *   *both* flags: `--tools Artifact` strips the built-in set down to the one
+ *   tool, and `--allowedTools Artifact` pre-approves calling it. Measured with
+ *   the same nonce probe as src/brief/llm.ts: `--allowedTools` alone still let
+ *   the agent read a file, `--tools Artifact` alone left it unable to publish.
  */
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { modelEffortArgs } from './llm.ts';
 import { BRIEF_DIR } from './state.ts';
 
 /** Stable across redeploys on purpose: a changed favicon reads as a new page. */
@@ -115,9 +120,9 @@ export async function deployArtifact(
 
   const proc = Bun.spawn(
     [
-      'claude', '-p', deployPrompt(artifactPath, url, opts.title), '--allowedTools', 'Artifact', '--strict-mcp-config',
-      ...(process.env.AULA_BRIEF_MODEL ? ['--model', process.env.AULA_BRIEF_MODEL] : []),
-      ...(process.env.AULA_BRIEF_EFFORT ? ['--effort', process.env.AULA_BRIEF_EFFORT] : []),
+      'claude', '-p', deployPrompt(artifactPath, url, opts.title),
+      '--tools', 'Artifact', '--allowedTools', 'Artifact', '--strict-mcp-config',
+      ...modelEffortArgs(),
     ],
     {
       stdout: 'pipe',

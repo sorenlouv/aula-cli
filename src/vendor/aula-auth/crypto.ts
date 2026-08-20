@@ -51,27 +51,14 @@ export interface AesGcmCiphertext {
  * AES-GCM encrypt with 16-byte tag (matches the Python BrowserClient defaults).
  * IV length is whatever the caller passes (Python uses 12 or 16 in different spots).
  */
-export function aesGcmEncrypt(
-  key: Buffer,
-  iv: Buffer,
-  plaintext: Buffer,
-  aad?: Buffer,
-): AesGcmCiphertext {
+export function aesGcmEncrypt(key: Buffer, iv: Buffer, plaintext: Buffer): AesGcmCiphertext {
   const cipher = createCipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
-  if (aad) cipher.setAAD(aad);
   const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
   return { ciphertext, tag: cipher.getAuthTag() };
 }
 
-export function aesGcmDecrypt(
-  key: Buffer,
-  iv: Buffer,
-  ciphertext: Buffer,
-  tag: Buffer,
-  aad?: Buffer,
-): Buffer {
+export function aesGcmDecrypt(key: Buffer, iv: Buffer, ciphertext: Buffer, tag: Buffer): Buffer {
   const decipher = createDecipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
   decipher.setAuthTag(tag);
-  if (aad) decipher.setAAD(aad);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
 }

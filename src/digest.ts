@@ -529,7 +529,7 @@ export function normalisePresence(entry: PresenceEntry) {
   };
 }
 
-export function normaliseAttachments(attachments: Attachment[] | undefined) {
+function normaliseAttachments(attachments: Attachment[] | undefined) {
   return (attachments ?? [])
     .map((a) => {
       const target = a.file ?? a.media ?? a.link ?? null;
@@ -538,7 +538,7 @@ export function normaliseAttachments(attachments: Attachment[] | undefined) {
     .filter((a) => a.name || a.url);
 }
 
-export function threadTimestamp(thread: ThreadSummary): Date | undefined {
+function threadTimestamp(thread: ThreadSummary): Date | undefined {
   const raw = thread.latestMessage?.sendDateTime ?? thread.startedTime;
   if (!raw) return undefined;
   const date = new Date(raw);

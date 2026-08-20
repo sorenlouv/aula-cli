@@ -52,26 +52,20 @@ export function buildFlowProofMessage(ctx: FlowProofContext): Buffer {
   return Buffer.from(joined, 'utf8');
 }
 
-export type FlowProofEncoding = 'base64' | 'hex';
-
 /**
- * Sign the flow-proof message with a key derived from `prefix + hex(K)`.
- *   • APP `/complete` path: prefix='flowValues', encoding='base64'
- *   • CODE_TOKEN path:      prefix='OTP'+digits, encoding='hex'
- *   • PASSWORD path:        prefix='flowValues', encoding='hex'
+ * Sign the flow-proof message with a key derived from `prefix + hex(K)`,
+ * hex-encoded — every live path uses hex. (The removed APP `/complete` path
+ * was the one consumer of a base64 proof.)
+ *   • APP `/prove` path: prefix='flowValues'
+ *   • CODE_TOKEN path:   prefix='OTP'+digits
+ *   • PASSWORD path:     prefix='flowValues'
  *
  * The Python reference derives the key in two slightly different ways across
  * authenticators (one calls `m.digest()`, the other `hex_to_bytes(m.hexdigest())`)
  * but those produce the same 32 bytes, so we just take the digest.
  */
-export function signFlowValueProof(
-  message: Buffer,
-  K: Buffer,
-  prefix: string,
-  encoding: FlowProofEncoding,
-): string {
+export function signFlowValueProof(message: Buffer, K: Buffer, prefix: string): string {
   const keyMaterial = Buffer.from(prefix + K.toString('hex'), 'utf8');
   const hmacKey = sha256(keyMaterial);
-  const proof = hmacSha256(hmacKey, message);
-  return encoding === 'base64' ? proof.toString('base64') : proof.toString('hex');
+  return hmacSha256(hmacKey, message).toString('hex');
 }

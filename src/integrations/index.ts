@@ -7,6 +7,7 @@
  */
 
 import { ResponseCache } from '../cache.ts';
+import { UsageError } from '../errors.ts';
 import type { Capability, DetectedWidget, WidgetTokens } from '../widgets.ts';
 import { WIDGETS } from '../widgets.ts';
 import * as easyiq from './easyiq.ts';
@@ -16,7 +17,7 @@ import * as minUddannelse from './min-uddannelse.ts';
 import * as systematic from './systematic.ts';
 import type { IntegrationContext, WeekPlan } from './types.ts';
 
-export type Fetcher = (
+type Fetcher = (
   ctx: IntegrationContext,
   tokens: WidgetTokens,
   widgetId: string,
@@ -79,7 +80,7 @@ export class NoProviderError extends Error {
  * stays in, because over-asking a vendor is recoverable noise while silently
  * dropping a school child is the failure this project exists to prevent.
  */
-export function schoolChildren(ctx: IntegrationContext): IntegrationContext['children'] {
+function schoolChildren(ctx: IntegrationContext): IntegrationContext['children'] {
   return ctx.children.filter((c) => (c.institutionType ?? '').toLowerCase() !== 'daycare');
 }
 
@@ -135,7 +136,7 @@ export async function readWidget(
 ): Promise<WeekPlan> {
   const fetcher = FETCHERS[widgetId];
   if (!fetcher) {
-    throw new Error(
+    throw new UsageError(
       `No integration for widget "${widgetId}". Supported: ${SUPPORTED_WIDGET_IDS.join(', ')}.`,
     );
   }
@@ -173,17 +174,18 @@ async function cached(
   read: () => Promise<WeekPlan>,
 ): Promise<WeekPlan> {
   // Every field the vendors actually filter on. `sessionId` is in here because
-  // setting the MitID username changes what Meebook and Systematic return.
+  // setting the MitID username changes what the vendors keyed on it return.
   const key = {
     isoWeek: ctx.isoWeek,
     from: ctx.fromDate ?? null,
     to: ctx.toDate ?? null,
     guardianId: ctx.guardianId,
     sessionId: ctx.sessionId,
+    institutionCodes: [...ctx.institutionCodes].sort(),
     children: ctx.children.map((c) => `${c.id}:${c.userId}`).sort(),
   };
   const hit = cache.get<WeekPlan>(`widget-${widgetId}`, key);
-  if (hit !== undefined) return hit;
+  if (hit !== undefined) return withSessionWarning(widgetId, ctx, hit);
   const plan = await read();
   // A plan with no items and a warning is a vendor that failed, not a quiet
   // week — and cache.ts's rule is that nothing which failed gets pinned for the
@@ -195,8 +197,23 @@ async function cached(
   // such widget at all) and the items are real.
   const failedOutright = plan.items.length === 0 && (plan.warnings ?? []).length > 0;
   if (!failedOutright) cache.set(`widget-${widgetId}`, key, plan);
-  return plan;
+  return withSessionWarning(widgetId, ctx, plan);
 }
 
-export type { IntegrationContext, WeekPlan, WeekPlanItem } from './types.ts';
-export { isoWeekString, isoWeekToMonday, isoDate, localIsoDate, weekOffset } from './types.ts';
+/**
+ * Meebook, Systematic and SkolePortal's ugeplan key their session on the MitID
+ * username, and a login stored without one falls back to the guardian id those
+ * vendors may reject. The warning is appended here — on the dispatcher, keyed
+ * off the registry's `needsMitidUsername` — so no adapter can quietly skip it:
+ * a rejection must read as a missing setting, not an outage.
+ */
+function withSessionWarning(widgetId: string, ctx: IntegrationContext, plan: WeekPlan): WeekPlan {
+  const info = WIDGETS[widgetId];
+  if (!info?.needsMitidUsername || !ctx.sessionIdIsFallback) return plan;
+  const warning =
+    `No MitID username on the stored login; ${info.name} may reject the fallback ` +
+    'session id. Log in again with `bun run login`.';
+  return { ...plan, warnings: [...(plan.warnings ?? []), warning] };
+}
+
+export type { WeekPlan } from './types.ts';

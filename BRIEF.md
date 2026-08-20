@@ -107,13 +107,12 @@ same gate:
 | Legible | colours come from the token set; contrast ratios pass |
 | Print-safe | `<details>` are forced open in print, so nothing hides in the PDF |
 
-A failed check is fed back for one retry; a second failure renders the same
-components in the ranker's own order — the fallback layout — and the page says
-so.
+A failed check drops the model's plan and renders the same components in the
+ranker's own order — the fallback layout — and the page says so.
 
 ### Freedom within a design system
 
-The renderer builds from `brief.css` — the tokens and tested components
+The renderer builds from `styles.ts` — the tokens and tested components
 (cards, chips, child cards, quote blocks) — so the page cannot come out
 grey-on-white, and **the topline and the must-act region stay in the same
 place at the top**. This is a glanceable artifact read in twenty seconds over
@@ -129,13 +128,13 @@ Sections render only when they have content, but never change order.
 family. The part that works when read in four seconds on a phone.
 
 **2 · Kræver handling** — the only tier with deadlines. Hard cap of **five
-items**; overflow drops to *Denne uge*. Each row: what to do, which child, by
+items**; overflow drops to *Kommende*. Each row: what to do, which child, by
 when (`om 3 dage`, `i dag`, `overskredet`), and the verbatim source phrase it
 came from.
 
-**3 · Denne uge** — a seven-day strip merging calendar, weekly plans, recurring
-commitments and planned drop-off/pickup times. Where *husk badetøj på torsdag*
-lives.
+**3 · Kommende** — dated things that ask nothing yet: events, weekly-plan
+entries, deadlines further out. Where *husk badetøj på torsdag* lives once
+Thursday is more than a glance away.
 
 **4 · Per barn** — one card each for Alma, Viggo and Ida: today's
 check-in state and planned pickup, what is new about them, their week. Cards
@@ -173,11 +172,11 @@ These are the whole point, and each becomes a test:
 ```
 aula new [--days 14] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 
-  collect   →  BriefInput    reuse buildDigest + galleries + notifications
+  collect   →  BriefInput    reuse buildDigest + galleries
   extract   →  Signal[]      deterministic rules ∪ model call #1, validated
   rank      →  RankedBrief   score → tiers → caps → must_show flags
   compose   →  JSON plan     model call #2, rendered locally from tested parts
-  validate  →  HTML          invariant checks, one retry, fallback layout
+  validate  →  HTML          invariant checks, fallback layout
   publish   →  files         HTML + PDF (+ PNG), open, update state
 ```
 
@@ -194,17 +193,19 @@ model can promote it further; it cannot sink it.
 
 | File | Responsibility |
 | --- | --- |
+| `src/brief/index.ts` | The pipeline: collect → extract → rank → compose → validate → publish → deploy |
 | `src/brief/collect.ts` | Assemble and token-trim `BriefInput` from `buildDigest` |
-| `src/brief/signals.ts` | The `Signal` type and its validators |
+| `src/brief/types.ts` | The `Signal` / `SourceItem` vocabulary |
 | `src/brief/rules.ts` | Danish date/obligation extractors |
-| `src/brief/llm.ts` | `claude -p` transport, retry, content-hash cache |
+| `src/brief/llm.ts` | `claude -p` transport, extraction validators, retry, content-hash cache |
 | `src/brief/dates.ts` | Date grounding — model-authored dates checked against the sources |
 | `src/brief/rank.ts` | Scoring, tiering, caps, `must_show` |
 | `src/brief/compose.ts` | The arrangement prompt, the plan parser, and the page renderer |
 | `src/brief/validate.ts` | The invariant table above, run against the generated HTML |
-| `src/brief/brief.css` | Tokens and components — the constraint compose designs within |
-| `src/brief/publish.ts` | PDF/PNG rendering, file layout, `--open` |
-| `src/brief/state.ts` | `~/.aula/brief/state.json` — seen ids, last run, last layout |
+| `src/brief/styles.ts` | Tokens and components — the constraint the renderer builds within |
+| `src/brief/publish.ts` | HTML/PDF/PNG rendering and file layout |
+| `src/brief/deploy.ts` | Redeploying the hosted artifact copy |
+| `src/brief/state.ts` | `~/.aula/brief/state.json` — which sources have been shown |
 
 Wired into `src/cli.ts` as `case 'new'`, following the existing
 `emit(value, asText, render)` convention so `--out` and `--no-cache` behave as
@@ -304,14 +305,16 @@ the same *shape* gets committed for CI.
 - `rank.test.ts` — tier ordering, cap overflow, tie-breaking
 - `llm.test.ts` — validator rejects bad `sourceId`, a non-substring quote, an
   unparseable date; the degraded path renders
-- `render.test.ts` — snapshots for three states: busy, quiet, partially-failed
-- `doctor` gains a brief check, since only a live call proves the pipeline
+- `dates.test.ts` / `validate.test.ts` — date grounding and the page invariants
+- `compose.test.ts` — the plan parser and both layouts
+- `deploy.test.ts` — the artifact redeploy leg, target parsing included
 
 ## Delivery and portability
 
 Generated into `~/.aula/brief/`, dated, plus a `latest.html` copy so a missed day
-is recoverable. A `launchd` agent runs it each weekday morning; `--open` opens
-it.
+is recoverable. A `launchd` agent runs it each weekday morning; an interactive
+`aula new` opens the page itself (`--no-open` suppresses that), and `aula open`
+shows the newest page without regenerating.
 
 **The scheduled run writes HTML and nothing else.** What follows is the argument
 for also producing a PDF, which was built and then deliberately turned off; it is
@@ -413,8 +416,8 @@ publish has landed.
 | P0 | `brief` skeleton, `BriefInput`, fixtures, state file | ½ day |
 | P1 | `Signal` model, Danish rules, ranking incl. audience breadth, `--explain` | 1 day |
 | P2 | `claude -p` extraction, quote/source validation, cache, fallback | 1 day |
-| P3 | `brief.css` design system + compose prompt — **first generated page** | 1 day |
-| P4 | `validate.ts` invariants, retry, fallback layout | ½ day |
+| P3 | `styles.ts` design system + compose prompt — **first generated page** | 1 day |
+| P4 | `validate.ts` invariants, fallback layout | ½ day |
 | P5 | PDF/PNG publish, print stylesheet, launchd, `NY` markers | ½ day |
 | P6 | `preferences.json`, muting, tuning against real weeks | ongoing |
 

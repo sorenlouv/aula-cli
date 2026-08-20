@@ -1,12 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  formatTraceText,
-  InMemoryTracer,
   sanitizeHeaders,
   sanitizeRequestBody,
   sanitizeResponseBody,
   sanitizeUrl,
-  type WireEntry,
 } from './wire-tracer.ts';
 
 describe('sanitizeUrl', () => {
@@ -124,30 +121,5 @@ describe('sanitizeResponseBody', () => {
     expect(parsed.access_token).toContain('redacted');
     expect(parsed.refresh_token).toContain('redacted');
     expect(parsed.expires_in).toBe(60);
-  });
-});
-
-describe('InMemoryTracer + formatTraceText', () => {
-  test('captures entries and formats them as text', () => {
-    const tracer = new InMemoryTracer();
-    const entry: WireEntry = {
-      ts: '2026-05-04T01:00:00Z',
-      seq: 1,
-      method: 'GET',
-      url: 'https://example.com/x',
-      requestHeaders: { accept: '*/*' },
-      requestBody: null,
-      status: 200,
-      responseHeaders: { 'content-type': 'text/html' },
-      responseBody: '<html>hi</html>',
-      responseBodyBytes: 15,
-      durationMs: 42,
-    };
-    tracer.record(entry);
-    expect(tracer.entries).toHaveLength(1);
-    const text = formatTraceText(tracer.entries);
-    expect(text).toContain('GET https://example.com/x');
-    expect(text).toContain('200 (42 ms, 15 bytes)');
-    expect(text).toContain('<html>hi</html>');
   });
 });

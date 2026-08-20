@@ -42,7 +42,6 @@ export type SourceItem = {
   text: string;
   at: string | null;
   author: string | null;
-  authorRole: string | null;
   groups: string[];
   /** Children this concerns, resolved from `regarding`, groups or plan owner. */
   childNames: string[];
@@ -50,7 +49,6 @@ export type SourceItem = {
   /** Aula's own `isImportant`. Almost always false, but load-bearing when set. */
   important: boolean;
   url: string | null;
-  attachments: Array<{ name: string; url: string | null }>;
 };
 
 export type PresenceRow = {
@@ -59,8 +57,6 @@ export type PresenceRow = {
   statusDanish: string;
   plannedEntry: string | null;
   plannedExit: string | null;
-  checkInTime: string | null;
-  checkOutTime: string | null;
 };
 
 /**
@@ -76,7 +72,6 @@ export type HealthNote = {
 };
 
 export type BriefFamily = {
-  guardian: string;
   children: Array<{
     name: string;
     firstName: string;
@@ -89,7 +84,6 @@ export type BriefFamily = {
 };
 
 export type BriefInput = {
-  generatedAt: string;
   /** Local calendar day the brief describes, `YYYY-MM-DD`. */
   today: string;
   isoWeek: string;
@@ -98,8 +92,7 @@ export type BriefInput = {
   items: SourceItem[];
   health: HealthNote[];
   /** Album titles are warm, low-priority content; kept apart from `items`. */
-  albums: Array<{ title: string; at: string | null; groups: string[]; childNames: string[] }>;
-  notificationCount: number;
+  albums: Array<{ title: string; at: string | null; childNames: string[] }>;
   newMediaCount: number;
 };
 

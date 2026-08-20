@@ -24,14 +24,14 @@
 import { AulaClient } from './client.ts';
 import { startOfDay } from './cli-helpers.ts';
 import { buildFamily, integrationContext, type Family } from './family.ts';
-import { isoDate, readWidget, SUPPORTED_WIDGET_IDS } from './integrations/index.ts';
+import { readWidget, SUPPORTED_WIDGET_IDS } from './integrations/index.ts';
+import { isoDate, isoWeekString } from './integrations/types.ts';
 import { fmt } from './io.ts';
-import { isoWeekString } from './integrations/types.ts';
 import { WIDGETS, WidgetTokens } from './widgets.ts';
 
-export type CheckStatus = 'ok' | 'warn' | 'skip' | 'fail';
+type CheckStatus = 'ok' | 'warn' | 'skip' | 'fail';
 
-export type Check = {
+type Check = {
   /** The Aula method, or a named step where there is no single method. */
   name: string;
   status: CheckStatus;
@@ -41,7 +41,7 @@ export type Check = {
   note?: string;
 };
 
-export type DoctorReport = {
+type DoctorReport = {
   ok: boolean;
   generatedAt: string;
   apiVersion: number;
@@ -367,7 +367,7 @@ const TAGS: Record<CheckStatus, string> = {
   fail: fmt.red('FAIL'),
 };
 
-export function renderDoctor(report: DoctorReport): string {
+function renderDoctor(report: DoctorReport): string {
   const width = Math.max(...report.checks.map((c) => c.name.length), 10);
   const lines = [
     `aula doctor — API v${report.apiVersion}`,

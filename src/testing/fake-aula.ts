@@ -19,9 +19,7 @@ import { appendFileSync } from 'node:fs';
 
 // -------------------------------------------------------------------- fixture
 
-export const GUARDIAN_INSTITUTION_PROFILE_IDS = [901, 902];
-
-export const CHILDREN = [
+const CHILDREN = [
   {
     id: 11,
     profileId: 111,
@@ -59,9 +57,10 @@ const PROFILES = {
 /**
  * Fault injection, so the states `doctor` exists to report can be provoked:
  *
- *   FAKE_AULA_NO_STEPUP=1   sensitive threads would read as empty
- *   FAKE_AULA_EMPTY_POSTS=1 the "wrong id set looks like an empty feed" trap
- *   FAKE_AULA_FAIL=<method> that one method answers 403
+ *   FAKE_AULA_NO_STEPUP=1    sensitive threads would read as empty
+ *   FAKE_AULA_EMPTY_POSTS=1  the "wrong id set looks like an empty feed" trap
+ *   FAKE_AULA_FAIL=<method>  that one method answers 403
+ *   FAKE_AULA_STALE_TOKEN=1  every widget token is rejected once as expired
  */
 const PROFILE_CONTEXT = {
   userId: 'mikk42a1',

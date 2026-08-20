@@ -52,7 +52,7 @@ export const READ_ONLY_METHODS = new Set<string>([
  * as a POST because the filter payload is too big for a query string; it does
  * not mutate anything.
  */
-export const POST_ALLOWED = new Set<string>(['calendar.getEventsByProfileIdsAndResourceIds']);
+const POST_ALLOWED = new Set<string>(['calendar.getEventsByProfileIdsAndResourceIds']);
 
 /**
  * Aula method names are `module.verbNoun`, and the read verbs are exactly

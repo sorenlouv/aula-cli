@@ -13,13 +13,13 @@
  * then `finalize` returns the OAuth authorization code.
  *
  * Testing strategy: pure helpers (parseAuxResponse, password derivations) have
- * unit tests. The HTTP-driven methods are integration-tested via fixture
- * replay (see packages/aula-auth/src/__tests__/fixtures/).
+ * unit tests in mitid-client.test.ts; the HTTP-driven methods are exercised
+ * only by a real login.
  */
 
 import { Buffer } from 'node:buffer';
-import { sha256 } from './crypto.ts';
-import { AulaAuthError } from './errors.ts';
+import { pbkdf2Sha256, sha256 } from './crypto.ts';
+import { AulaAuthFlowError } from './errors.ts';
 import type { AulaHttpClient } from './http.ts';
 import type { Logger } from './logger.ts';
 import { silentLogger } from './logger.ts';
@@ -49,7 +49,7 @@ import {
 import { mitidUrls } from './mitid-urls.ts';
 import { CustomSrp } from './srp.ts';
 
-export class MitidError extends AulaAuthError {
+export class MitidError extends AulaAuthFlowError {
   override readonly name: string = 'MitidError';
 }
 
@@ -136,28 +136,10 @@ export interface AppAuthCallbacks {
   onPoll?: (result: MitidPollResult) => void | Promise<void>;
 }
 
-export interface AppAuthLoopOptions {
-  /** Time between polls. Default 1 s — matches Python. */
-  pollIntervalMs?: number;
-  /** Hard stop after this many ms. Default 10 minutes. */
-  maxPollMs?: number;
-  /** Stop signal from outside (e.g. CLI Ctrl-C). */
-  signal?: AbortSignal;
-}
-
 export interface MitidClientOptions {
   http: AulaHttpClient;
   aux: MitidAuxData;
   logger?: Logger;
-}
-
-export interface MitidClientState {
-  authenticationSessionId: string;
-  currentAuthenticatorType?: MitidAuthenticatorType;
-  currentAuthenticatorSessionId?: string;
-  finalizationSessionId?: string;
-  hasPollUrl: boolean;
-  hasAuthResponse: boolean;
 }
 
 export class MitidClient {
@@ -257,9 +239,9 @@ export class MitidClient {
     return available;
   }
 
-  // ============ APP authenticator (modern /complete path) ====================
+  // ============ APP authenticator ============================================
 
-  async startAppAuth(): Promise<{ pollUrl: string; ticket: string }> {
+  private async startAppAuth(): Promise<{ pollUrl: string; ticket: string }> {
     await this.selectAuthenticator('APP');
     if (!this.currentAuthenticatorSessionId) {
       throw new MitidError('startAppAuth: no current authenticator session id');
@@ -281,7 +263,7 @@ export class MitidClient {
   }
 
   /** Single poll. Caller decides cadence. */
-  async pollAppAuth(): Promise<MitidPollResult> {
+  private async pollAppAuth(): Promise<MitidPollResult> {
     if (!this.pollUrl || !this.ticket) {
       throw new MitidError('pollAppAuth called before startAppAuth');
     }
@@ -313,7 +295,7 @@ export class MitidClient {
    * timings have been observed to upset the server-side bot heuristics, so
    * we send a real number.
    */
-  async completeAppAuth(): Promise<void> {
+  private async completeAppAuth(): Promise<void> {
     if (
       !this.authResponse ||
       !this.authResponseSignature ||
@@ -352,7 +334,7 @@ export class MitidClient {
     });
 
     const flowProofMessage = buildFlowProofMessage(this.flowProofContext());
-    const flowValueProofHex = signFlowValueProof(flowProofMessage, K, 'flowValues', 'hex');
+    const flowValueProofHex = signFlowValueProof(flowProofMessage, K, 'flowValues');
 
     const proveRes = await this.postJson(mitidUrls.appProve(sessionId), {
       m1: { value: m1Hex },
@@ -399,19 +381,15 @@ export class MitidClient {
     this.logger.info('mitid.app_authenticated', { frontEndProcessingTime });
   }
 
-  /** Convenience: drive the APP authenticator end-to-end with UI callbacks. */
-  async authenticateWithApp(
-    callbacks: AppAuthCallbacks = {},
-    opts: AppAuthLoopOptions = {},
-  ): Promise<void> {
-    const pollIntervalMs = opts.pollIntervalMs ?? 1_000;
-    const maxPollMs = opts.maxPollMs ?? 10 * 60 * 1_000;
-    const deadline = Date.now() + maxPollMs;
+  /** Convenience: drive the APP authenticator end-to-end with UI callbacks.
+   *  Polls every second (matching the Python reference) for up to 10 minutes. */
+  async authenticateWithApp(callbacks: AppAuthCallbacks = {}): Promise<void> {
+    const pollIntervalMs = 1_000;
+    const deadline = Date.now() + 10 * 60 * 1_000;
 
     await this.startAppAuth();
 
     while (true) {
-      if (opts.signal?.aborted) throw new MitidError('APP poll aborted by caller');
       if (Date.now() > deadline) throw new MitidError('APP poll timed out');
 
       const result = await this.pollAppAuth();
@@ -439,7 +417,7 @@ export class MitidClient {
         case 'error':
           throw new MitidError(`APP poll error: ${result.message}`);
       }
-      await sleep(pollIntervalMs, opts.signal);
+      await sleep(pollIntervalMs);
     }
   }
 
@@ -476,7 +454,7 @@ export class MitidClient {
     });
 
     const flowProofMessage = buildFlowProofMessage(this.flowProofContext());
-    const flowValueProof = signFlowValueProof(flowProofMessage, K, `OTP${digits}`, 'hex');
+    const flowValueProof = signFlowValueProof(flowProofMessage, K, `OTP${digits}`);
 
     const proveRes = await this.postJson(
       mitidUrls.codeTokenProve(this.currentAuthenticatorSessionId),
@@ -527,7 +505,6 @@ export class MitidClient {
       throw new MitidError('passwordInit response missing pbkdf2Salt');
     }
 
-    const { pbkdf2Sha256 } = await import('./crypto.ts');
     const pbkdfSaltBytes = Buffer.from(init.pbkdf2Salt.value, 'hex');
     const passwordHex = pbkdf2Sha256(password, pbkdfSaltBytes, 20_000, 32).toString('hex');
 
@@ -539,7 +516,7 @@ export class MitidClient {
     });
 
     const flowProofMessage = buildFlowProofMessage(this.flowProofContext());
-    const flowValueProof = signFlowValueProof(flowProofMessage, K, 'flowValues', 'hex');
+    const flowValueProof = signFlowValueProof(flowProofMessage, K, 'flowValues');
 
     const proveRes = await this.postJson(
       mitidUrls.passwordProve(this.currentAuthenticatorSessionId),
@@ -584,26 +561,6 @@ export class MitidClient {
     }
     this.logger.info('mitid.finalized');
     return json.authorizationCode;
-  }
-
-  // ============ State / debug ================================================
-
-  getState(): MitidClientState {
-    const state: MitidClientState = {
-      authenticationSessionId: this.authenticationSessionId,
-      hasPollUrl: this.pollUrl != null,
-      hasAuthResponse: this.authResponse != null,
-    };
-    if (this.currentAuthenticatorType !== undefined) {
-      state.currentAuthenticatorType = this.currentAuthenticatorType;
-    }
-    if (this.currentAuthenticatorSessionId !== undefined) {
-      state.currentAuthenticatorSessionId = this.currentAuthenticatorSessionId;
-    }
-    if (this.finalizationSessionId !== undefined) {
-      state.finalizationSessionId = this.finalizationSessionId;
-    }
-    return state;
   }
 
   // ============ Internals ====================================================
@@ -725,20 +682,6 @@ function safeJson(text: string): { errorCode?: string } | null {
   }
 }
 
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new MitidError('aborted'));
-      return;
-    }
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(new MitidError('aborted'));
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

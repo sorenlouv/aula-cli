@@ -94,9 +94,6 @@ export interface SrpStage3Result {
 }
 
 export class CustomSrp {
-  static readonly N: bigint = SRP_N;
-  static readonly g: bigint = SRP_g;
-
   private secretA!: bigint;
   private publicA!: bigint;
   private serverB: bigint = 0n;
@@ -105,20 +102,13 @@ export class CustomSrp {
   private m1Hex?: string;
 
   constructor(options: CustomSrpOptions = {}) {
-    let a = options.a ?? bytesToBigIntBE(randomBytes(32));
-    if (a < 0n) a += SRP_N; // dead code in the reference, kept for parity
-    this.secretA = a;
+    this.secretA = options.a ?? bytesToBigIntBE(randomBytes(32));
     this.publicA = modPow(SRP_g, this.secretA, SRP_N);
   }
 
   /** A as the wire-format hex string. Send as `randomA.value`. */
   stage1(): string {
     return bigIntToHexMinimal(this.publicA);
-  }
-
-  /** Public A as a bigint. Useful for tests. */
-  get publicAValue(): bigint {
-    return this.publicA;
   }
 
   /** Derive K and M1 given the server response. */
@@ -168,20 +158,6 @@ export class CustomSrp {
   authDec(base64Message: string): Buffer {
     if (!this.sessionKey) throw new Error('SRP: K not derived');
     return decryptIvCipherTag(base64Message, this.sessionKey);
-  }
-
-  /** Decrypt with the PIN-derived key (SHA256(hex(K) || "PIN")). */
-  authDecPin(base64Message: string): Buffer {
-    if (!this.sessionKey) throw new Error('SRP: K not derived');
-    const pinKey = sha256(
-      Buffer.concat([Buffer.from(this.sessionKey.toString('hex')), Buffer.from('PIN')]),
-    );
-    return decryptIvCipherTag(base64Message, pinKey);
-  }
-
-  /** Exposed for tests; mirrors Python's `K_bits`. */
-  get K(): Buffer | undefined {
-    return this.sessionKey;
   }
 
   // --- internals ---------------------------------------------------------

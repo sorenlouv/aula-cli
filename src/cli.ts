@@ -51,10 +51,12 @@ import { explain } from './brief/rank.ts';
 import { BRIEF_DIR } from './brief/state.ts';
 import { runDoctor } from './doctor.ts';
 import { AulaSessionError, UsageError } from './errors.ts';
+import { AulaAuthFlowError } from './vendor/aula-auth/index.ts';
 import { resolveFamily, selectChildren, type Family } from './family.ts';
 import { runLogin, runLogout, runRefreshStepUp, runStatus } from './login.ts';
 import { runSchedule } from './schedule.ts';
-import { isoDate, localIsoDate, SUPPORTED_WIDGET_IDS, type WeekPlan } from './integrations/index.ts';
+import { SUPPORTED_WIDGET_IDS, type WeekPlan } from './integrations/index.ts';
+import { isoDate, localIsoDate } from './integrations/types.ts';
 import type { CommonFile, Contact, ThreadDetail } from './types.ts';
 import type { Capability } from './widgets.ts';
 
@@ -108,9 +110,9 @@ type them:
   raw <method> [k=v ...]       Any un-wrapped Aula read method
 
   Their options: --text --limit <n> --since <7d|2026-08-01> --child <name|id>
-  --days <n> --full --unread --important --week <2026-W33> --next
+  --days <n> --full --unread --important --week <2026-W33> --next --page <n>
   --widget <id> --group <id> --role <child|guardian> --out <path>
-  --no-cache --cache-ttl <seconds>
+  --from <date> --to <date> --no-cache --cache-ttl <seconds>
 
 Login options:
   --username <name>            MitID username
@@ -203,6 +205,13 @@ async function main(): Promise<number> {
     throw new UsageError(
       `"${command}" cannot narrow to one child, so --child would have been ignored.\n` +
         `Commands that honour it: ${[...CHILD_AWARE].sort().join(', ')}.`,
+    );
+  }
+  // Same principle for --page: `messages --page 2` would quietly return page 0.
+  if (values.page !== undefined && !PAGE_AWARE.has(command)) {
+    throw new UsageError(
+      `"${command}" is not paginated, so --page would have been ignored.\n` +
+        `Commands that honour it: ${[...PAGE_AWARE].sort().join(', ')}.`,
     );
   }
 
@@ -586,6 +595,9 @@ const CHILD_AWARE = new Set([
   'homework',
 ]);
 
+/** The only commands that read `--page` — see the refusal in `main`. */
+const PAGE_AWARE = new Set(['thread', 'attachments']);
+
 function runCache(positionals: string[], asText: boolean, ttlMs: number): number {
   const sub = positionals[0] ?? 'status';
   if (sub === 'clear') {
@@ -754,7 +766,7 @@ function renderWhoami(family: Family): string {
   const lines = [
     `Guardian: ${family.guardian.name} (${family.guardian.userId})`,
     `Session stepped up: ${family.isSteppedUp} ${family.isSteppedUp ? '' : '(sensitive threads will be unreadable)'}`,
-    `MitID username: ${family.mitidUsername ?? 'not set (Meebook and Huskelisten may refuse)'}`,
+    `MitID username: ${family.mitidUsername ?? 'not set (Meebook, Huskelisten and SkolePortal may refuse)'}`,
     '',
     'Children:',
     ...family.children.map(
@@ -1072,7 +1084,13 @@ try {
   if (err instanceof UsageError) {
     console.error(err.message);
     process.exitCode = 1;
-  } else if (err instanceof AulaAuthError || err instanceof AulaSessionError) {
+  } else if (
+    err instanceof AulaAuthError ||
+    err instanceof AulaSessionError ||
+    // The vendored login flow's own hierarchy — a failed refresh-stepup or
+    // token refresh is a credentials problem, not a bug, so no stack trace.
+    err instanceof AulaAuthFlowError
+  ) {
     console.error(err.message);
     process.exitCode = 2;
   } else if (err instanceof AulaApiError) {

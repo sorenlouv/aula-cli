@@ -17,19 +17,10 @@ export const silentLogger: Logger = {
   error() {},
 };
 
-export function consoleLogger(prefix = 'aula-auth'): Logger {
-  return {
-    debug: (m, meta) => console.debug(`[${prefix}] ${m}`, meta ?? ''),
-    info: (m, meta) => console.info(`[${prefix}] ${m}`, meta ?? ''),
-    warn: (m, meta) => console.warn(`[${prefix}] ${m}`, meta ?? ''),
-    error: (m, meta) => console.error(`[${prefix}] ${m}`, meta ?? ''),
-  };
-}
-
 /**
- * Logger that writes every level to stderr. Use this in stdio MCP
- * servers — stdout is the JSON-RPC channel and `console.info`/`debug`
- * default to stdout in Node/Bun, which would corrupt the protocol.
+ * Logger that writes every level to stderr — the only loud logger here,
+ * because the CLI's stdout is a data channel (see src/io.ts) and
+ * `console.info`/`debug` default to stdout in Node/Bun.
  */
 export function stderrLogger(prefix = 'aula-auth'): Logger {
   const write = (level: string, m: string, meta?: Record<string, unknown>): void => {

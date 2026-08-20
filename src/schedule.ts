@@ -73,7 +73,7 @@ const xmlEscape = (value: string) =>
  * writing the key there would undo the point of keeping it out of the
  * filesystem.
  */
-export const BAKED_ENV = ['AULA_BRIEF_MODEL', 'AULA_BRIEF_EFFORT', 'AULA_CACHE_TTL'];
+const BAKED_ENV = ['AULA_BRIEF_MODEL', 'AULA_BRIEF_EFFORT', 'AULA_CACHE_TTL'];
 
 /** The launchd agent, weekdays only. Exported for tests. */
 export function buildPlist(opts: {

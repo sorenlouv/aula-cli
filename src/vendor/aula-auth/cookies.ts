@@ -21,15 +21,9 @@ export class AulaCookieJar {
   private readonly jar: CookieJar;
   private readonly logger: Logger;
 
-  constructor(opts: AulaCookieJarOptions | CookieJar = {}) {
-    // Back-compat: callers may have passed a bare CookieJar.
-    if (opts instanceof CookieJar) {
-      this.jar = opts;
-      this.logger = silentLogger;
-    } else {
-      this.jar = opts.jar ?? new CookieJar();
-      this.logger = opts.logger ?? silentLogger;
-    }
+  constructor(opts: AulaCookieJarOptions = {}) {
+    this.jar = opts.jar ?? new CookieJar();
+    this.logger = opts.logger ?? silentLogger;
   }
 
   /** Parse and store every Set-Cookie header from a response. */
@@ -77,6 +71,6 @@ export class AulaCookieJar {
   static async deserialize(serialized: string): Promise<AulaCookieJar> {
     const parsed = JSON.parse(serialized);
     const jar = await CookieJar.deserialize(parsed);
-    return new AulaCookieJar(jar);
+    return new AulaCookieJar({ jar });
   }
 }

@@ -12,24 +12,18 @@
  */
 
 import * as cheerio from 'cheerio';
-import { AulaAuthError } from './errors.ts';
-import { extractAttr, extractFormAction, extractHiddenInputs, extractText } from './html.ts';
+import { AulaAuthFlowError } from './errors.ts';
+import { extractAttr, extractFormAction, extractHiddenInputs } from './html.ts';
 
-export class AulaSamlError extends AulaAuthError {
+export class AulaSamlError extends AulaAuthFlowError {
   override readonly name: string = 'AulaSamlError';
-  /** Snippet of the offending HTML — handy for debugging mismatched parsers. */
-  readonly htmlSnippet?: string;
-  constructor(message: string, options?: { cause?: unknown; htmlSnippet?: string }) {
-    super(message, options);
-    if (options?.htmlSnippet !== undefined) this.htmlSnippet = options.htmlSnippet;
-  }
 }
 
 /**
  * On the broker IdP-selection page we look for the form and fill in
- * `selectedIdp=nemlogin3`. The Python reference brute-forces several
- * (selector, value) combinations; we stick to the one that's worked for years
- * and let callers override if MitID renames it.
+ * `selectedIdp=nemlogin3`. The login client brute-forces the same
+ * (field, value) combinations the Python reference does — see
+ * `postBrokerLogin` in aula-login-client.ts.
  */
 export interface BrokerFormData {
   /** Where to POST. */
@@ -44,7 +38,7 @@ export function parseBrokerIdpForm(
 ): BrokerFormData {
   const action = extractFormAction(html);
   if (!action) {
-    throw new AulaSamlError('Broker IdP page has no form', { htmlSnippet: html.slice(0, 500) });
+    throw new AulaSamlError('Broker IdP page has no form');
   }
   const fields = extractHiddenInputs(html);
   fields[options.idpField ?? 'selectedIdp'] = options.idpValue ?? 'nemlogin3';
@@ -56,9 +50,7 @@ export function parseMitidVerificationToken(html: string): string {
   const inputs = extractHiddenInputs(html);
   const token = inputs.__RequestVerificationToken;
   if (!token) {
-    throw new AulaSamlError('Could not find __RequestVerificationToken on MitID page', {
-      htmlSnippet: html.slice(0, 500),
-    });
+    throw new AulaSamlError('Could not find __RequestVerificationToken on MitID page');
   }
   return token;
 }
@@ -85,9 +77,7 @@ export function extractSamlForm(html: string): ExtractedSamlForm {
   const inputs = extractHiddenInputs(html);
   const samlResponse = inputs.SAMLResponse;
   if (!samlResponse) {
-    throw new AulaSamlError('Could not find SAMLResponse in form', {
-      htmlSnippet: html.slice(0, 500),
-    });
+    throw new AulaSamlError('Could not find SAMLResponse in form');
   }
   const relayState = inputs.RelayState ?? '';
   const action = extractSamlFormAction(html);
@@ -133,8 +123,8 @@ export function parseIdentitySelectionPage(html: string): {
   const formInputs = extractHiddenInputs(html);
   const optionsJson: string[] = [];
   const labels: string[] = [];
-  // We can't easily get aligned arrays from extractAllAttr because the labels
-  // live in a child div, so use cheerio directly here.
+  // The labels live in a child div of each option anchor, so attribute
+  // extraction alone cannot keep them aligned — use cheerio directly here.
   const $ = cheerio.load(html);
   // The live page wraps each `a.list-link` inside a `div.list-link-box`, so
   // this selector matches both the container *and* its nested anchor — and
@@ -155,9 +145,7 @@ export function parseIdentitySelectionPage(html: string): {
     labels.push(labelEl.length ? labelEl.text().trim() : `Option ${optionsJson.length}`);
   });
   if (optionsJson.length === 0) {
-    throw new AulaSamlError('No identity options found on /loginoption page', {
-      htmlSnippet: html.slice(0, 500),
-    });
+    throw new AulaSamlError('No identity options found on /loginoption page');
   }
   const options: IdentityOption[] = optionsJson.map((loginOptionsJson, i) => {
     const name = labels[i] ?? `Option ${i + 1}`;
@@ -254,9 +242,4 @@ export function buildMitidCompletionForm(params: MitidCompletionParams): URLSear
   body.set('SessionStorageActiveSessionUuid', params.sessionStorageActiveSessionUuid);
   body.set('SessionStorageActiveChallenge', params.sessionStorageActiveChallenge);
   return body;
-}
-
-/** Convenience to produce the page title (or some text) for error reports. */
-export function pageTitle(html: string): string | null {
-  return extractText(html, 'title');
 }

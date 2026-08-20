@@ -14,11 +14,10 @@ export interface PkcePair {
 
 export function generatePkce(verifierBytes: number = 32): PkcePair {
   const verifier = base64url.encode(randomBytes(verifierBytes));
-  const challenge = base64url.encode(sha256(verifier));
-  return { verifier, challenge, method: 'S256' };
+  return { verifier, challenge: challengeFromVerifier(verifier), method: 'S256' };
 }
 
-/** Recompute the challenge for a known verifier. Useful for testing + recovery. */
+/** The S256 challenge for a verifier — split out so the RFC 7636 vector can test it. */
 export function challengeFromVerifier(verifier: string): string {
   return base64url.encode(sha256(verifier));
 }

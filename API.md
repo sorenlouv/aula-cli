@@ -150,11 +150,12 @@ server-side and returns a path for that reason.
   `302` to its own login page. All three are treated as expiry, and the call is
   retried once with a fresh token.
 - **`sessionId` means two different things.** MinUddannelse and EasyIQ want the
-  Aula guardian `userId`. Meebook (`sessionuuid` header) and Systematic
-  (`sessionId` query) want the **MitID username**, which exists nowhere in the
-  API because it is what you type into MitID. Set it with
-  `session username <name>` or `$AULA_MITID_USERNAME`; without it those two fall
-  back to the guardian id and say so in `warnings`.
+  Aula guardian `userId`. Meebook (`sessionuuid` header), Systematic
+  (`sessionId` query) and SkolePortal's ugeplan (`x-login` header) want the
+  **MitID username**, which exists nowhere in the API because it is what you
+  type into MitID. `login` records it on the stored token record; if it is
+  missing, log in again — until then those vendors fall back to the guardian id
+  and say so in `warnings`.
 - **Meebook keys on UniLogin.** `childFilter[]` takes `Child.userId`, not the
   numeric id. Meebook also requires a one-time interactive SSO: open the Meebook
   widget inside aula.dk once before the API will answer. That instruction comes

@@ -5,15 +5,14 @@
  * ignores `isoWeek`.
  *
  * Two oddities: the bearer goes in `Aula-Authorization`, not `Authorization`,
- * and `sessionId` is the MitID username — Systematic is the second of the two
- * vendors that wants that rather than the Aula guardian id.
+ * and `sessionId` is the MitID username — one of the three consumers of it,
+ * with Meebook and SkolePortal's ugeplan — rather than the Aula guardian id.
  */
 
 import { type WidgetTokens, widgetFetch } from '../widgets.ts';
 import { type IntegrationContext, isoDate, type WeekPlan, type WeekPlanItem } from './types.ts';
 
 const SYSTEMATIC_URL = 'https://systematic-momo.dk/api/aula/reminders/v1';
-export const SYSTEMATIC_WIDGET = '0062';
 
 type Reminder = {
   id?: number;
@@ -40,16 +39,8 @@ type Person = {
 export async function getReminders(
   ctx: IntegrationContext,
   tokens: WidgetTokens,
-  widgetId: string = SYSTEMATIC_WIDGET,
+  widgetId: string,
 ): Promise<WeekPlan> {
-  const warnings: string[] = [];
-  if (ctx.sessionIdIsFallback) {
-    warnings.push(
-      'No MitID username on the stored login; Huskelisten may reject the fallback ' +
-        'session id. Log in again with `bun run login`.',
-    );
-  }
-
   const params = new URLSearchParams({
     children: ctx.children.map((c) => c.id).join(','),
     institutions: ctx.institutionCodes.join(','),
@@ -105,6 +96,5 @@ export async function getReminders(
     widgetId,
     isoWeek: ctx.isoWeek,
     items,
-    ...(warnings.length ? { warnings } : {}),
   };
 }

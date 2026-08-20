@@ -32,9 +32,6 @@ const CHILDREN_URL = `${BASE}/Aula/GetChildren`;
 const UGEPLAN_URL = `${BASE}/Calendar/CalendarGetWeekplanEvents`;
 const LEKTIER_URL = `${BASE}/AulaHuskeliste/GetWeekplanEvents`;
 
-export const SKOLEPORTAL_WIDGET = '0128';
-export const LEKTIER_WIDGET = '0142';
-
 type AuthResponse = { loginId?: string | number; childName?: string; schoolName?: string };
 type ChildrenResponse = { Children?: Array<{ Id: number; Login: string; Name?: string }> };
 
@@ -114,7 +111,7 @@ function toItem(event: SpEvent, childName: string, kind: string): WeekPlanItem {
 export async function getWeekPlan(
   ctx: IntegrationContext,
   tokens: WidgetTokens,
-  widgetId: string = SKOLEPORTAL_WIDGET,
+  widgetId: string,
 ): Promise<WeekPlan> {
   const date = weekParam(ctx.isoWeek);
   const institutions = ctx.institutionCodes.join(',');
@@ -191,7 +188,7 @@ export async function getWeekPlan(
 export async function getLektier(
   ctx: IntegrationContext,
   tokens: WidgetTokens,
-  widgetId: string = LEKTIER_WIDGET,
+  widgetId: string,
 ): Promise<WeekPlan> {
   const date = weekParam(ctx.isoWeek);
   const institutions = ctx.institutionCodes.join(',');
