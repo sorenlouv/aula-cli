@@ -272,6 +272,50 @@ export function rank(input: BriefInput, signals: Signal[]): RankedBrief {
     overflow.reasons.push(`over ACT_CAP(${ACT_CAP}) → week`);
   }
 
+  // ---------------------------------------------------------------- floor
+  // Aula's "vigtig" flag is the school shouting, and it is deterministic —
+  // so the floor is too. The model benchmark showed mid-tier models reading
+  // a vigtig-marked mandatory sign-up as background, or missing it entirely;
+  // either way it must not end below the fold. An under-read signal is
+  // promoted to the week tier, and an important item no signal covered gets
+  // a plain rule-made one. The model may still promote it further; it can
+  // no longer sink it.
+  for (const signal of merged) {
+    if (signal.source.important && signal.tier === 'context') {
+      signal.tier = 'week';
+      signal.mustShow = true;
+      signal.reasons.push('aula-important floor → week');
+    }
+  }
+  const covered = new Set(merged.flatMap((s) => [s.sourceKey, ...s.mergedSourceKeys]));
+  for (const item of input.items) {
+    if (!item.important || covered.has(item.key)) continue;
+    const base: Signal = {
+      id: `rule:important:${item.key}`,
+      kind: 'info',
+      title: item.title,
+      child: item.childNames.length === 1 ? firstName(item.childNames[0] ?? '') : null,
+      dueAt: null,
+      urgency: 'week',
+      quote: null,
+      why: null,
+      sourceKey: item.key,
+      origin: 'rule',
+      concernsChild: looksLikeChildBusiness(item),
+    };
+    const { score, reasons } = scoreOf(base, item.audience, true);
+    merged.push({
+      ...base,
+      score,
+      tier: 'week',
+      mustShow: true,
+      audience: item.audience,
+      reasons: [...reasons, 'aula-important floor: intet signal dækkede den'],
+      source: item,
+      mergedSourceKeys: [],
+    });
+  }
+
   const ordered = merged.sort((a, b) => {
     const rank = { act: 0, week: 1, context: 2, hidden: 3 } as const;
     if (rank[a.tier] !== rank[b.tier]) return rank[a.tier] - rank[b.tier];

@@ -134,6 +134,58 @@ describe('rank', () => {
     expect(brief.signals[0]?.tier).toBe('act');
   });
 
+  test('an important item no signal covered still reaches the page', () => {
+    // The model-benchmark failure: mid-tier models read the vigtig-marked
+    // photo sign-up as background noise and produced nothing for it.
+    const items = [
+      item({
+        key: 'post:3',
+        title: 'Skolefoto - uge 35!',
+        text: 'Det er vigtigt at hver elev bliver oprettet.',
+        audience: 'institution',
+        important: true,
+      }),
+    ];
+    const brief = rank(input(items), []); // no model, no rule signals at all
+    expect(brief.signals).toHaveLength(1);
+    expect(brief.signals[0]?.tier).toBe('week');
+    expect(brief.signals[0]?.mustShow).toBe(true);
+    expect(brief.signals[0]?.origin).toBe('rule');
+    expect(brief.unusedSources).toHaveLength(0);
+  });
+
+  test('an important signal under-read as background is promoted to week', () => {
+    const items = [
+      item({ key: 'post:4', title: 'Skolefoto', text: 'Hver elev skal oprettes.', audience: 'institution', important: true }),
+    ];
+    const underRead: Signal = {
+      id: 'model:0',
+      kind: 'info',
+      title: 'Skolefoto er på vej',
+      child: null,
+      dueAt: null,
+      urgency: 'fyi',
+      quote: null,
+      why: null,
+      sourceKey: 'post:4',
+      origin: 'model',
+      concernsChild: false,
+    };
+    const brief = rank(input(items), [underRead]);
+    expect(brief.signals[0]?.tier).toBe('week');
+    expect(brief.signals[0]?.mustShow).toBe(true);
+    expect(brief.signals[0]?.reasons).toContain('aula-important floor → week');
+  });
+
+  test('an unimportant background item is not floored', () => {
+    const items = [
+      item({ key: 'post:5', title: 'Nyt fra køkkenet', text: 'Vi bager i næste uge.', audience: 'institution' }),
+    ];
+    const brief = rank(input(items), []);
+    expect(brief.signals).toHaveLength(0);
+    expect(brief.unusedSources).toHaveLength(1);
+  });
+
   test('a gear reminder for one child reaches the action tier', () => {
     const items = [
       item({
