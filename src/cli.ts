@@ -46,6 +46,7 @@ import {
   withFullMessages,
 } from './digest.ts';
 import { runBrief } from './brief/index.ts';
+import { readTarget } from './brief/deploy.ts';
 import { explain } from './brief/rank.ts';
 import { BRIEF_DIR } from './brief/state.ts';
 import { runDoctor } from './doctor.ts';
@@ -57,87 +58,68 @@ import type { CommonFile, Contact, ThreadDetail } from './types.ts';
 import type { Capability } from './widgets.ts';
 
 const USAGE = `
-aula — read-only client for aula.dk
+aula — your kids' school and daycare, read from Aula (aula.dk)
 
 Usage: aula <command> [options]        (or: bun src/cli.ts <command>)
 
-Aula:
-  whoami                       Guardian, children, institutions, widgets and the id sets
-  messages                     Recent message threads (newest first)
-  thread <id>                  One thread with every message in it
-  posts                        Recent posts ("opslag") from schools and daycare
+Everyday:
+  new                          Generate today's AI overview — the local page and,
+                               where configured, the hosted copy — then open it
+  open                         Open the newest overview without regenerating
+  open --web                   Open the hosted copy instead (readable anywhere)
+  login                        Log in with MitID (tokens refresh themselves)
+  logout                       Forget the stored login
+  status                       Whether you are logged in, and for how much longer
+
+Options for new:
+  --days <n>                   How much history to read (default 14)
+  --no-open                    Do not open the page (a pipe or scheduler never opens)
+  --no-llm                     Danish rules only — skip the model calls
+  --no-deploy                  Do not update the hosted copy this run
+  --explain                    Print the score breakdown behind the ranking
+  --pdf, --png                 Also write a PDF / PNG
+  --out <dir>                  Write somewhere other than ~/.aula/brief
+
+For Claude — the aula skill drives these to answer questions; humans rarely
+type them (details: README.md):
+  digest                       Everything relevant in one payload
+  whoami                       Guardian, children, institutions, widgets, id sets
+  messages / thread <id>       Message threads / one thread with every message
+  posts                        Posts ("opslag") from schools and daycare
   galleries                    Photo albums — titles and dates, not the photos
-  calendar                     Upcoming calendar events
-  presence                     Today's check-in/check-out overview
-  schedule                     The recurring komme/gå plan (drop-off and pickup times)
-  groups                       Which groups and classes each child belongs to
-  contacts                     Class contact list ("kontaktliste")
+  calendar / presence          Upcoming events / today's check-in and check-out
+  schedule                     The recurring komme/gå plan
+  groups / contacts            Group membership / class contact list
   birthdays                    Classmates' birthdays, soonest first
   notifications                Unread badges Aula is currently showing
   attachments <threadId>       List a thread's attachments
   attachment <threadId> <n>    Download attachment n of a thread
-  commonfiles                  "Fælles Filer" — the shared shelf (timetables, holiday plans)
-  commonfile <id|title>        Download one shared file
-  brief                        Generate the "Aula AI oversigt" as HTML in ~/.aula/brief
-  latest                       Open the newest generated brief (no regeneration, no login)
-  digest                       Everything relevant in one payload — the summarisation entry point
-
-Weekly plans (third-party widgets):
+  commonfiles / commonfile <x> "Fælles Filer" — the shared shelf / download one
   widgets                      Which vendor widgets these schools expose
-  ugeplan                      Weekly plan (EasyIQ / Meebook / EasyIQ SkolePortal)
-  ugebrev                      Weekly letter (MinUddannelse)
-  opgaver                      Homework list (MinUddannelse)
-  lektier                      Homework (EasyIQ Lektier)
-  huskelisten                  Homework reminders (Systematic)
-  homework                     opgaver + lektier + huskelisten in one call
+  ugeplan / ugebrev            Weekly plan / weekly letter, whichever vendor
+  opgaver / lektier / huskelisten / homework
+                               Homework, per vendor and combined
+  refresh-stepup               Restore step-up so sensitive threads read again
+  doctor                       Call every endpoint and report status + timing
+  cache status|clear           Inspect or drop the response cache
+  raw <method> [k=v ...]       Any un-wrapped Aula read method
 
-Authentication:
-  login                        Log in with MitID (tokens refresh themselves)
-  logout                       Forget the stored login
-  status                       Whether you are logged in, and for how much longer
-  refresh-stepup               Restore step-up assurance so sensitive threads read
+  Their options: --text --limit <n> --since <7d|2026-08-01> --child <name|id>
+  --days <n> --full --unread --important --week <2026-W33> --next
+  --widget <id> --group <id> --role <child|guardian> --out <path>
+  --no-cache --cache-ttl <seconds>
 
-Diagnostics:
-  doctor                       Call every endpoint and report status + timing (never cached)
-  cache status                 What is cached, and how much of it
-  cache clear                  Drop every cached response
-
-Escape hatch:
-  raw <method> [k=v ...]       Any Aula read method, e.g. raw presence.getDailyOverview childIds=42
-
-Common options:
-  --text                       Human-readable output (default is JSON)
-  --limit <n>                  Max items to return
-  --since <7d|2026-08-01>      Only items newer than this
-  --child <name|shortName|id>  Restrict to one child
-  --full                       Fetch full message bodies for each thread (slower)
-  --days <n>                   Window size for calendar/digest/schedule (default 14)
-  --week <2026-W33>            ISO week for the weekly-plan commands (default: this week)
-  --next                       Shorthand for next week
-  --widget <0004>              Force a specific widget instead of using detection
-  --group <id>                 Group id for contacts
-  --role <child|guardian>      Contact list filter (default child)
-  --out <path>                 Destination for attachment downloads
-  --no-llm                     Skip the model; use the Danish rules only
-  --explain                    Print the score breakdown behind the ranking
-  --open                       Open the finished page in the browser
-  --pdf, --png                 Also write a PDF / PNG (off by default)
-  --no-deploy                  Do not update the hosted artifact this run
-  --no-cache                   Ignore the response cache and go to Aula
-  --cache-ttl <seconds>        How long a cached response stays usable (default 600)
-  --username <name>            MitID username for login
-  --method <APP|CODE_TOKEN>    MitID method: app approval (default) or kodeviser
+Login options:
+  --username <name>            MitID username
+  --method <APP|CODE_TOKEN>    App approval (default) or kodeviser
   --debug                      Write a sanitised wire transcript during login
 
 Examples:
-  bun run login
-  bun src/cli.ts doctor --text
-  bun src/cli.ts digest --days 14
-  bun src/cli.ts messages --limit 30 --full --since 30d
-  bun src/cli.ts ugeplan --next --text
-  bun src/cli.ts birthdays --text
-  bun src/cli.ts attachment 12345678 0 --out ~/Desktop/seddel.pdf
-  bun src/cli.ts commonfile "skema" --out ~/Desktop/skema.pdf
+  aula new
+  aula open --web
+  aula digest --days 14 --text
+  aula messages --limit 30 --full --since 30d
+  aula ugeplan --next --text
 `.trim();
 
 // ---------------------------------------------------------------- entrypoint
@@ -173,11 +155,12 @@ async function main(): Promise<number> {
       from: { type: 'string' },
       to: { type: 'string' },
       out: { type: 'string' },
-      // brief
+      // new / open
       'no-llm': { type: 'boolean', default: false },
       'no-deploy': { type: 'boolean', default: false },
+      'no-open': { type: 'boolean', default: false },
+      web: { type: 'boolean', default: false },
       explain: { type: 'boolean', default: false },
-      open: { type: 'boolean', default: false },
       pdf: { type: 'boolean', default: false },
       png: { type: 'boolean', default: false },
       // caching
@@ -208,7 +191,7 @@ async function main(): Promise<number> {
   }
 
   if (command === 'cache') return runCache(positionals, asText, ttlMs);
-  if (command === 'latest') return runLatest();
+  if (command === 'open') return runOpen(values.web === true);
   if (command === 'login') {
     return runLogin({
       ...(values.username ? { username: values.username } : {}),
@@ -513,7 +496,7 @@ async function main(): Promise<number> {
       return emit(digest, asText, renderDigest);
     }
 
-    case 'brief': {
+    case 'new': {
       const run = await runBrief(client, {
         days,
         isoWeek: week,
@@ -527,8 +510,10 @@ async function main(): Promise<number> {
       if (values.explain) {
         console.error(explain(run.brief));
       }
-      if (values.open && run.published.htmlPath) {
-        Bun.spawn(['open', run.published.htmlPath]);
+      // Opens in a terminal, stays quiet everywhere else: the launchd agent
+      // runs this exact command through a pipe and must not pop a browser.
+      if (process.stdout.isTTY && values['no-open'] !== true && run.published.htmlPath) {
+        openInBrowser(run.published.htmlPath);
       }
       return emit(
         {
@@ -598,25 +583,45 @@ function runCache(positionals: string[], asText: boolean, ttlMs: number): number
 }
 
 /**
- * Opens the newest generated brief without regenerating anything. The
- * scheduled run refreshes `latest.html` each weekday morning, so this is the
- * "just show me today's page" command — and it needs no credentials, so it
- * works even when the login has expired.
+ * `open` / `open --web` — show the overview that already exists.
+ *
+ * The scheduled run refreshes `latest.html` (and, where configured, the hosted
+ * copy) each weekday morning, so this is the "just show me today's page"
+ * command. It needs no credentials, so it works even when the login has
+ * expired.
  */
-function runLatest(): number {
+function runOpen(web: boolean): number {
+  if (web) {
+    const url = readTarget();
+    if (!url) {
+      console.error(
+        'No hosted copy is configured — see SETUP.md ("publish the brief to a URL"). ' +
+          '`aula open` shows the local page.',
+      );
+      return 1;
+    }
+    openInBrowser(url);
+    console.log(url);
+    return 0;
+  }
+
   const path = join(BRIEF_DIR, 'latest.html');
   if (!existsSync(path)) {
-    console.error(`No brief found at ${path} — run \`brief\` to generate one.`);
+    console.error(`No overview found at ${path} — run \`aula new\` to generate one.`);
     return 1;
   }
   const day = localIsoDate(new Date(statSync(path).mtimeMs));
   const today = localIsoDate(new Date());
   if (day !== today) {
-    console.error(`The latest brief is from ${day} — run \`brief\` to generate today's.`);
+    console.error(`The newest overview is from ${day} — \`aula new\` generates today's.`);
   }
-  Bun.spawn([process.platform === 'darwin' ? 'open' : 'xdg-open', path]);
+  openInBrowser(path);
   console.log(path);
   return 0;
+}
+
+function openInBrowser(target: string): void {
+  Bun.spawn([process.platform === 'darwin' ? 'open' : 'xdg-open', target]);
 }
 
 function renderCacheStats(stats: CacheStats): string {

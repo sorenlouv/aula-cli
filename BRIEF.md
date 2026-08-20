@@ -1,6 +1,6 @@
-# `aula brief` — a daily overview that replaces checking Aula
+# `aula new` — a daily overview that replaces checking Aula
 
-> **Status: built and running.** `bun src/cli.ts brief` produces an HTML page in
+> **Status: built and running.** `bun src/cli.ts new` produces an HTML page in
 > `~/.aula/brief/`, and a launchd agent runs it weekdays at 06:30
 > (`scripts/install-brief-schedule.sh`). What follows is the design and the
 > reasoning behind it; the phase table at the end records what each stage cost.
@@ -160,7 +160,7 @@ These are the whole point, and each becomes a test:
 ## Architecture
 
 ```
-aula brief [--days 14] [--open] [--pdf] [--no-llm] [--explain] [--out <path>]
+aula new [--days 14] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 
   collect   →  BriefInput    reuse buildDigest + galleries + notifications
   extract   →  Signal[]      deterministic rules ∪ model call #1, validated
@@ -183,7 +183,7 @@ aula brief [--days 14] [--open] [--pdf] [--no-llm] [--explain] [--out <path>]
 | `src/brief/publish.ts` | PDF/PNG rendering, file layout, `--open` |
 | `src/brief/state.ts` | `~/.aula/brief/state.json` — seen ids, last run, last layout |
 
-Wired into `src/cli.ts` as `case 'brief'`, following the existing
+Wired into `src/cli.ts` as `case 'new'`, following the existing
 `emit(value, asText, render)` convention so `--out` and `--no-cache` behave as
 they do everywhere else.
 

@@ -83,7 +83,8 @@ bun src/cli.ts refresh-stepup
 
 | Command | Purpose |
 | --- | --- |
-| `brief [--open] [--explain] [--no-llm] [--pdf] [--png] [--no-deploy]` | The "Aula AI oversigt" — a generated HTML page in `~/.aula/brief`. See [BRIEF.md](BRIEF.md) |
+| `new [--explain] [--no-llm] [--pdf] [--png] [--no-deploy] [--no-open]` | Generate the "Aula AI oversigt" — local HTML in `~/.aula/brief` plus, where configured, the hosted copy — and open it. See [BRIEF.md](BRIEF.md) |
+| `open [--web]` | Open the newest overview without regenerating: the local page, or with `--web` the hosted copy |
 | `digest [--days 14]` | Threads, posts, calendar, presence, weekly plans and an `attention` block in one payload |
 | `whoami` | Guardian, children, institutions, widgets, and the resolved id sets |
 | `messages [--full] [--unread]` | Message threads, newest first |
@@ -357,7 +358,7 @@ The data is personal and concerns children. Both credentials grant full read
 access to the account, and the MitID **refresh token is long-lived**.
 
 **What leaves your machine.** Aula data is stored and processed locally. There
-is no telemetry. `aula brief` is the one command that transmits anything, and it
+is no telemetry. `aula new` is the one command that transmits anything, and it
 can do so in two ways:
 
 - **Model calls, always.** It sends a trimmed excerpt of recent Aula content to

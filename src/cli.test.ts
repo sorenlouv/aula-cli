@@ -235,10 +235,16 @@ test('an expired widget token is still recoverable with the cache on', () => {
   );
 });
 
-test('latest without a generated brief fails with a pointer, not a blank page', () => {
-  const result = sandbox().run('latest');
+test('open without a generated overview fails with a pointer, not a blank page', () => {
+  const result = sandbox().run('open');
   assert.notEqual(result.code, 0);
-  assert.match(result.stderr, /brief/);
+  assert.match(result.stderr, /aula new/);
+});
+
+test('open --web without a configured hosted copy says how to get one', () => {
+  const result = sandbox().run('open', '--web');
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /SETUP\.md/);
 });
 
 test('a failed read is not cached', () => {

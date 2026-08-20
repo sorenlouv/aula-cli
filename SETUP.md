@@ -51,7 +51,7 @@ mkdir -p ~/.local/bin && printf '#!/bin/sh\nexec bun "%s/src/cli.ts" "$@"\n' "$(
 ```
 
 Requires `~/.local/bin` on your PATH. `aula --help` lists the commands;
-`aula latest` opens the newest generated brief without regenerating it.
+`aula open` shows the newest overview, `aula new` generates a fresh one.
 
 ## 3. Log in with MitID
 
@@ -104,13 +104,13 @@ New Claude sessions will now answer "what did I miss in Aula?" directly.
 
 ## 6. Optional: the daily brief
 
-`aula brief` generates the "Aula AI oversigt" — a self-contained HTML page
-summarising what needs action, what is coming, and what merely happened. Try
-it once (it takes a couple of minutes; it calls `claude` for the extraction
-and layout):
+`aula new` generates the "Aula AI oversigt" — a self-contained HTML page
+summarising what needs action, what is coming, and what merely happened — and
+opens it. Try it once (it takes a couple of minutes; it calls `claude` for the
+extraction and layout):
 
 ```bash
-bun src/cli.ts brief --open
+bun src/cli.ts new
 ```
 
 If you want it every weekday morning (06:30 by default) on macOS:
@@ -124,7 +124,7 @@ time; the script prints how to run it now and how to uninstall. On Linux, a
 cron line does the same job:
 
 ```cron
-30 6 * * 1-5 cd /path/to/aula-cli && bun src/cli.ts brief --text
+30 6 * * 1-5 cd /path/to/aula-cli && bun src/cli.ts new --text
 ```
 
 The agent bakes in the directories holding `bun`, `claude` and `node`, because
