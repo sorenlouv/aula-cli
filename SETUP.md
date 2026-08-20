@@ -49,12 +49,6 @@ From the repository root:
 bun install
 ```
 
-Optional sanity check — the test suite needs no credentials and no network:
-
-```bash
-bun run test
-```
-
 ### Optional: put `aula` on your PATH
 
 This guide spells out `bun src/cli.ts …`; a one-line wrapper makes that just
