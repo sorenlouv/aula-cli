@@ -241,6 +241,12 @@ test('open without a generated overview fails with a pointer, not a blank page',
   assert.match(result.stderr, /aula new/);
 });
 
+test('schedule refuses a malformed --at before touching the system', () => {
+  const result = sandbox().run('schedule', '--at', 'kl-syv');
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /--at wants/);
+});
+
 test('open --web without a configured hosted copy says how to get one', () => {
   const result = sandbox().run('open', '--web');
   assert.notEqual(result.code, 0);

@@ -57,7 +57,7 @@ ranking what actually matters to this family is your job.
 | `galleries --since 30d` | Photo albums: title, date, photographer, group |
 | `calendar --days 30` | Upcoming events, incl. ones awaiting a response |
 | `presence` | Today's check-in/check-out per child |
-| `schedule` | The recurring komme/gå plan (drop-off and pickup times) |
+| `pickup-times` | The recurring komme/gå plan (drop-off and pickup times) |
 | `groups` | Which groups and classes each child belongs to |
 | `contacts [--group id]` | Class contact list ("kontaktliste") |
 | `birthdays` | Classmates' birthdays, soonest first |
@@ -144,8 +144,9 @@ page in `~/.aula/brief/` — and opens it (`--no-open` to skip). It calls
 `claude` itself for extraction and layout; `--no-llm` produces a rules-only
 page. `bun src/cli.ts open` shows the newest page without regenerating, and
 `open --web` opens the hosted copy where one is configured. A weekday-morning
-schedule can be installed with `scripts/install-brief-schedule.sh` (macOS
-launchd; see BRIEF.md). Offer it — don't install it unasked.
+schedule is installed with `bun src/cli.ts schedule` (06:30 by default,
+`--at HH:MM` to change, `--remove` to stop; launchd on macOS, Task Scheduler
+on Windows). Offer it — don't install it unasked.
 
 ## Session handling
 

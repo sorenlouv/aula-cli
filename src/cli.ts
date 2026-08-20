@@ -53,6 +53,7 @@ import { runDoctor } from './doctor.ts';
 import { AulaSessionError, UsageError } from './errors.ts';
 import { resolveFamily, selectChildren, type Family } from './family.ts';
 import { runLogin, runLogout, runRefreshStepUp, runStatus } from './login.ts';
+import { runSchedule } from './schedule.ts';
 import { isoDate, localIsoDate, SUPPORTED_WIDGET_IDS, type WeekPlan } from './integrations/index.ts';
 import type { CommonFile, Contact, ThreadDetail } from './types.ts';
 import type { Capability } from './widgets.ts';
@@ -67,6 +68,8 @@ Everyday:
                                where configured, the hosted copy — then open it
   open                         Open the newest overview without regenerating
   open --web                   Open the hosted copy instead (readable anywhere)
+  schedule [--at HH:MM]        Generate the overview automatically every weekday
+  schedule --remove            Stop generating it automatically
   login                        Log in with MitID (tokens refresh themselves)
   logout                       Forget the stored login
   status                       Whether you are logged in, and for how much longer
@@ -88,7 +91,7 @@ type them (details: README.md):
   posts                        Posts ("opslag") from schools and daycare
   galleries                    Photo albums — titles and dates, not the photos
   calendar / presence          Upcoming events / today's check-in and check-out
-  schedule                     The recurring komme/gå plan
+  pickup-times                 The recurring komme/gå plan
   groups / contacts            Group membership / class contact list
   birthdays                    Classmates' birthdays, soonest first
   notifications                Unread badges Aula is currently showing
@@ -155,11 +158,13 @@ async function main(): Promise<number> {
       from: { type: 'string' },
       to: { type: 'string' },
       out: { type: 'string' },
-      // new / open
+      // new / open / schedule
       'no-llm': { type: 'boolean', default: false },
       'no-deploy': { type: 'boolean', default: false },
       'no-open': { type: 'boolean', default: false },
       web: { type: 'boolean', default: false },
+      remove: { type: 'boolean', default: false },
+      at: { type: 'string' },
       explain: { type: 'boolean', default: false },
       pdf: { type: 'boolean', default: false },
       png: { type: 'boolean', default: false },
@@ -192,6 +197,9 @@ async function main(): Promise<number> {
 
   if (command === 'cache') return runCache(positionals, asText, ttlMs);
   if (command === 'open') return runOpen(values.web === true);
+  if (command === 'schedule') {
+    return runSchedule({ remove: values.remove === true, ...(values.at ? { at: values.at } : {}) });
+  }
   if (command === 'login') {
     return runLogin({
       ...(values.username ? { username: values.username } : {}),
@@ -304,7 +312,7 @@ async function main(): Promise<number> {
       );
     }
 
-    case 'schedule': {
+    case 'pickup-times': {
       const family = await resolveFamily(client);
       const children = selectChildren(family, values.child);
       const from = values.from ?? isoDate(startOfDay(new Date()));
@@ -554,7 +562,7 @@ const CHILD_AWARE = new Set([
   'galleries',
   'calendar',
   'presence',
-  'schedule',
+  'pickup-times',
   'groups',
   'contacts',
   'birthdays',
