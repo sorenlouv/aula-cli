@@ -99,7 +99,8 @@ re-deriving at a call site — that is the whole reason it exists.
 A fourth identity: the **MitID username** (`mikkelex`) is not the Aula guardian id
 (`mikk42a1`). Meebook and Systematic key their session on the MitID one and
 reject the Aula one. It appears nowhere in the API — it is what the human types
-into MitID — so it comes from the login or from config.
+into MitID — so `login` records it on the stored token record, which is the one
+place it exists.
 
 ## Fælles Filer (`commonFiles.getCommonFiles`)
 
@@ -172,7 +173,7 @@ and the prior-art projects cover fewer. When something is missing, do not guess
 method names — read them out of Aula's own bundle:
 
 ```bash
-curl -s https://www.aula.dk/portal/ -H "Cookie: $AULA_COOKIE" -o portal.html
+curl -s https://www.aula.dk/portal/ -H "Cookie: <a logged-in aula.dk browser cookie>" -o portal.html
 grep -oE 'src="/static/js/[^"]*"' portal.html | sed 's/src="//;s/"//' \
   | while read -r p; do curl -s "https://www.aula.dk$p" -O; done
 grep -ohoE '\?method=[a-zA-Z]+\.[a-zA-Z]+' ./*.js | sed 's/?method=//' | sort -u
@@ -239,13 +240,3 @@ succeeded but returned a known symptom as `WARN` rather than `PASS` — an empty
 posts feed, a session that is not stepped up, a child with no `userId`. Read the
 warnings; they are the failures this file exists to describe. It never uses the
 cache.
-
-For auth work specifically:
-
-```bash
-./scripts/verify-token-auth.sh
-```
-
-It hides the cookie fallback (restoring it on any exit) so tokens are genuinely
-the only credential. Without that, the cookie authenticates on its own and the
-run proves nothing.

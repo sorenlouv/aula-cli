@@ -2,7 +2,6 @@ import type { AulaClient } from './client.ts';
 import { UsageError } from './errors.ts';
 import type { IntegrationContext } from './integrations/types.ts';
 import { isoWeekString } from './integrations/types.ts';
-import { loadMitidUsername } from './session.ts';
 import type { Child, Profile, ProfileContext } from './types.ts';
 import { type DetectedWidget, detectWidgets } from './widgets.ts';
 
@@ -113,9 +112,9 @@ export function buildFamily(
     institutionCodes,
     widgets: detectWidgets(context),
     isSteppedUp: Boolean(context.isSteppedUp),
-    // A live login knows the username; the stored one is only a fallback for
-    // cookie auth, where nothing on the wire reveals it.
-    mitidUsername: mitidUsername ?? loadMitidUsername(),
+    // Recorded by the MitID login on the stored token record — the one place
+    // it exists, since no Aula endpoint ever reveals it.
+    mitidUsername,
   };
 }
 

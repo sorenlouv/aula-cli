@@ -135,7 +135,7 @@ test('a missing MitID username is warned about rather than failing silently', as
     () => [],
     async (_calls, tokens) => {
       const plan = await meebook.getWeekPlan({ ...CTX, sessionIdIsFallback: true }, tokens);
-      assert.match(plan.warnings?.join('\n') ?? '', /AULA_MITID_USERNAME/);
+      assert.match(plan.warnings?.join('\n') ?? '', /MitID username/);
     },
   );
 });

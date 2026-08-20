@@ -65,8 +65,8 @@ export async function getWeekPlan(
 
   if (ctx.sessionIdIsFallback) {
     warnings.push(
-      'No MitID username configured (AULA_MITID_USERNAME); Meebook may reject the ' +
-        'session id. See README "Widgets and weekly plans".',
+      'No MitID username on the stored login; Meebook may reject the fallback ' +
+        'session id. Log in again with `bun run login`.',
     );
   }
 

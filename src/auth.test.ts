@@ -40,13 +40,9 @@ function sandbox(overrides: Record<string, string> = {}) {
   sandboxes.push(dir);
   const env: Record<string, string> = {
     AULA_DIR: dir,
-    AULA_SESSION_FILE: join(dir, 'session.json'),
     NO_COLOR: '1',
     ...overrides,
   };
-  // `$AULA_COOKIE` outranks stored tokens by design, so it has to be cleared
-  // for these to be testing the token path at all.
-  delete env.AULA_COOKIE;
 
   const writer = join(dir, 'write-tokens.ts');
   writeFileSync(

@@ -22,7 +22,6 @@ import { clearCache } from './cache.ts';
 import { UsageError } from './errors.ts';
 import { fail, fmt, info, ok, prompt, promptSecret, selectFromList, warn } from './io.ts';
 import { createQrRenderer } from './qr.ts';
-import { SESSION_PATH, saveMitidUsername } from './session.ts';
 import {
   AulaHttpClient,
   AulaLoginClient,
@@ -139,17 +138,6 @@ export async function runLogin(args: LoginArgs): Promise<number> {
       warn('Calendar reads may fail; everything else will work.');
     }
 
-    // Meebook and Systematic key their session on the MitID username, which we
-    // now know for certain rather than by hand-configuration.
-    try {
-      saveMitidUsername(username);
-      info(`MitID username recorded — Meebook and Huskelisten will use it.`);
-    } catch {
-      // Only possible when there is no session.json to attach it to, which is
-      // fine: `loadMitidUsername` also reads $AULA_MITID_USERNAME.
-      info(`Set ${fmt.dim('$AULA_MITID_USERNAME=' + username)} for Meebook and Huskelisten.`);
-    }
-
     const secondsLeft = Math.max(0, tokens.expires_at - Math.floor(Date.now() / 1000));
     info(`Access token valid for ${Math.round(secondsLeft / 60)} min; it refreshes itself after that.`);
     return 0;
@@ -190,8 +178,6 @@ export async function runLogout(): Promise<number> {
   // The cache holds message bodies about the children; logging out and leaving
   // them readable on disk would make `logout` a lie.
   if (clearCache()) ok('Cleared the cached responses.');
-  info(`The browser-cookie fallback in ${fmt.dim(SESSION_PATH)} was left alone.`);
-  info(`Remove it with: ${fmt.dim(`rm ${SESSION_PATH}`)}`);
   return 0;
 }
 
@@ -207,7 +193,6 @@ export async function runStatus(asText: boolean): Promise<number> {
     identityName: record?.identityName ?? null,
     accessTokenExpiresInSeconds: record ? Math.max(0, record.tokens.expires_at - now) : null,
     cookieJar: existsSync(COOKIE_JAR_PATH) ? COOKIE_JAR_PATH : null,
-    cookieFallback: existsSync(SESSION_PATH) ? SESSION_PATH : null,
   };
 
   if (!asText) {
@@ -225,7 +210,6 @@ export async function runStatus(asText: boolean): Promise<number> {
   }
   info(`  Token store:     ${status.tokenStore}${status.tokenKeyFromEnv ? ` (key from $${KEY_ENV})` : ''}`);
   info(`  Cookie jar:      ${status.cookieJar ?? 'none'}`);
-  info(`  Cookie fallback: ${status.cookieFallback ?? 'none'}`);
   return 0;
 }
 

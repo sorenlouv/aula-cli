@@ -78,7 +78,6 @@ bun src/cli.ts refresh-stepup
 | `logout` | Forget the stored login |
 | `status` | Whether you are logged in, and for how much longer |
 | `refresh-stepup` | Restore step-up assurance so sensitive threads read |
-| `session set <cookie>` | Fallback: store a browser session cookie by hand |
 
 ### Aula itself
 
@@ -310,7 +309,7 @@ keep their real `.ts` extension.
 | `attachments.ts` | Presigned-URL downloads |
 | `cli.ts` | Commands, normalisation, rendering |
 | `cli-helpers.ts` | Pure helpers, importable without running `main()` |
-| `auth.ts` | Credential resolution: tokens, cookies, precedence |
+| `auth.ts` | MitID credential resolution — the token store and the login's cookie jar |
 | `cache.ts` | The on-disk response cache and its lifecycle |
 | `doctor.ts` | The endpoint walk |
 | `login.ts` | `login` / `logout` / `status` / `refresh-stepup` |
