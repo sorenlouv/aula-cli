@@ -63,25 +63,39 @@ Two smaller findings that shape the design:
 
 ## Dynamic or static — the answer
 
-**The model designs the page.** A week with one dominant thing should not look
-like a week with twelve small ones, and a fixed renderer can only vary along
-axes chosen in advance. Tailoring the layout to the content is the point.
+**The model plans the page; a local renderer builds it.** A week with one
+dominant thing should not read like a week with twelve small ones, and the
+judgment about which is which belongs to the model. The markup does not:
+having the model type out ~27 KB of HTML a token at a time was half the
+runtime of `aula new`, and none of those tokens bought judgment.
 
 The seam is not *renderer vs model*. It is **two model calls, and only the first
 one may touch the source data**:
 
 1. **Extract** reads the Aula payload and emits validated `Signal[]` — facts,
-   with quotes checked against the source text.
-2. **Compose** receives *only those validated signals* and writes the page.
+   with quotes checked against the source text, and dates given the same
+   treatment: every weekday, calendar date or week number in a title, why or
+   topline — and every `dueAt` — must be grounded in the sources
+   (`src/brief/dates.ts`). The judge benchmarks showed invented small dates
+   ("senest søndag", a deadline no source states) are the one failure mode
+   every strong model exhibits occasionally; grounding turns them into a
+   dropped signal and a retry instead of a published page.
+2. **Compose** receives *only those validated signals* and returns a small JSON
+   plan: what leads, what waits, what is worth rewording, and in which words.
+   The renderer in `compose.ts` turns the plan into HTML from tested
+   components.
 
 Because compose never sees the raw payload, it cannot invent a deadline or
-misquote a teacher: it can only arrange facts that already survived validation.
-Layout freedom therefore costs nothing in trustworthiness — which is what makes
-it safe to hand over.
+misquote a teacher. And because the renderer inserts quotes, dates, sources,
+links and "Ny" chips directly from the validated signals, a plan cannot lose
+them either: an omission deprioritises a card to the bottom of its section,
+never off the page, and hidden-tier noise is refused at the plan boundary. The
+model keeps exactly the freedom that was worth model time — priority, section
+membership, wording.
 
-What used to be guaranteed by a fixed renderer is now **machine-checked after
-generation** instead. That is the real change, and it is the part that must not
-be skipped:
+What the renderer guarantees by construction is still **machine-checked after
+rendering**, because the fallback path and any future renderer must pass the
+same gate:
 
 | Invariant | Check |
 | --- | --- |
@@ -93,22 +107,19 @@ be skipped:
 | Legible | colours come from the token set; contrast ratios pass |
 | Print-safe | `<details>` are forced open in print, so nothing hides in the PDF |
 
-A failed check is fed back for one retry; a second failure ships the previous
-day's layout with today's content, and says so in the footer.
+A failed check is fed back for one retry; a second failure renders the same
+components in the ranker's own order — the fallback layout — and the page says
+so.
 
 ### Freedom within a design system
 
-Compose is given `brief.css` — the tokens and tested components (cards, chips,
-week strip, child cards, quote blocks) — and may add a `<style>` block for
-one-off arrangement. It may **not** redefine colours, fonts or spacing. So it
-can invent a timeline, a comparison grid across the three kids, or a single hero
-card when one thing dominates, without being able to produce grey-on-white.
-
-One constraint worth keeping: **the topline and the must-act region stay in the
-same place at the top.** Everything below is free. This is a glanceable artifact
-read in twenty seconds over breakfast, and knowing where the urgent thing lives
-is worth more than the variety gained by moving it. It is one line to remove if
-it proves too rigid.
+The renderer builds from `brief.css` — the tokens and tested components
+(cards, chips, child cards, quote blocks) — so the page cannot come out
+grey-on-white, and **the topline and the must-act region stay in the same
+place at the top**. This is a glanceable artifact read in twenty seconds over
+breakfast, and knowing where the urgent thing lives is worth more than the
+variety gained by moving it. The model's plan decides everything inside that
+frame: order, section, emphasis and phrasing.
 
 ## The page
 
@@ -165,10 +176,16 @@ aula new [--days 14] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
   collect   →  BriefInput    reuse buildDigest + galleries + notifications
   extract   →  Signal[]      deterministic rules ∪ model call #1, validated
   rank      →  RankedBrief   score → tiers → caps → must_show flags
-  compose   →  HTML          model call #2, given signals + brief.css
+  compose   →  JSON plan     model call #2, rendered locally from tested parts
   validate  →  HTML          invariant checks, one retry, fallback layout
   publish   →  files         HTML + PDF (+ PNG), open, update state
 ```
+
+The model calls run on the `claude` CLI's default model unless overridden:
+`AULA_BRIEF_MODEL` (a model id or alias) and `AULA_BRIEF_EFFORT`
+(`low`/`medium`/`high`) apply to extract, compose and the artifact deploy
+alike. The default is deliberately the strong model — extract is where "what
+needs attention" gets decided, and that judgment is the product.
 
 | File | Responsibility |
 | --- | --- |
@@ -176,8 +193,9 @@ aula new [--days 14] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 | `src/brief/signals.ts` | The `Signal` type and its validators |
 | `src/brief/rules.ts` | Danish date/obligation extractors |
 | `src/brief/llm.ts` | `claude -p` transport, retry, content-hash cache |
+| `src/brief/dates.ts` | Date grounding — model-authored dates checked against the sources |
 | `src/brief/rank.ts` | Scoring, tiering, caps, `must_show` |
-| `src/brief/compose.ts` | Prompt and design brief for the page-writing call |
+| `src/brief/compose.ts` | The arrangement prompt, the plan parser, and the page renderer |
 | `src/brief/validate.ts` | The invariant table above, run against the generated HTML |
 | `src/brief/brief.css` | Tokens and components — the constraint compose designs within |
 | `src/brief/publish.ts` | PDF/PNG rendering, file layout, `--open` |

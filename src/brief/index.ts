@@ -91,6 +91,9 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const composed = await composePage(brief, { topline, summaries, isNew });
+        for (const problem of composed.problems) {
+          notes.push(`Layoutplan: ${problem}`);
+        }
         const found = validatePage(composed.html, brief);
         if (found.length === 0) {
           body = composed.html;

@@ -61,8 +61,28 @@ export function agentPath(tools: { bun: string; claude?: string; node?: string }
   return [...new Set(dirs)].join(':');
 }
 
+const xmlEscape = (value: string) =>
+  value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/**
+ * The brief knobs travel into the agent the same way PATH does: launchd
+ * starts with a bare environment, so an `export AULA_BRIEF_EFFORT=high` in a
+ * shell profile would silently never reach the 06:30 run. Anything set when
+ * `aula schedule` runs is baked in; re-run `aula schedule` to change it.
+ * `AULA_TOKEN_KEY` is deliberately NOT baked — the plist is plaintext, and
+ * writing the key there would undo the point of keeping it out of the
+ * filesystem.
+ */
+export const BAKED_ENV = ['AULA_BRIEF_MODEL', 'AULA_BRIEF_EFFORT', 'AULA_CACHE_TTL'];
+
 /** The launchd agent, weekdays only. Exported for tests. */
-export function buildPlist(opts: { at: At; bun: string; path: string; logPath: string }): string {
+export function buildPlist(opts: {
+  at: At;
+  bun: string;
+  path: string;
+  logPath: string;
+  env?: Record<string, string>;
+}): string {
   const day = (weekday: number) =>
     `    <dict><key>Weekday</key><integer>${weekday}</integer>` +
     `<key>Hour</key><integer>${opts.at.hour}</integer>` +
@@ -84,6 +104,9 @@ export function buildPlist(opts: { at: At; bun: string; path: string; logPath: s
   <dict>
     <key>PATH</key><string>${opts.path}</string>
     <key>HOME</key><string>${homedir()}</string>
+${Object.entries(opts.env ?? {})
+  .map(([k, v]) => `    <key>${xmlEscape(k)}</key><string>${xmlEscape(v)}</string>`)
+  .join('\n')}
   </dict>
   <key>StartCalendarInterval</key>
   <array>
@@ -146,6 +169,9 @@ function installDarwin(at: At): number {
   }
   const plist = plistPath();
   const logPath = join(BRIEF_DIR, 'launchd.log');
+  const env = Object.fromEntries(
+    BAKED_ENV.flatMap((name) => (process.env[name] ? [[name, process.env[name] as string]] : [])),
+  );
   mkdirSync(dirname(plist), { recursive: true });
   mkdirSync(BRIEF_DIR, { recursive: true });
   writeFileSync(
@@ -159,6 +185,7 @@ function installDarwin(at: At): number {
         ...(Bun.which('claude') ? { claude: Bun.which('claude') as string } : {}),
         ...(Bun.which('node') ? { node: Bun.which('node') as string } : {}),
       }),
+      env,
     }),
   );
 
@@ -170,6 +197,9 @@ function installDarwin(at: At): number {
     return 1;
   }
   console.log(`Installed — every weekday at ${pad(at.hour)}:${pad(at.minute)}.`);
+  if (Object.keys(env).length > 0) {
+    console.log(`  baked:   ${Object.entries(env).map(([k, v]) => `${k}=${v}`).join(' ')}`);
+  }
   console.log(`  agent:   ${plist}`);
   console.log(`  log:     ${logPath}`);
   console.log(`  run now: launchctl kickstart -k gui/${uid}/${LABEL}`);

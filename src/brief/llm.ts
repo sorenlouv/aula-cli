@@ -16,6 +16,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { buildDateSupport, dueAtSupported, unsupportedDateClaims } from './dates.ts';
 import { BRIEF_DIR } from './state.ts';
 import type { BriefInput, Signal, SignalKind, Urgency } from './types.ts';
 
@@ -54,13 +55,24 @@ export class LlmUnavailableError extends Error {}
 export async function runClaude(
   instructions: string,
   stdin: string,
-  opts: { timeoutMs?: number } = {},
+  opts: { timeoutMs?: number; model?: string; effort?: string } = {},
 ): Promise<string> {
-  const proc = Bun.spawn(['claude', '-p', instructions, '--tools', '', '--strict-mcp-config'], {
-    stdin: new TextEncoder().encode(stdin),
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
+  // Which model (and how hard it thinks) is the quality/speed dial for the
+  // whole brief. Per-call opts win; the env vars are the user's standing choice.
+  const model = opts.model ?? process.env.AULA_BRIEF_MODEL;
+  const effort = opts.effort ?? process.env.AULA_BRIEF_EFFORT;
+  const proc = Bun.spawn(
+    [
+      'claude', '-p', instructions, '--tools', '', '--strict-mcp-config',
+      ...(model ? ['--model', model] : []),
+      ...(effort ? ['--effort', effort] : []),
+    ],
+    {
+      stdin: new TextEncoder().encode(stdin),
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
+  );
 
   const timeout = setTimeout(() => proc.kill(), opts.timeoutMs ?? 240_000);
   try {
@@ -118,6 +130,7 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
   const signals: Signal[] = [];
   const byKey = new Map(input.items.map((item) => [item.key, item]));
   const firstNames = new Set(input.family.children.map((c) => c.firstName));
+  const dates = buildDateSupport(input);
 
   const root = (parsed ?? {}) as Record<string, unknown>;
   const rawSignals = Array.isArray(root.signals) ? root.signals : [];
@@ -155,7 +168,22 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
         problems.push(`signals[${index}] ("${title}"): dueAt "${row.dueAt}" er ikke en dato`);
         continue;
       }
+      if (!dueAtSupported(row.dueAt, sourceKey, dates)) {
+        problems.push(
+          `signals[${index}] ("${title}"): dueAt ${row.dueAt} har ingen støtte i kilderne`,
+        );
+        continue;
+      }
       dueAt = row.dueAt;
+    }
+
+    const why = typeof row.why === 'string' && row.why.trim() ? row.why.trim() : null;
+    const inventedDates = unsupportedDateClaims(`${title} ${why ?? ''}`, dates, { dueAt, sourceKey });
+    if (inventedDates.length > 0) {
+      problems.push(
+        `signals[${index}] ("${title}"): dato uden kilde: ${inventedDates.map((d) => `"${d}"`).join(', ')}`,
+      );
+      continue;
     }
 
     const child = typeof row.child === 'string' && firstNames.has(row.child) ? row.child : null;
@@ -168,7 +196,7 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
       dueAt,
       urgency,
       quote: quote || null,
-      why: typeof row.why === 'string' && row.why.trim() ? row.why.trim() : null,
+      why,
       sourceKey,
       origin: 'model',
       concernsChild: row.concernsChild === true,
@@ -179,12 +207,26 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
   const rawSummaries = (root.childSummaries ?? {}) as Record<string, unknown>;
   for (const [name, value] of Object.entries(rawSummaries)) {
     if (firstNames.has(name) && typeof value === 'string' && value.trim()) {
+      const invented = unsupportedDateClaims(value, dates);
+      if (invented.length > 0) {
+        problems.push(`childSummaries.${name}: dato uden kilde: ${invented.map((d) => `"${d}"`).join(', ')}`);
+        continue;
+      }
       summaries[name] = value.trim();
     }
   }
 
+  let topline = typeof root.topline === 'string' && root.topline.trim() ? root.topline.trim() : null;
+  if (topline) {
+    const invented = unsupportedDateClaims(topline, dates);
+    if (invented.length > 0) {
+      problems.push(`topline: dato uden kilde: ${invented.map((d) => `"${d}"`).join(', ')}`);
+      topline = null;
+    }
+  }
+
   return {
-    topline: typeof root.topline === 'string' && root.topline.trim() ? root.topline.trim() : null,
+    topline,
     signals,
     childSummaries: summaries,
     problems,
@@ -265,7 +307,7 @@ function cacheKey(payload: unknown): string {
  */
 export async function extractSignals(
   input: BriefInput,
-  opts: { useCache?: boolean; timeoutMs?: number } = {},
+  opts: { useCache?: boolean; timeoutMs?: number; model?: string; effort?: string } = {},
 ): Promise<ExtractResult> {
   const payload = extractionPayload(input);
   const key = cacheKey(payload);
@@ -289,7 +331,11 @@ export async function extractSignals(
   // so letting it through still produces a brief — it just produces an honest
   // one. Nothing is written to the cache on this path either; a 06:30 outage
   // must not pin a degraded brief for the rest of the day.
-  const answer = await runClaude(INSTRUCTIONS, body, { timeoutMs: opts.timeoutMs ?? 240_000 });
+  const answer = await runClaude(INSTRUCTIONS, body, {
+    timeoutMs: opts.timeoutMs ?? 240_000,
+    ...(opts.model ? { model: opts.model } : {}),
+    ...(opts.effort ? { effort: opts.effort } : {}),
+  });
 
   let parsed: unknown;
   try {
@@ -312,7 +358,11 @@ export async function extractSignals(
 Dit forrige svar havde disse fejl. Ret dem og svar igen med det fulde JSON:
 ${result.problems.map((p) => `- ${p}`).join('\n')}`;
     try {
-      const second = await runClaude(retry, body, { timeoutMs: opts.timeoutMs ?? 240_000 });
+      const second = await runClaude(retry, body, {
+        timeoutMs: opts.timeoutMs ?? 240_000,
+        ...(opts.model ? { model: opts.model } : {}),
+        ...(opts.effort ? { effort: opts.effort } : {}),
+      });
       const reparsed = validateExtraction(input, parseJsonLoosely(second));
       // Keep the retry only if it is genuinely better.
       if (reparsed.problems.length < result.problems.length) {
@@ -324,11 +374,16 @@ ${result.problems.map((p) => `- ${p}`).join('\n')}`;
     }
   }
 
-  try {
-    mkdirSync(CACHE_DIR, { recursive: true });
-    writeFileSync(cachePath, JSON.stringify(parsed, null, 2));
-  } catch {
-    // A brief that cannot cache is still a brief.
+  // A run told to ignore the cache must not author it either — otherwise a
+  // `--no-cache` run (or a model comparison) pins its answer for whoever runs
+  // next inside the content window.
+  if (opts.useCache !== false) {
+    try {
+      mkdirSync(CACHE_DIR, { recursive: true });
+      writeFileSync(cachePath, JSON.stringify(parsed, null, 2));
+    } catch {
+      // A brief that cannot cache is still a brief.
+    }
   }
   return result;
 }
