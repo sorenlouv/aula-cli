@@ -20,7 +20,7 @@
     "aula": "bun src/cli.ts",
     "login": "bun src/cli.ts login",
     "logout": "bun src/cli.ts logout",
-    "status": "bun src/cli.ts status",
+    "status": "bun src/cli.ts status --text",
     "whoami": "bun src/cli.ts whoami",
     "doctor": "bun src/cli.ts doctor --text",
     "test": "bun test --timeout 30000 src/",

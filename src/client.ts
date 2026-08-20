@@ -414,7 +414,7 @@ export class AulaClient {
         `Access denied by Aula (code 403). The session is still valid — this is ` +
           `almost always the wrong institution-profile id set. calendar and presence ` +
           `accept children ids only; posts needs guardian ids *and* children ids. ` +
-          `See README "The two id spaces".`,
+          `See API.md "The three id spaces".`,
       );
     }
     if (code === STATUS_BAD_PARAMETERS) {

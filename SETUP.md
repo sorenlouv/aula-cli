@@ -4,19 +4,30 @@ A walkthrough from nothing to "just ask Claude about school". Takes about ten
 minutes, most of it the MitID login.
 
 **If you are Claude**, follow the steps in order. Ask before installing
-software (step 1) and before writing anything outside this repository (steps 5
-and 6). Never perform the MitID approval yourself — that is the user's phone
-and the user's identity. Report each step's outcome as you go.
+software, and before any write outside this repository — the PATH wrapper, the
+skill install and `schedule` all are. Never perform the MitID approval
+yourself — that is the user's phone and the user's identity. Report each
+step's outcome as you go.
 
 ## What you need
 
-- macOS or Linux (Windows is untested)
+- macOS or Linux (the Windows code paths exist, `schedule` included, but are
+  untested)
 - [git](https://git-scm.com) and [Claude Code](https://claude.com/claude-code)
 - The MitID app on your phone — the same one you use for aula.dk today
 - For the optional daily brief: the `claude` CLI on your PATH, and Chrome if
   you ever want PDF/PNG output
 
-## 1. Bun
+## 1. Get the code
+
+```bash
+git clone https://github.com/sorenlouv/aula-cli.git
+cd aula-cli
+```
+
+Every command below runs from this folder.
+
+## 2. Bun
 
 The CLI runs on [Bun](https://bun.com) ≥ 1.3, no build step. Check, and
 install if missing:
@@ -27,7 +38,10 @@ bun --version || curl -fsSL https://bun.sh/install | bash
 
 (Homebrew works too: `brew install oven-sh/bun/bun`.)
 
-## 2. Install dependencies
+The installer edits your shell profile, not the shell you are in — if `bun` is
+still not found afterwards, run `exec $SHELL` or open a new terminal.
+
+## 3. Install dependencies
 
 From the repository root:
 
@@ -53,7 +67,7 @@ mkdir -p ~/.local/bin && printf '#!/bin/sh\nexec bun "%s/src/cli.ts" "$@"\n' "$(
 Requires `~/.local/bin` on your PATH. `aula --help` lists the commands;
 `aula open` shows the newest overview, `aula new` generates a fresh one.
 
-## 3. Log in with MitID
+## 4. Log in with MitID
 
 Have your phone ready:
 
@@ -62,8 +76,12 @@ bun run login
 ```
 
 It asks for your **MitID username** (what you type into MitID, not your Aula
-name), then prints a code — approve it in the MitID app. Tokens are encrypted
-into `~/.aula/tokens.json` and refresh themselves; you will not log in again
+name), then shows one of three things, all normal: a code to approve in the
+MitID app, a QR code to scan with it, or — if your MitID holds more than one
+identity — a list to pick from. `--method CODE_TOKEN` uses a kodeviser instead
+of the app, and `--debug` writes a sanitised wire transcript to
+`~/.aula/login-trace.jsonl` when something fails. Tokens are encrypted into
+`~/.aula/tokens.json` and refresh themselves; you will not log in again
 day-to-day. Verify:
 
 ```bash
@@ -74,7 +92,7 @@ If MitID complains about a *parallel session* (CAP008): open the MitID app and
 reject any pending approval, close aula.dk browser tabs, wait a minute, retry.
 The login prints these exact instructions when it happens.
 
-## 4. Health check
+## 5. Health check
 
 ```bash
 bun src/cli.ts doctor --text
@@ -88,12 +106,12 @@ calls that *succeeded* but returned a known symptom — read them:
 - A Meebook warning telling you to open the widget in aula.dk once — that is
   Meebook's one-time activation, done in the browser, not a bug here.
 
-## 5. Install the skill
+## 6. Install the skill
 
 The repository ships a Claude skill at `.claude/skills/aula/SKILL.md`. It
 already works whenever Claude is opened *in this folder*. To make Aula
 questions work in **any** Claude session, install it at user level with the
-repo path filled in:
+repo path filled in (re-running overwrites a previous install):
 
 ```bash
 mkdir -p ~/.claude/skills/aula
@@ -102,7 +120,7 @@ sed "s|{{AULA_CLI_DIR}}|$(pwd)|" .claude/skills/aula/SKILL.md > ~/.claude/skills
 
 New Claude sessions will now answer "what did I miss in Aula?" directly.
 
-## 6. Optional: the daily brief
+## 7. Optional: the daily brief
 
 `aula new` generates the "Aula AI oversigt" — a self-contained HTML page
 summarising what needs action, what is coming, and what merely happened — and
@@ -137,7 +155,7 @@ costs the brief its model output.
 
 Design and reasoning: [BRIEF.md](BRIEF.md).
 
-## 7. Optional: publish the brief to a URL
+## 8. Optional: publish the brief to a URL
 
 By default the brief never leaves the machine. If you want to read it on a phone
 or send the link, publish it once from a Claude session in this repository —
@@ -157,7 +175,7 @@ and daycare wrote about your children — for some families that includes health
 information. Artifacts are private to your account until you choose to share the
 link, but this is still the only part of the tool that sends anything anywhere.
 
-## 8. Try it
+## 9. Try it
 
 Ask Claude things like:
 

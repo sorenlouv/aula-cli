@@ -4,7 +4,8 @@ Field notes for working on this project. Everything here was established against
 the live API and cost time to find; none of it is documented by Aula, and most
 of it fails in ways that look like a different problem than it is.
 
-Ordinary usage is in [README.md](README.md). This file is only the traps.
+Ordinary usage is in [SETUP.md](SETUP.md) and `aula --help`. This file is only
+the traps.
 
 ## You may not write. Ever.
 
