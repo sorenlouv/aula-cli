@@ -184,8 +184,13 @@ aula new [--days 14] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 The model calls run on the `claude` CLI's default model unless overridden:
 `AULA_BRIEF_MODEL` (a model id or alias) and `AULA_BRIEF_EFFORT`
 (`low`/`medium`/`high`) apply to extract, compose and the artifact deploy
-alike. The default is deliberately the strong model — extract is where "what
-needs attention" gets decided, and that judgment is the product.
+alike. Extract is where "what needs attention" gets decided, so a stronger
+model buys real judgment — but the pipeline must stay safe on whatever model
+the user has. The benchmarked failure of mid-tier models was under-reading a
+vigtig-marked mandatory sign-up into the fold, so `rank` carries a
+deterministic floor: an Aula-important item is never tiered below `week`,
+and one that no signal covered at all gets a plain rule-made signal. The
+model can promote it further; it cannot sink it.
 
 | File | Responsibility |
 | --- | --- |
