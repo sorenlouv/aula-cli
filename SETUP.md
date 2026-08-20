@@ -115,7 +115,9 @@ bun src/cli.ts new
 
 In the Claude Code desktop app, this project's **Preview** button shows the
 newest overview too: `.claude/launch.json` starts a small local-only server
-(port 4317) that serves the pages in `~/.aula/brief` and nothing else.
+(port 4317) that serves the pages in `~/.aula/brief` and nothing else. When no
+overview exists yet, opening the preview generates one on the spot and shows
+progress until it appears.
 
 If you want it every weekday morning (06:30 by default):
 
