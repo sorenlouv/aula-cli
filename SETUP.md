@@ -41,6 +41,18 @@ Optional sanity check — the test suite needs no credentials and no network:
 bun run test
 ```
 
+### Optional: put `aula` on your PATH
+
+This guide spells out `bun src/cli.ts …`; a one-line wrapper makes that just
+`aula …` from any directory (the CLI never depends on the working directory):
+
+```bash
+mkdir -p ~/.local/bin && printf '#!/bin/sh\nexec bun "%s/src/cli.ts" "$@"\n' "$(pwd)" > ~/.local/bin/aula && chmod +x ~/.local/bin/aula
+```
+
+Requires `~/.local/bin` on your PATH. `aula --help` lists the commands;
+`aula latest` opens the newest generated brief without regenerating it.
+
 ## 3. Log in with MitID
 
 Have your phone ready:
