@@ -43,7 +43,7 @@ cat > "$PLIST" <<PLIST_EOF
   <array>
     <string>$BUN</string>
     <string>$REPO/src/cli.ts</string>
-    <string>brief</string>
+    <string>new</string>
     <string>--text</string>
   </array>
   <key>WorkingDirectory</key><string>$REPO</string>

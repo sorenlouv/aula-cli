@@ -66,7 +66,8 @@ ranking what actually matters to this family is your job.
 | `attachment <threadId> <n>` | Download one to disk |
 | `commonfiles` | "Fælles Filer": class timetables, holiday plans, policies |
 | `commonfile <id\|title>` | Download one shared file |
-| `brief [--open]` | Generate the daily "Aula AI oversigt" HTML page |
+| `new` | Generate the daily "Aula AI oversigt" and open it |
+| `open [--web]` | Open the newest overview — the local page, or the hosted copy |
 | `doctor --text` | Call every endpoint and report status + timing |
 | `cache status` / `cache clear` | What is cached; drop it all |
 
@@ -138,12 +139,13 @@ conversation may already be stale.
 
 ## The daily brief
 
-`bun src/cli.ts brief --open` generates the "Aula AI oversigt" — a
-self-contained HTML page in `~/.aula/brief/` — and opens it. It calls `claude`
-itself for extraction and layout; `--no-llm` produces a rules-only page. A
-weekday-morning schedule can be installed with
-`scripts/install-brief-schedule.sh` (macOS launchd; see BRIEF.md). Offer it —
-don't install it unasked.
+`bun src/cli.ts new` generates the "Aula AI oversigt" — a self-contained HTML
+page in `~/.aula/brief/` — and opens it (`--no-open` to skip). It calls
+`claude` itself for extraction and layout; `--no-llm` produces a rules-only
+page. `bun src/cli.ts open` shows the newest page without regenerating, and
+`open --web` opens the hosted copy where one is configured. A weekday-morning
+schedule can be installed with `scripts/install-brief-schedule.sh` (macOS
+launchd; see BRIEF.md). Offer it — don't install it unasked.
 
 ## Session handling
 
