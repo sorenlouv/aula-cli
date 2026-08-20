@@ -6,7 +6,7 @@ const SOURCE: SourceItem = {
   key: 'post:1',
   kind: 'post',
   title: 'Myretuens løbedag',
-  text: 'Kære alle.\n\nI morgen holder vi løbedag, og børnene må meget gerne have løbetøj og sko med, de kan løbe i!',
+  text: 'Kære alle.\n\nI morgen holder vi løbedag — det gør vi hver mandag fremover — og børnene må meget gerne have løbetøj og sko med, de kan løbe i!',
   at: '2026-08-10T11:42:00+00:00',
   author: 'Palle',
   authorRole: 'employee',
@@ -67,6 +67,46 @@ describe('validateExtraction', () => {
     expect(result.signals).toHaveLength(1);
     expect(result.signals[0]?.origin).toBe('model');
     expect(result.topline).toBe('Rolig uge.');
+  });
+
+  test('drops a signal whose title asserts a date no source supports', () => {
+    const result = validateExtraction(INPUT, {
+      signals: [{ ...good, title: 'Løbetøj med — aflever senest søndag 24/9' }],
+    });
+    expect(result.signals).toHaveLength(0);
+    expect(result.problems[0]).toContain('dato uden kilde');
+    expect(result.problems[0]).toContain('søndag');
+  });
+
+  test('drops a signal whose dueAt nothing grounds', () => {
+    // 2026-08-19 is a Wednesday; the source speaks only of mandag.
+    const result = validateExtraction(INPUT, { signals: [{ ...good, dueAt: '2026-08-19' }] });
+    expect(result.signals).toHaveLength(0);
+    expect(result.problems[0]).toContain('ingen støtte');
+  });
+
+  test('a title may echo the weekday of its own grounded dueAt', () => {
+    const result = validateExtraction(INPUT, { signals: [good] });
+    expect(result.problems).toEqual([]); // "på mandag" + dueAt on a Monday
+  });
+
+  test('nulls a topline with an invented date and reports it', () => {
+    const result = validateExtraction(INPUT, {
+      topline: 'Husk mødet på fredag.',
+      signals: [good],
+    });
+    expect(result.topline).toBeNull();
+    expect(result.signals).toHaveLength(1);
+    expect(result.problems.some((p) => p.startsWith('topline'))).toBe(true);
+  });
+
+  test('drops a child summary with an invented date', () => {
+    const result = validateExtraction(INPUT, {
+      signals: [good],
+      childSummaries: { Viggo: 'God uge — husk festen 24/9.' },
+    });
+    expect(result.childSummaries).toEqual({});
+    expect(result.problems.some((p) => p.startsWith('childSummaries.Viggo'))).toBe(true);
   });
 
   test('drops a signal whose quote is not literally in the source', () => {

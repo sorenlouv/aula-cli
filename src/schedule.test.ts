@@ -36,6 +36,18 @@ describe('buildPlist', () => {
     expect(plist).toContain('<key>Minute</key><integer>30</integer>');
   });
 
+  test('bakes brief knobs into the agent, XML-escaped', () => {
+    const withEnv = buildPlist({
+      at: { hour: 6, minute: 30 },
+      bun: '/opt/homebrew/bin/bun',
+      path: '/usr/bin',
+      logPath: '/tmp/launchd.log',
+      env: { AULA_BRIEF_EFFORT: 'high', AULA_BRIEF_MODEL: 'a<b&c' },
+    });
+    expect(withEnv).toContain('<key>AULA_BRIEF_EFFORT</key><string>high</string>');
+    expect(withEnv).toContain('<key>AULA_BRIEF_MODEL</key><string>a&lt;b&amp;c</string>');
+  });
+
   test('bakes the PATH and the log destination into the agent', () => {
     expect(plist).toContain('<key>PATH</key><string>/opt/homebrew/bin:/usr/bin</string>');
     expect(plist).toContain('<string>/tmp/launchd.log</string>');

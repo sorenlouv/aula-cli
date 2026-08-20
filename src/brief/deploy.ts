@@ -114,7 +114,11 @@ export async function deployArtifact(
   }
 
   const proc = Bun.spawn(
-    ['claude', '-p', deployPrompt(artifactPath, url, opts.title), '--allowedTools', 'Artifact', '--strict-mcp-config'],
+    [
+      'claude', '-p', deployPrompt(artifactPath, url, opts.title), '--allowedTools', 'Artifact', '--strict-mcp-config',
+      ...(process.env.AULA_BRIEF_MODEL ? ['--model', process.env.AULA_BRIEF_MODEL] : []),
+      ...(process.env.AULA_BRIEF_EFFORT ? ['--effort', process.env.AULA_BRIEF_EFFORT] : []),
+    ],
     {
       stdout: 'pipe',
       stderr: 'pipe',

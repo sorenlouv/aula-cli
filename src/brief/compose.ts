@@ -1,25 +1,24 @@
 /**
- * The page-writing call, and the layout used when it fails.
+ * The arrangement call, and the one renderer both layouts share.
  *
- * The composer is given only *validated* signals — never the raw Aula payload —
- * so it can arrange facts but cannot invent one. That is what makes it safe to
- * hand it real freedom over the layout.
+ * The composer used to write the page's HTML itself, which meant generating
+ * ~27 KB of markup a token at a time — half the runtime of `aula new`. Now it
+ * returns a small JSON *plan* — ordering, section membership, rewording — and
+ * the markup is built locally from tested parts. The model keeps the freedom
+ * that matters (what leads, what waits, how it is phrased) and loses the one
+ * that never did (typing out the `<div>`s). Quotes, dates, sources and links
+ * are inserted by the renderer straight from validated signals, so the surface
+ * on which a fact could be invented *shrinks* to the reworded text fields.
  */
 
-import { runClaude } from './llm.ts';
-import { COMPONENT_GUIDE } from './styles.ts';
+import { buildDateSupport, DA_MONTHS, DA_WEEKDAYS, unsupportedDateClaims } from './dates.ts';
+import { parseJsonLoosely, runClaude } from './llm.ts';
 import type { RankedBrief, RankedSignal } from './types.ts';
-
-const DA_DAYS = ['søndag', 'mandag', 'tirsdag', 'onsdag', 'torsdag', 'fredag', 'lørdag'];
-const DA_MONTHS = [
-  'januar', 'februar', 'marts', 'april', 'maj', 'juni',
-  'juli', 'august', 'september', 'oktober', 'november', 'december',
-];
 
 export function danishDate(isoDay: string): string {
   const date = new Date(`${isoDay}T00:00:00`);
   if (Number.isNaN(date.getTime())) return isoDay;
-  return `${DA_DAYS[date.getDay()]} ${date.getDate()}. ${DA_MONTHS[date.getMonth()]}`;
+  return `${DA_WEEKDAYS[date.getDay()]} ${date.getDate()}. ${DA_MONTHS[date.getMonth()]}`;
 }
 
 function capitalise(value: string): string {
@@ -92,31 +91,146 @@ function composePayload(brief: RankedBrief, topline: string | null, summaries: R
   };
 }
 
-const INSTRUCTIONS = `Du designer og skriver en dansk HTML-side: en daglig "Aula AI oversigt" til en travl forælder, der sjældent åbner Aula.
+const INSTRUCTIONS = `Du prioriterer og formulerer en dansk "Aula AI oversigt" til en travl forælder, der sjældent åbner Aula. Selve siden bygges lokalt af en fast skabelon — du bestemmer rækkefølge, sektion og ordlyd.
 
-Input er JSON på stdin med FÆRDIGT VALIDEREDE fakta. Du må omarrangere, gruppere, formulere og prioritere — men du må ALDRIG tilføje fakta, datoer eller citater, der ikke står i inputtet.
+Input er JSON på stdin med FÆRDIGT VALIDEREDE fakta. Du må omarrangere, omformulere og prioritere — men du må ALDRIG tilføje fakta, datoer eller citater, der ikke står i inputtet. Citater, datoer, kilder, links og "Ny"-markeringer indsætter skabelonen selv.
 
-Svar KUN med HTML-markup til <body>. Ingen <!DOCTYPE>, <html>, <head> eller <body>. Ingen kodeblok. Ingen forklaring.
+Svar KUN med ét JSON-objekt. Ingen kodeblok. Ingen forklaring:
+{
+  "topline": "Én-to sætninger: dagens vigtigste konklusion først.",
+  "handling": [{"signalId": "…", "titel": "kortere omskrivning (valgfri)", "hvorfor": "én konkret sætning (valgfri)"}],
+  "kommende": [{"signalId": "…", "titel": "…", "hvorfor": "…"}],
+  "tomHandling": "Rolig sætning til når 'handling' er tom (valgfri)"
+}
 
-Stylesheet er allerede indlæst. Brug disse komponenter og klasser:
-${COMPONENT_GUIDE}
-
-Ufravigelige krav (siden afvises automatisk hvis de brydes):
-1. Hvert punkt fra "kraeverHandling" og "kommende" SKAL med som et element med både data-signal-id="…" og data-source-id="…" præcis som i inputtet.
-2. Alt fra "datastatus" SKAL med i <div class="panel" data-block="datastatus">. Fejl (level "warn") skal fremgå tydeligt — en fejlet hentning må ALDRIG ligne en stille uge.
-3. Ingen eksterne filer: ingen <img>, <script src>, <link>, @import eller url(http…). Links med <a href> til aula.dk er i orden.
-4. Intet må forsvinde: "baggrund" og "ubrugteKilder" hører til i en sammenklappet <details>, og "skjult" i <details class="muted"> nederst.
-5. Skriv alt på dansk. Citater gengives ordret som de står i "citat", i «…».
-
-Design:
-- Øverst: <header> med dagens dato og børnene, derefter <p class="topline">. Den rækkefølge ligger fast.
-- Under det bestemmer du selv layoutet ud fra hvad der faktisk er i dag: er der én stor ting, så giv den plads; er der mange små, så komprimér.
-- Er "kraeverHandling" tom, så sig det tydeligt og roligt ("Intet kræver handling lige nu") frem for at vise en tom kasse.
-- Marker ting hvor "nyt" er true med <span class="chip new">Ny</span>.
-- Brug barnets farve (c1/c2/c3) konsekvent.
-- Hold det skimbart på 20 sekunder.`;
+Regler:
+1. "handling" og "kommende" er signalId'er fra inputtets "kraeverHandling" og "kommende" — vigtigst først; din rækkefølge ER prioriteringen. Alt du udelader, vises alligevel nederst i sin sektion, så udeladelse er nedprioritering, aldrig sletning. Et punkt fra "baggrund" må promoveres, hvis det reelt beder om noget.
+2. "topline": behold eller skærp den givne topline. Konklusionen først, detaljen bagefter.
+3. "titel"/"hvorfor" udelades hvor inputtets formulering allerede er god; omskriv kun for at gøre det kortere, mere konkret eller imperativt.
+4. Skriv alt på dansk. Hold det skimbart på 20 sekunder.`;
 
 export type ComposeResult = { html: string; origin: 'model' | 'fallback'; problems: string[] };
+
+export type PlanEntry = { signalId: string; titel?: string; hvorfor?: string };
+
+export type ComposePlan = {
+  topline?: string;
+  handling: PlanEntry[];
+  kommende: PlanEntry[];
+  tomHandling?: string;
+};
+
+/**
+ * Reads whatever the model answered into a plan the renderer can trust:
+ * unknown ids are dropped, hidden-tier ids are refused (the noise gate is not
+ * the model's to reopen), duplicates keep their first placement.
+ */
+export function parsePlan(raw: unknown, brief: RankedBrief): { plan: ComposePlan; problems: string[] } {
+  const problems: string[] = [];
+  const byId = new Map(brief.signals.map((s) => [s.id, s]));
+  const placed = new Set<string>();
+  const dates = buildDateSupport(brief.input);
+
+  const text = (value: unknown) =>
+    typeof value === 'string' && value.trim() ? value.trim() : undefined;
+
+  // A rewording that asserts a date nothing vouches for loses only the
+  // rewording — the signal's own validated text carries the card instead.
+  const grounded = (value: string | undefined, where: string, signal?: RankedSignal) => {
+    if (!value) return undefined;
+    const invented = unsupportedDateClaims(value, dates, {
+      dueAt: signal?.dueAt ?? null,
+      ...(signal ? { sourceKey: signal.sourceKey } : {}),
+    });
+    if (invented.length === 0) return value;
+    problems.push(`${where}: dato uden kilde: ${invented.map((d) => `"${d}"`).join(', ')}`);
+    return undefined;
+  };
+
+  const entries = (value: unknown, field: string): PlanEntry[] => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) {
+      problems.push(`"${field}" er ikke en liste`);
+      return [];
+    }
+    const out: PlanEntry[] = [];
+    for (const item of value) {
+      const id = (item as { signalId?: unknown } | null)?.signalId;
+      if (typeof id !== 'string' || !byId.has(id)) {
+        problems.push(`${field}: ukendt signalId ${JSON.stringify(id ?? item)}`);
+        continue;
+      }
+      const signal = byId.get(id);
+      if (signal?.tier === 'hidden') {
+        problems.push(`${field}: ${id} er skjult støj og blev ikke vist`);
+        continue;
+      }
+      if (placed.has(id)) continue;
+      placed.add(id);
+      const titel = grounded(text((item as { titel?: unknown }).titel), `${field} (${id}) titel`, signal);
+      const hvorfor = grounded(text((item as { hvorfor?: unknown }).hvorfor), `${field} (${id}) hvorfor`, signal);
+      out.push({ signalId: id, ...(titel ? { titel } : {}), ...(hvorfor ? { hvorfor } : {}) });
+    }
+    return out;
+  };
+
+  const obj = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+  const topline = grounded(text(obj.topline), 'topline');
+  const tomHandling = grounded(text(obj.tomHandling), 'tomHandling');
+  return {
+    plan: {
+      ...(topline ? { topline } : {}),
+      handling: entries(obj.handling, 'handling'),
+      kommende: entries(obj.kommende, 'kommende'),
+      ...(tomHandling ? { tomHandling } : {}),
+    },
+    problems,
+  };
+}
+
+/** A signal on its way onto the page, with the plan's rewording if any. */
+type CardSpec = { signal: RankedSignal; titel?: string; hvorfor?: string };
+
+type PageOptions = {
+  topline?: string | null;
+  summaries?: Record<string, string>;
+  isNew?: (key: string) => boolean;
+  note?: string;
+  emptyAct?: string;
+  /** Signal ids the plan already shows as cards, so details do not repeat them. */
+  planned?: Set<string>;
+};
+
+/** Renders the model's plan with the same machinery the fallback uses. */
+export function renderPlan(
+  brief: RankedBrief,
+  plan: ComposePlan,
+  opts: { topline?: string | null; summaries?: Record<string, string>; isNew?: (key: string) => boolean } = {},
+): string {
+  const byId = new Map(brief.signals.map((s) => [s.id, s]));
+  const spec = (entry: PlanEntry): CardSpec => ({
+    signal: byId.get(entry.signalId) as RankedSignal,
+    ...(entry.titel ? { titel: entry.titel } : {}),
+    ...(entry.hvorfor ? { hvorfor: entry.hvorfor } : {}),
+  });
+  const planned = new Set([...plan.handling, ...plan.kommende].map((e) => e.signalId));
+  // An omission in the plan is a deprioritisation, never a deletion: whatever
+  // the ranker put in a visible tier still renders, after the planned cards.
+  const restAct = brief.signals.filter((s) => s.tier === 'act' && !planned.has(s.id));
+  const restWeek = brief.signals.filter((s) => s.tier === 'week' && !planned.has(s.id));
+  return buildPage(
+    brief,
+    [...plan.handling.map(spec), ...restAct.map((signal) => ({ signal }))],
+    [...plan.kommende.map(spec), ...restWeek.map((signal) => ({ signal }))],
+    {
+      topline: plan.topline ?? opts.topline ?? null,
+      summaries: opts.summaries ?? {},
+      ...(opts.isNew ? { isNew: opts.isNew } : {}),
+      ...(plan.tomHandling ? { emptyAct: plan.tomHandling } : {}),
+      planned,
+    },
+  );
+}
 
 export async function composePage(
   brief: RankedBrief,
@@ -125,6 +239,8 @@ export async function composePage(
     summaries?: Record<string, string>;
     isNew?: (key: string) => boolean;
     timeoutMs?: number;
+    model?: string;
+    effort?: string;
   } = {},
 ): Promise<ComposeResult> {
   const payload = composePayload(
@@ -133,45 +249,69 @@ export async function composePage(
     opts.summaries ?? {},
     opts.isNew ?? (() => false),
   );
-  const html = await runClaude(INSTRUCTIONS, JSON.stringify(payload), {
+  const answer = await runClaude(INSTRUCTIONS, JSON.stringify(payload), {
     timeoutMs: opts.timeoutMs ?? 300_000,
+    ...(opts.model ? { model: opts.model } : {}),
+    ...(opts.effort ? { effort: opts.effort } : {}),
   });
-  return { html: stripFence(html), origin: 'model', problems: [] };
-}
-
-function stripFence(raw: string): string {
-  const fenced = /```(?:html)?\s*([\s\S]*?)```/.exec(raw);
-  return (fenced?.[1] ?? raw).trim();
+  const { plan, problems } = parsePlan(parseJsonLoosely(answer), brief);
+  const html = renderPlan(brief, plan, {
+    topline: opts.topline ?? null,
+    summaries: opts.summaries ?? {},
+    ...(opts.isNew ? { isNew: opts.isNew } : {}),
+  });
+  return { html, origin: 'model', problems };
 }
 
 /**
- * The layout used when the composer fails validation twice.
- *
- * Deliberately plain. Its job is to be *correct* — every required signal, every
- * health note, every source — on a day when the interesting path did not work.
+ * The layout used when the composer fails twice: the same renderer, fed the
+ * ranker's own order. Its job is to be *correct* — every required signal,
+ * every health note, every source — on a day when the model did not answer.
  */
 export function fallbackPage(
   brief: RankedBrief,
   opts: { topline?: string | null; summaries?: Record<string, string>; note?: string } = {},
 ): string {
+  return buildPage(
+    brief,
+    brief.signals.filter((s) => s.tier === 'act').map((signal) => ({ signal })),
+    brief.signals.filter((s) => s.tier === 'week').map((signal) => ({ signal })),
+    {
+      topline: opts.topline ?? null,
+      summaries: opts.summaries ?? {},
+      ...(opts.note ? { note: opts.note } : {}),
+    },
+  );
+}
+
+/** The one place page markup is written. Both layouts come through here. */
+function buildPage(brief: RankedBrief, act: CardSpec[], week: CardSpec[], opts: PageOptions): string {
   const { input } = brief;
   const colour = new Map(input.family.children.map((c, i) => [c.firstName, `c${i + 1}`]));
-  const card = (s: RankedSignal) => `
+  const card = ({ signal: s, titel, hvorfor }: CardSpec) => `
     <div class="card ${s.urgency === 'now' ? 'now' : 'soon'}" data-signal-id="${escapeHtml(s.id)}" data-source-id="${escapeHtml(s.sourceKey)}">
       <div class="row">
         ${s.dueAt ? `<span class="chip ${s.urgency === 'now' ? 'now' : 'soon'}">${escapeHtml(capitalise(danishDate(s.dueAt)))}</span>` : ''}
+        ${opts.isNew?.(s.sourceKey) ? '<span class="chip new">Ny</span>' : ''}
         ${s.child ? `<span class="who"><span class="dot ${colour.get(s.child) ?? 'c1'}"></span>${escapeHtml(s.child)}</span>` : ''}
       </div>
-      <p class="title">${escapeHtml(s.title)}</p>
-      ${s.why ? `<p class="why">${escapeHtml(s.why)}</p>` : ''}
+      <p class="title">${escapeHtml(titel ?? s.title)}</p>
+      ${hvorfor ?? s.why ? `<p class="why">${escapeHtml(hvorfor ?? s.why ?? '')}</p>` : ''}
       ${s.quote ? `<blockquote>«${escapeHtml(s.quote)}»</blockquote>` : ''}
       <div class="src">${escapeHtml(s.source.title)}${s.source.author ? ` · ${escapeHtml(s.source.author)}` : ''}${s.source.url ? ` · <a href="${escapeHtml(s.source.url)}">åbn i Aula</a>` : ''}</div>
     </div>`;
 
-  const act = brief.signals.filter((s) => s.tier === 'act');
-  const week = brief.signals.filter((s) => s.tier === 'week');
-  const context = brief.signals.filter((s) => s.tier === 'context');
+  const context = brief.signals.filter((s) => s.tier === 'context' && !opts.planned?.has(s.id));
   const hidden = brief.signals.filter((s) => s.tier === 'hidden');
+
+  // A failed fetch must never look like a quiet week, so on a day with
+  // warnings the datastatus panel sits right under the topline instead of at
+  // the bottom.
+  const degradedDay = input.health.some((h) => h.level === 'warn') || brief.degraded.length > 0;
+  const datastatus = `<div class="panel" data-block="datastatus">
+    ${input.health.map((h) => `<div class="st ${h.level === 'warn' ? 'bad' : ''}"><i>${h.level === 'warn' ? '⚠' : '○'}</i><span>${escapeHtml(h.message)}</span></div>`).join('')}
+    ${brief.degraded.map((d) => `<div class="st bad"><i>⚠</i><span>${escapeHtml(d)}</span></div>`).join('')}
+  </div>`;
 
   return `<div class="wrap">
   <header>
@@ -190,8 +330,10 @@ export function fallbackPage(
   </header>
   <p class="topline">${escapeHtml(opts.topline ?? (act.length === 0 ? 'Intet kræver handling lige nu.' : `${act.length} ting kræver din opmærksomhed.`))}</p>
 
+  ${degradedDay ? `<section><h2>Datastatus</h2>${datastatus}</section>` : ''}
+
   <section><h2>Kræver handling <span class="count">${act.length}</span></h2>
-    ${act.length ? act.map(card).join('') : '<div class="panel">Intet kræver handling lige nu.</div>'}
+    ${act.length ? act.map(card).join('') : `<div class="panel">${escapeHtml(opts.emptyAct ?? 'Intet kræver handling lige nu.')}</div>`}
   </section>
 
   ${week.length ? `<section><h2>Kommende <span class="count">${week.length}</span></h2>${week.map(card).join('')}</section>` : ''}
@@ -209,6 +351,14 @@ export function fallbackPage(
   </div></section>
 
   ${
+    input.albums.length
+      ? `<section><h2>Galleri <span class="count">${input.albums.length}</span></h2><div class="chips">
+      ${input.albums.map((a) => `<div class="tile"><b>${escapeHtml(a.title)}</b><span>${escapeHtml([a.at ? capitalise(danishDate(a.at)) : null, a.childNames.join(', ') || null].filter(Boolean).join(' · '))}</span></div>`).join('')}
+    </div></section>`
+      : ''
+  }
+
+  ${
     context.length || brief.unusedSources.length
       ? `<section><h2>Godt at vide</h2><details><summary>${context.length + brief.unusedSources.length} ting uden noget, du skal gøre</summary>
       ${context.map((s) => `<div class="di" data-source-id="${escapeHtml(s.sourceKey)}"><b>${escapeHtml(s.title)}</b>${s.quote ? `<p>«${escapeHtml(s.quote)}»</p>` : ''}</div>`).join('')}
@@ -217,10 +367,7 @@ export function fallbackPage(
       : ''
   }
 
-  <section><h2>Datastatus</h2><div class="panel" data-block="datastatus">
-    ${input.health.map((h) => `<div class="st ${h.level === 'warn' ? 'bad' : ''}"><i>${h.level === 'warn' ? '⚠' : '○'}</i><span>${escapeHtml(h.message)}</span></div>`).join('')}
-    ${brief.degraded.map((d) => `<div class="st bad"><i>⚠</i><span>${escapeHtml(d)}</span></div>`).join('')}
-  </div></section>
+  ${degradedDay ? '' : `<section><h2>Datastatus</h2>${datastatus}</section>`}
 
   ${hidden.length ? `<details class="muted"><summary>${hidden.length} fællesbeskeder skjult</summary>${hidden.map((s) => `<div class="di"><b>${escapeHtml(s.title)}</b><p>${escapeHtml(s.source.groups.join(', '))}</p></div>`).join('')}</details>` : ''}
 

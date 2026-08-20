@@ -147,6 +147,11 @@ after changing node version** — `claude` shells out to node for plugin hooks,
 and a node it cannot find kills it with exit 143 after the work is done, which
 costs the brief its model output.
 
+The same baking applies to the brief's model knobs: `AULA_BRIEF_MODEL`,
+`AULA_BRIEF_EFFORT` and `AULA_CACHE_TTL` set in the shell where you run
+`aula schedule` are written into the agent (a plain `export` in your profile
+never reaches launchd). Change them by re-running `aula schedule`.
+
 Design and reasoning: [BRIEF.md](BRIEF.md).
 
 ## 8. Optional: publish the brief to a URL
