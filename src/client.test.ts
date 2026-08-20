@@ -310,38 +310,33 @@ test('cookie auth never adds an access_token parameter', async () => {
   );
 });
 
-// A dead MitID login and a dead pasted cookie need different fixes, and this
-// message is the whole of what the user (or Claude) gets to act on.
-test('an expired credential is explained in terms of the credential that expired', async () => {
+// MitID is the only credential, so every expiry points at the same fix — and
+// that message is the whole of what the user (or Claude) gets to act on.
+test('an expired credential points at the MitID login', async () => {
   const expired = async () => jsonResponse({ status: { code: 448 }, data: null }, 403);
 
-  await withFetch(expired, async () => {
-    const client = new AulaClient({
-      auth: { kind: 'token', accessToken: 'tok', username: 'u' },
+  for (const opts of [
+    { auth: { kind: 'token', accessToken: 'tok', username: 'u' } as const },
+    { cookie: COOKIE },
+  ]) {
+    await withFetch(expired, async () => {
+      const client = new AulaClient(opts);
+      await assert.rejects(() => client.getProfiles(), (err: unknown) => {
+        assert.match((err as Error).message, /bun run login/);
+        return true;
+      });
     });
-    await assert.rejects(() => client.getProfiles(), (err: unknown) => {
-      assert.match((err as Error).message, /bun run login/);
-      return true;
-    });
-  });
-
-  await withFetch(expired, async () => {
-    const client = new AulaClient({ cookie: COOKIE });
-    await assert.rejects(() => client.getProfiles(), (err: unknown) => {
-      assert.match((err as Error).message, /session set/);
-      return true;
-    });
-  });
+  }
 });
 
-test('status 448 is reported as an expired session, not a permission problem', async () => {
+test('status 448 is reported as expired credentials, not a permission problem', async () => {
   await withFetch(
     async () => jsonResponse({ status: { code: 448 }, data: null }, 403),
     async () => {
       const client = new AulaClient({ cookie: COOKIE });
       await assert.rejects(() => client.getProfiles(), (err: unknown) => {
         assert.ok(err instanceof AulaAuthError, 'should be an auth error');
-        assert.match(err.message, /session/i);
+        assert.match(err.message, /rejected the credentials/);
         return true;
       });
     },

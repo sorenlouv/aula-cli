@@ -49,17 +49,10 @@ import { runBrief } from './brief/index.ts';
 import { explain } from './brief/rank.ts';
 import { BRIEF_DIR } from './brief/state.ts';
 import { runDoctor } from './doctor.ts';
-import { UsageError } from './errors.ts';
+import { AulaSessionError, UsageError } from './errors.ts';
 import { resolveFamily, selectChildren, type Family } from './family.ts';
 import { runLogin, runLogout, runRefreshStepUp, runStatus } from './login.ts';
 import { isoDate, localIsoDate, SUPPORTED_WIDGET_IDS, type WeekPlan } from './integrations/index.ts';
-import {
-  AulaSessionError,
-  SESSION_PATH,
-  refreshInstructions,
-  saveCookie,
-  saveMitidUsername,
-} from './session.ts';
 import type { CommonFile, Contact, ThreadDetail } from './types.ts';
 import type { Capability } from './widgets.ts';
 
@@ -103,10 +96,6 @@ Authentication:
   logout                       Forget the stored login
   status                       Whether you are logged in, and for how much longer
   refresh-stepup               Restore step-up assurance so sensitive threads read
-
-  session set <cookie>         Fallback: store a browser session cookie by hand
-  session username <name>      Store the MitID username (login does this for you)
-  session check                Show where the session lives
 
 Diagnostics:
   doctor                       Call every endpoint and report status + timing (never cached)
@@ -218,7 +207,6 @@ async function main(): Promise<number> {
     );
   }
 
-  if (command === 'session') return runSession(positionals);
   if (command === 'cache') return runCache(positionals, asText, ttlMs);
   if (command === 'latest') return runLatest();
   if (command === 'login') {
@@ -593,42 +581,6 @@ const CHILD_AWARE = new Set([
   'huskelisten',
   'homework',
 ]);
-
-function runSession(positionals: string[]): number {
-  const sub = positionals[0];
-  if (sub === 'set') {
-    const cookie = positionals.slice(1).join(' ');
-    if (!cookie) {
-      console.error("Usage: session set '<cookie string>'\n\n" + refreshInstructions());
-      return 1;
-    }
-    const path = saveCookie(cookie);
-    console.log(`Saved session to ${path} (mode 0600).`);
-    return 0;
-  }
-  if (sub === 'username') {
-    const username = positionals[1];
-    if (!username) {
-      console.error(
-        'Usage: session username <your MitID username>\n\n' +
-          'Meebook and Huskelisten identify the session by the MitID username rather\n' +
-          'than by any id the Aula API exposes, so it has to be supplied by hand.\n' +
-          '$AULA_MITID_USERNAME overrides this if you prefer the environment.',
-      );
-      return 1;
-    }
-    const path = saveMitidUsername(username);
-    console.log(`Saved MitID username to ${path}.`);
-    return 0;
-  }
-  if (sub === 'check' || sub === undefined) {
-    console.log(`Session file: ${SESSION_PATH}`);
-    console.log('Run `bun src/cli.ts whoami` to verify it against Aula.');
-    return 0;
-  }
-  console.error(`Unknown session subcommand "${sub}". Use "set", "username" or "check".`);
-  return 1;
-}
 
 function runCache(positionals: string[], asText: boolean, ttlMs: number): number {
   const sub = positionals[0] ?? 'status';

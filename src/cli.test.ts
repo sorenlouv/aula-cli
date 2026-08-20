@@ -20,6 +20,7 @@ import { after, test } from 'node:test';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const PRELOAD = join(ROOT, 'src/testing/fake-aula.ts');
+const SEED = join(ROOT, 'src/testing/seed-tokens.ts');
 const ENTRY = join(ROOT, 'src/cli.ts');
 
 const sandboxes: string[] = [];
@@ -41,15 +42,18 @@ function sandbox(overrides: Record<string, string> = {}) {
   /** Mutable so a test can change credentials between runs. */
   const env: Record<string, string> = {
     AULA_DIR: dir,
-    AULA_SESSION_FILE: join(dir, 'session.json'),
-    // Cookie auth keeps these tests off the token store entirely; what is being
-    // tested here is dispatch and caching, not how credentials are stored.
-    AULA_COOKIE: 'PHPSESSID=test; Csrfp-Token=test-csrf',
-    AULA_MITID_USERNAME: 'valdemarex',
     FAKE_AULA_LOG: log,
     NO_COLOR: '1',
     ...overrides,
   };
+
+  // Auth is MitID-only, so "logged in" is a state on disk: seed a fixture
+  // login through the same encrypted store the CLI reads. The username on the
+  // record is also what Meebook and Systematic receive as their session id.
+  const seeded = Bun.spawnSync({ cmd: ['bun', SEED], env: { ...process.env, ...env } });
+  if (seeded.exitCode !== 0) {
+    throw new Error(`token seeding failed: ${seeded.stderr.toString()}`);
+  }
 
   return {
     dir,
@@ -258,11 +262,17 @@ test('cached responses belong to one login', () => {
   assert.equal(box.requests().length, 0, 'sanity: the same login hits cache');
 
   box.reset();
-  box.env.AULA_COOKIE = 'PHPSESSID=somebody-else; Csrfp-Token=other';
+  // A different MitID login in the same ~/.aula: re-seed the token store
+  // under another username, which is what a family switch actually looks like.
+  const reseed = Bun.spawnSync({
+    cmd: ['bun', SEED],
+    env: { ...process.env, ...box.env, SEED_USERNAME: 'somebody-else' },
+  });
+  assert.equal(reseed.exitCode, 0, `re-seeding failed: ${reseed.stderr.toString()}`);
   box.run('messages');
   assert.ok(
     box.requests().includes('messaging.getThreads'),
-    "a different credential must not read the previous login's entries",
+    "a different login must not read the previous login's entries",
   );
 });
 
@@ -402,7 +412,7 @@ test('doctor exits non-zero when an endpoint is broken, and keeps checking', () 
 test('doctor --text is readable and marks each check', () => {
   const result = sandbox().run('doctor', '--text');
   assert.equal(result.code, 0);
-  assert.match(result.stdout, /aula doctor — API v\d+, cookie auth/);
+  assert.match(result.stdout, /aula doctor — API v\d+/);
   assert.match(result.stdout, /\[PASS\] messaging\.getThreads/);
   assert.match(result.stdout, /passed, \d+ warned/);
 });

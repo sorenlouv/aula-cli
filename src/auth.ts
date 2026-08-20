@@ -1,22 +1,18 @@
 /**
- * Where the client's credentials come from.
+ * Where the client's credentials come from: a stored MitID login, and nothing
+ * else.
  *
- * There are two ways to be authenticated against Aula, and they are not
- * alternatives so much as successive generations:
- *
- *   - **token** — what `bun src/cli.ts login` produces. A real MitID login
- *     ending in OAuth tokens that refresh themselves, so a session survives
- *     unattended for as long as the refresh token lives. They are written to
- *     `~/.aula/tokens.json`, AES-256-GCM encrypted, on every platform.
- *   - **cookie** — a session cookie lifted out of a browser by hand. Dies after
- *     a few hours and cannot be renewed without a human. Kept because it is a
- *     useful escape hatch when the login flow itself is what is broken.
+ * `login` runs the real MitID flow and ends with OAuth tokens written to
+ * `~/.aula/tokens.json`, AES-256-GCM encrypted, on every platform. The access
+ * token refreshes itself from the refresh token, so day-to-day use never
+ * prompts. The login's cookie jar rides along because the calendar POST needs
+ * the CSRF token that lives in it.
  */
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { AulaSessionError, loadCookie, SESSION_PATH } from './session.ts';
+import { AulaSessionError } from './errors.ts';
 import { AulaCookieJar, AulaHttpClient, EncryptedFileTokenStore } from './vendor/aula-auth/index.ts';
 import type { StoredTokenRecord, TokenStore } from './vendor/aula-auth/index.ts';
 import { TokenStoreError, withFreshTokens } from './vendor/aula-auth/index.ts';
@@ -35,6 +31,12 @@ export const TOKEN_PATH = join(AULA_DIR, 'tokens.json');
 const KEY_PATH = join(AULA_DIR, '.token-key');
 export const KEY_ENV = 'AULA_TOKEN_KEY';
 
+/**
+ * The `cookie` kind never comes out of {@link resolveAuth} — the CLI is
+ * MitID-only. It exists as a test seam: the transport tests construct a client
+ * from a bare cookie to model an already-bootstrapped session without a token
+ * store on disk.
+ */
 export type Auth =
   | { kind: 'token'; accessToken: string; username: string; cookie?: string }
   | { kind: 'cookie'; cookie: string };
@@ -71,43 +73,25 @@ export function tokenStore(): TokenStore {
 const HOW_TO_LOGIN = `
 Run a MitID login:
   bun run login
-
-Or, if the login flow itself is the problem, fall back to a browser cookie:
-  bun src/cli.ts session set '<cookie>'
 `.trim();
 
 export function loginInstructions(): string {
   return HOW_TO_LOGIN;
 }
 
-/**
- * Resolve credentials, most explicit first.
- *
- * `$AULA_COOKIE` wins over stored tokens on purpose: it is how you pin the
- * client to one specific session while debugging, and a stored login silently
- * overriding that would be maddening.
- */
+/** The stored MitID login, refreshed if need be — or a clear "not logged in". */
 export async function resolveAuth(): Promise<Auth> {
-  const fromEnv = process.env.AULA_COOKIE?.trim();
-  if (fromEnv) return { kind: 'cookie', cookie: loadCookie() };
-
   const record = await loadFreshTokens();
-  if (record) {
-    const cookie = await loadCookieHeader();
-    return {
-      kind: 'token',
-      accessToken: record.tokens.access_token,
-      username: record.username,
-      ...(cookie ? { cookie } : {}),
-    };
+  if (!record) {
+    throw new AulaSessionError(`Not logged in — no MitID tokens in ${TOKEN_PATH}.\n\n${HOW_TO_LOGIN}`);
   }
-
-  if (existsSync(SESSION_PATH)) return { kind: 'cookie', cookie: loadCookie() };
-
-  throw new AulaSessionError(
-    `Not logged in — no MitID tokens in ${TOKEN_PATH}, no $AULA_COOKIE, ` +
-      `and no ${SESSION_PATH}.\n\n${HOW_TO_LOGIN}`,
-  );
+  const cookie = await loadCookieHeader();
+  return {
+    kind: 'token',
+    accessToken: record.tokens.access_token,
+    username: record.username,
+    ...(cookie ? { cookie } : {}),
+  };
 }
 
 /**

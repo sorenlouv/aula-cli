@@ -45,8 +45,8 @@ export async function getReminders(
   const warnings: string[] = [];
   if (ctx.sessionIdIsFallback) {
     warnings.push(
-      'No MitID username configured (AULA_MITID_USERNAME); Huskelisten may reject the ' +
-        'session id. See README "Widgets and weekly plans".',
+      'No MitID username on the stored login; Huskelisten may reject the fallback ' +
+        'session id. Log in again with `bun run login`.',
     );
   }
 

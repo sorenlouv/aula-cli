@@ -45,7 +45,6 @@ export type DoctorReport = {
   ok: boolean;
   generatedAt: string;
   apiVersion: number;
-  authKind: 'token' | 'cookie';
   summary: { passed: number; warned: number; skipped: number; failed: number; totalMs: number };
   checks: Check[];
 };
@@ -348,7 +347,6 @@ function finish(checks: Check[], client: AulaClient, opts: { asText: boolean }):
     ok: count('fail') === 0,
     generatedAt: new Date().toISOString(),
     apiVersion: client.apiVersion,
-    authKind: client.authKind,
     summary: {
       passed: count('ok'),
       warned: count('warn'),
@@ -372,7 +370,7 @@ const TAGS: Record<CheckStatus, string> = {
 export function renderDoctor(report: DoctorReport): string {
   const width = Math.max(...report.checks.map((c) => c.name.length), 10);
   const lines = [
-    `aula doctor — API v${report.apiVersion}, ${report.authKind} auth`,
+    `aula doctor — API v${report.apiVersion}`,
     '',
     ...report.checks.flatMap((c) => {
       const row = `  [${TAGS[c.status]}] ${c.name.padEnd(width)}  ${c.detail} ${fmt.dim(`(${c.ms} ms)`)}`;

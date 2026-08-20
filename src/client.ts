@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { type Auth, loginInstructions, resolveAuth } from './auth.ts';
 import { type CacheSettings, ResponseCache, openCache } from './cache.ts';
-import { loadCookie, readCookieValue, refreshInstructions } from './session.ts';
 import type {
   Album,
   AulaEnvelope,
@@ -143,12 +142,8 @@ export class AulaApiError extends Error {
 }
 
 export class AulaAuthError extends Error {
-  /**
-   * `guidance` is how the caller says *which* credential died, because the fix
-   * differs: a stale MitID login is re-run, a stale cookie is re-pasted.
-   * Defaults to the cookie instructions for callers that predate token auth.
-   */
-  constructor(message: string, guidance: string = refreshInstructions()) {
+  /** Always ends with the fix, because MitID is the only credential there is. */
+  constructor(message: string, guidance: string = loginInstructions()) {
     super(`${message}\n\n${guidance}`);
     this.name = 'AulaAuthError';
   }
@@ -184,23 +179,26 @@ export class AulaClient {
   #cache: ResponseCache;
 
   /**
-   * `cookie` is still accepted directly so tests (and the `session set` escape
-   * hatch) can construct a client without touching the stored login. Prefer
-   * `AulaClient.create()`, which resolves whatever credentials exist.
+   * `cookie` is a test seam: the transport tests construct a client from a
+   * bare cookie to model an already-bootstrapped session. The CLI itself only
+   * ever arrives here through `AulaClient.create()`, with MitID tokens.
    *
    * Caching is opt-in rather than opt-out: a bare `new AulaClient(...)` never
    * touches the disk, so a test cannot accidentally assert against a response
    * an earlier test left lying around.
    */
   constructor(opts: { cookie?: string; auth?: Auth; apiVersion?: number; cache?: ResponseCache } = {}) {
-    this.#auth = opts.auth ?? { kind: 'cookie', cookie: opts.cookie ?? loadCookie() };
+    if (!opts.auth && opts.cookie === undefined) {
+      throw new Error('AulaClient needs credentials — use AulaClient.create().');
+    }
+    this.#auth = opts.auth ?? { kind: 'cookie', cookie: opts.cookie as string };
     this.#cookie = this.#auth.cookie;
     this.#csrf = this.#cookie ? readCookieValue(this.#cookie, 'Csrfp-Token') : undefined;
     this.#version = opts.apiVersion ?? DEFAULT_API_VERSION;
     this.#cache = opts.cache ?? ResponseCache.disabled();
   }
 
-  /** Builds a client from stored MitID tokens, or a cookie if that is all there is. */
+  /** Builds a client from the stored MitID login — the only credential there is. */
   static async create(opts: { apiVersion?: number; cache?: CacheSettings } = {}): Promise<AulaClient> {
     const auth = await resolveAuth();
     return new AulaClient({
@@ -222,25 +220,18 @@ export class AulaClient {
     return this.#cache;
   }
 
-  /** Which credential kind is in play — `status` and error messages report it. */
-  get authKind(): Auth['kind'] {
-    return this.#auth.kind;
-  }
-
   /**
-   * The MitID username, when we logged in rather than borrowed a cookie.
+   * The MitID username, off the stored login record.
    *
    * Meebook and Systematic key their session on this rather than on any id Aula
-   * exposes. A real login knows it for certain, which beats the hand-configured
-   * copy in session.json — and means token auth needs no session.json at all.
+   * exposes. The login records it, so nothing needs configuring by hand.
    */
   get mitidUsername(): string | undefined {
     return this.#auth.kind === 'token' ? this.#auth.username : undefined;
   }
 
-  /** The fix for a dead credential depends on which kind of credential it was. */
   #authGuidance(): string {
-    return this.#auth.kind === 'token' ? loginInstructions() : refreshInstructions();
+    return loginInstructions();
   }
 
   // ---------------------------------------------------------------- transport
@@ -750,6 +741,18 @@ export class AulaClient {
 function cacheScope(auth: Auth): string {
   if (auth.kind === 'token') return `token:${auth.username}`;
   return `cookie:${createHash('sha256').update(auth.cookie).digest('hex').slice(0, 16)}`;
+}
+
+/** Pulls one value out of a `k=v; k=v` cookie string (the CSRF token, in practice). */
+function readCookieValue(cookie: string, name: string): string | undefined {
+  for (const part of cookie.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim().toLowerCase() === name.toLowerCase()) {
+      return part.slice(eq + 1).trim();
+    }
+  }
+  return undefined;
 }
 
 /** Aula's calendar filter wants `YYYY-MM-DD HH:mm:ss.SSSS+ZZZZ`, not ISO-8601. */

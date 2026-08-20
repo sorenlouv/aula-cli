@@ -171,8 +171,6 @@ Ask Claude things like:
 - **A weekly plan says COULD NOT BE READ** — the school's third-party vendor
   is down or misconfigured; that is not an empty week. `doctor --text` shows
   which vendor and why.
-- **The login flow itself is broken** — there is a browser-cookie fallback;
-  see [Cookie fallback](README.md#cookie-fallback) in the README.
 - **The brief runs but loses the model's wording** — check
   `~/.aula/brief/launchd.log` for `exited 143` and a `command not found`. A
   plugin hook could not find its interpreter on launchd's bare PATH; re-run

@@ -23,9 +23,9 @@ export type IntegrationContext = {
    * (`sessionId` query) want *this*, not the Aula user id — the one place
    * the two differ.
    *
-   * It is not derivable from the API: it is what the user types into MitID.
-   * Set `AULA_MITID_USERNAME` to supply it; otherwise this falls back to
-   * `guardianId`, which those two vendors may reject.
+   * It is not derivable from the API: it is what the user types into MitID,
+   * so `login` records it on the stored token record. Without a record it
+   * falls back to `guardianId`, which those two vendors may reject.
    */
   sessionId: string;
   /** Whether `sessionId` is the real MitID username or the fallback. */
