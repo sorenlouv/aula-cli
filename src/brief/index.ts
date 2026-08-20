@@ -18,7 +18,7 @@ import { publish, type PublishResult } from './publish.ts';
 import { rank, signalsFromRules } from './rank.ts';
 import { loadState, markSeen, pruneState, saveState, whichAreNew } from './state.ts';
 import type { RankedBrief } from './types.ts';
-import { validatePage, type Violation } from './validate.ts';
+import { validatePage } from './validate.ts';
 
 export type BriefOptions = {
   days?: number;
@@ -36,7 +36,6 @@ export type BriefRun = {
   brief: RankedBrief;
   topline: string | null;
   origin: 'model' | 'fallback';
-  violations: Violation[];
   published: PublishResult;
   deployment: DeployResult;
   notes: string[];
@@ -85,29 +84,24 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
 
   let body = '';
   let origin: BriefRun['origin'] = 'fallback';
-  let violations: Violation[] = [];
 
   if (opts.useModel !== false) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const composed = await composePage(brief, { topline, summaries, isNew });
-        for (const problem of composed.problems) {
-          notes.push(`Layoutplan: ${problem}`);
-        }
-        const found = validatePage(composed.html, brief);
-        if (found.length === 0) {
-          body = composed.html;
-          origin = 'model';
-          violations = [];
-          break;
-        }
-        violations = found;
-        notes.push(
-          `Layoutforsøg ${attempt + 1} afvist: ${found.map((v) => `${v.rule} (${v.detail})`).join('; ')}`,
-        );
-      } catch (err) {
-        notes.push(`Layoutforsøg ${attempt + 1} fejlede: ${(err as Error).message}`);
+    try {
+      const composed = await composePage(brief, { topline, summaries, isNew });
+      for (const problem of composed.problems) {
+        notes.push(`Layoutplan: ${problem}`);
       }
+      const found = validatePage(composed.html, brief);
+      if (found.length === 0) {
+        body = composed.html;
+        origin = 'model';
+      } else {
+        notes.push(
+          `Layout afvist: ${found.map((v) => `${v.rule} (${v.detail})`).join('; ')}`,
+        );
+      }
+    } catch (err) {
+      notes.push(`Layout fejlede: ${(err as Error).message}`);
     }
   }
 
@@ -117,9 +111,10 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
       summaries,
       note: opts.useModel === false ? undefined : 'reservelayout',
     });
-    origin = 'fallback';
     // The fallback is held to the same standard as the model's output.
-    violations = validatePage(body, brief);
+    for (const v of validatePage(body, brief)) {
+      notes.push(`Reservelayout: ${v.rule} (${v.detail})`);
+    }
   }
 
   // ---------------------------------------------------------------- publish
@@ -149,9 +144,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   // Recorded only once the page exists, so a crash re-shows rather than hides.
   markSeen(state, input.items.map((item) => item.key), now);
   pruneState(state);
-  state.lastRunAt = now.toISOString();
-  state.lastGoodHtmlPath = published.htmlPath;
   saveState(state);
 
-  return { brief, topline, origin, violations, published, deployment, notes };
+  return { brief, topline, origin, published, deployment, notes };
 }

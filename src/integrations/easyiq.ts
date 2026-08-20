@@ -13,7 +13,6 @@ import { type WidgetTokens, widgetFetch } from '../widgets.ts';
 import type { IntegrationContext, WeekPlan, WeekPlanItem } from './types.ts';
 
 const EASYIQ_URL = 'https://api.easyiqcloud.dk/api/aula/weekplaninfo';
-export const EASYIQ_WIDGET = '0001';
 
 type EasyIqEvent = {
   /** `YYYY/MM/DD HH:mm`, not ISO. */
@@ -30,7 +29,7 @@ type EasyIqEvent = {
 export async function getWeekPlan(
   ctx: IntegrationContext,
   tokens: WidgetTokens,
-  widgetId: string = EASYIQ_WIDGET,
+  widgetId: string,
 ): Promise<WeekPlan> {
   const items: WeekPlanItem[] = [];
   const warnings: string[] = [];

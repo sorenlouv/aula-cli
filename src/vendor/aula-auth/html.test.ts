@@ -1,11 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  extractAllAttr,
-  extractAttr,
-  extractFormAction,
-  extractHiddenInputs,
-  extractText,
-} from './html.ts';
+import { extractAttr, extractFormAction, extractHiddenInputs } from './html.ts';
 
 const samlForm = `
 <html><body>
@@ -56,27 +50,10 @@ describe('extractFormAction', () => {
   });
 });
 
-describe('extractAttr / extractAllAttr', () => {
-  test('extractAttr returns first matching attribute', () => {
+describe('extractAttr', () => {
+  test('returns the first matching attribute', () => {
     expect(extractAttr(loginOptionsPage, 'a.list-link', 'data-loginoptions')).toBe(
       '{"id":"1","name":"Child A"}',
     );
-  });
-
-  test('extractAllAttr returns every match in document order', () => {
-    expect(extractAllAttr(loginOptionsPage, 'a.list-link', 'data-loginoptions')).toEqual([
-      '{"id":"1","name":"Child A"}',
-      '{"id":"2","name":"Child B"}',
-    ]);
-  });
-});
-
-describe('extractText', () => {
-  test('returns trimmed text of the first match', () => {
-    expect(extractText(loginOptionsPage, 'div.list-link-text')).toBe('Child A (Guardian)');
-  });
-
-  test('returns null when nothing matches', () => {
-    expect(extractText(loginOptionsPage, 'div.does-not-exist')).toBeNull();
   });
 });

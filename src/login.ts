@@ -27,8 +27,9 @@ import {
   AulaLoginClient,
   AulaSilentSsoFailedError,
   JsonlFileTracer,
-  consoleLogger,
+  MitidParallelSessionError,
   silentLogger,
+  stderrLogger,
 } from './vendor/aula-auth/index.ts';
 import type { IdentityOption, Logger, StoredTokenRecord } from './vendor/aula-auth/index.ts';
 
@@ -42,8 +43,10 @@ export async function runLogin(args: LoginArgs): Promise<number> {
   const username = args.username ?? (await prompt('MitID username:'));
   if (!username) throw new UsageError('A MitID username is required.');
 
+  // stderr, never console.*: the CLI's stdout is a data channel (see io.ts),
+  // and console.debug/info default to stdout in Bun.
   const tracePath = args.debug ? `${AULA_DIR}/login-trace.jsonl` : undefined;
-  const logger: Logger = args.debug ? consoleLogger('aula') : silentLogger;
+  const logger: Logger = args.debug ? stderrLogger('aula') : silentLogger;
   const http = new AulaHttpClient({
     logger,
     ...(tracePath ? { tracer: new JsonlFileTracer(tracePath) } : {}),
@@ -149,7 +152,7 @@ export async function runLogin(args: LoginArgs): Promise<number> {
     // exposes no way to tear a session down, so this can only be waited out —
     // and the usual cause is an earlier attempt that was abandoned rather than
     // finished, whose app prompt is still sitting there unanswered.
-    if (error.name === 'MitidParallelSessionError' || /parallel/i.test(error.message)) {
+    if (error instanceof MitidParallelSessionError || /parallel/i.test(error.message)) {
       info('');
       info(`${fmt.bold('This is MitID\'s "parallel sessions" detector (CAP008).')}`);
       info('  In order:');

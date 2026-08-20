@@ -11,11 +11,12 @@
  * on which a fact could be invented *shrinks* to the reworded text fields.
  */
 
+import { escapeHtml } from '../html.ts';
 import { buildDateSupport, DA_MONTHS, DA_WEEKDAYS, unsupportedDateClaims } from './dates.ts';
 import { parseJsonLoosely, runClaude } from './llm.ts';
 import type { RankedBrief, RankedSignal } from './types.ts';
 
-export function danishDate(isoDay: string): string {
+function danishDate(isoDay: string): string {
   const date = new Date(`${isoDay}T00:00:00`);
   if (Number.isNaN(date.getTime())) return isoDay;
   return `${DA_WEEKDAYS[date.getDay()]} ${date.getDate()}. ${DA_MONTHS[date.getMonth()]}`;
@@ -23,14 +24,6 @@ export function danishDate(isoDay: string): string {
 
 function capitalise(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }
 
 /** What the composer is allowed to know: facts, already checked. */
@@ -109,9 +102,9 @@ Regler:
 3. "titel"/"hvorfor" udelades hvor inputtets formulering allerede er god; omskriv kun for at gøre det kortere, mere konkret eller imperativt.
 4. Skriv alt på dansk. Hold det skimbart på 20 sekunder.`;
 
-export type ComposeResult = { html: string; origin: 'model' | 'fallback'; problems: string[] };
+type ComposeResult = { html: string; problems: string[] };
 
-export type PlanEntry = { signalId: string; titel?: string; hvorfor?: string };
+type PlanEntry = { signalId: string; titel?: string; hvorfor?: string };
 
 export type ComposePlan = {
   topline?: string;
@@ -239,8 +232,6 @@ export async function composePage(
     summaries?: Record<string, string>;
     isNew?: (key: string) => boolean;
     timeoutMs?: number;
-    model?: string;
-    effort?: string;
   } = {},
 ): Promise<ComposeResult> {
   const payload = composePayload(
@@ -251,8 +242,6 @@ export async function composePage(
   );
   const answer = await runClaude(INSTRUCTIONS, JSON.stringify(payload), {
     timeoutMs: opts.timeoutMs ?? 300_000,
-    ...(opts.model ? { model: opts.model } : {}),
-    ...(opts.effort ? { effort: opts.effort } : {}),
   });
   const { plan, problems } = parsePlan(parseJsonLoosely(answer), brief);
   const html = renderPlan(brief, plan, {
@@ -260,7 +249,7 @@ export async function composePage(
     summaries: opts.summaries ?? {},
     ...(opts.isNew ? { isNew: opts.isNew } : {}),
   });
-  return { html, origin: 'model', problems };
+  return { html, problems };
 }
 
 /**

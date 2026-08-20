@@ -5,7 +5,7 @@
  */
 
 import type { AulaClient } from './../client.ts';
-import { localIsoDate } from './../integrations/index.ts';
+import { localIsoDate } from '../integrations/types.ts';
 import {
   buildDigest,
   collectAlbums,
@@ -105,13 +105,11 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
       text: post.text,
       at: post.publishedAt,
       author: post.author,
-      authorRole: 'employee',
       groups: post.groups,
       childNames,
       audience: classifyAudience(post.groups, classGroupNames),
       important: post.important,
       url: `${AULA_PORTAL}/opslag`,
-      attachments: post.attachments,
     });
   }
 
@@ -133,13 +131,11 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
       text: `${thread.subject}\n\n${body}`,
       at: thread.lastMessageAt ?? thread.startedAt,
       author: thread.createdBy,
-      authorRole: messages.at(-1)?.fromRole ?? null,
       groups: [],
       childNames: thread.regarding,
       audience: thread.regarding.length > 0 ? 'child' : 'class',
       important: thread.sensitive || thread.unread,
       url: `${AULA_PORTAL}/beskeder`,
-      attachments: messages.flatMap((m) => m.attachments),
     });
   }
 
@@ -154,7 +150,6 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
         text: entry.content ?? '',
         at: entry.date ?? null,
         author: plan.provider,
-        authorRole: 'employee',
         groups: [],
         childNames: childName ? [childName] : [],
         // A weekly plan is produced for one child's class; it is as specific as
@@ -162,7 +157,6 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
         audience: 'child',
         important: false,
         url: `${AULA_PORTAL}/ugeplan`,
-        attachments: [],
       });
     }
     for (const warning of plan.warnings ?? []) {
@@ -179,13 +173,11 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
       text: [event.title, event.location, event.createdBy].filter(Boolean).join(' · '),
       at: event.start,
       author: event.createdBy,
-      authorRole: 'employee',
       groups: [],
       childNames: event.children,
       audience: event.children.length > 0 ? 'child' : 'class',
       important: event.responseRequired,
       url: `${AULA_PORTAL}/kalender`,
-      attachments: [],
     });
   }
 
@@ -199,8 +191,6 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
       statusDanish: row.statusDanish,
       plannedEntry: row.plannedEntry,
       plannedExit: row.plannedExit,
-      checkInTime: row.checkInTime,
-      checkOutTime: row.checkOutTime,
     });
   }
 
@@ -235,7 +225,6 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
   const className = new Map(childGroups.map((cg) => [cg.child, cg.className]));
 
   return {
-    generatedAt: now.toISOString(),
     // Local, not UTC: the rules layer dates deadlines against the Danish
     // calendar, and a run just after midnight would otherwise head the page
     // with yesterday and republish over yesterday's archive.
@@ -243,7 +232,6 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
     isoWeek: opts.isoWeek,
     windowDays: opts.days,
     family: {
-      guardian: family.guardian.name,
       children: family.children.map((child) => ({
         name: child.name,
         firstName: child.name.split(' ')[0] ?? child.name,
@@ -258,10 +246,8 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
     albums: albums.map((album) => ({
       title: album.title,
       at: album.createdAt,
-      groups: album.groups,
       childNames: childrenForGroups(album.groups, childGroups),
     })),
-    notificationCount: digest.notificationCount,
     newMediaCount,
   };
 }

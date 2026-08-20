@@ -22,7 +22,7 @@ import {
 } from './wire-tracer.ts';
 
 /** Default headers — replicates the Python mobile-Chrome fingerprint. */
-export const DEFAULT_HEADERS: Readonly<Record<string, string>> = Object.freeze({
+const DEFAULT_HEADERS: Readonly<Record<string, string>> = Object.freeze({
   'user-agent':
     'Mozilla/5.0 (Linux; Android 14; sdk_gphone64_x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Mobile Safari/537.36',
   'sec-ch-ua': '"Google Chrome";v="113", "Chromium";v="113", "Not-A.Brand";v="24"',
@@ -37,11 +37,9 @@ export const DEFAULT_HEADERS: Readonly<Record<string, string>> = Object.freeze({
 export interface AulaHttpClientOptions {
   jar?: AulaCookieJar;
   logger?: Logger;
-  /** Override default headers (merged in; lower-cased on lookup). */
-  defaultHeaders?: Record<string, string>;
   /** Wire tracer — captures sanitised request/response pairs. Defaults to
-   *  noop. The CLI's `aula debug login` swaps in an InMemoryTracer or
-   *  JsonlFileTracer to make failures diagnosable. */
+   *  noop. `aula login --debug` swaps in a JsonlFileTracer to make failures
+   *  diagnosable. */
   tracer?: WireTracer;
 }
 
@@ -49,8 +47,6 @@ export interface RequestOptions {
   method?: string;
   headers?: Record<string, string>;
   body?: string | Uint8Array | URLSearchParams;
-  /** Per-request override; defaults to the client's default headers. */
-  noDefaultHeaders?: boolean;
 }
 
 export interface AulaResponse {
@@ -66,10 +62,6 @@ export interface RedirectStep {
   status: number;
 }
 
-export interface FollowOptions extends RequestOptions {
-  maxHops?: number;
-}
-
 export interface FollowResult {
   history: RedirectStep[];
   final: AulaResponse;
@@ -79,21 +71,17 @@ export class AulaHttpClient {
   readonly jar: AulaCookieJar;
   readonly tracer: WireTracer;
   private readonly logger: Logger;
-  private readonly defaultHeaders: Record<string, string>;
   private seq = 0;
 
   constructor(options: AulaHttpClientOptions = {}) {
     this.logger = options.logger ?? silentLogger;
     this.jar = options.jar ?? new AulaCookieJar({ logger: this.logger });
     this.tracer = options.tracer ?? noopTracer;
-    this.defaultHeaders = { ...DEFAULT_HEADERS, ...(options.defaultHeaders ?? {}) };
   }
 
   /** Single request, cookies in/out. No automatic redirect following. */
   async request(url: string, options: RequestOptions = {}): Promise<AulaResponse> {
-    const headers: Record<string, string> = options.noDefaultHeaders
-      ? {}
-      : { ...this.defaultHeaders };
+    const headers: Record<string, string> = { ...DEFAULT_HEADERS };
     for (const [k, v] of Object.entries(options.headers ?? {})) {
       headers[k.toLowerCase()] = v;
     }
@@ -172,12 +160,12 @@ export class AulaHttpClient {
   }
 
   /**
-   * Follow Location redirects manually, capping at `maxHops`.
+   * Follow Location redirects manually, capping at 10 hops.
    * Stops at the first non-3xx response. The caller decides whether further
    * "200 with hidden form" hops are needed.
    */
-  async followRedirects(url: string, options: FollowOptions = {}): Promise<FollowResult> {
-    const maxHops = options.maxHops ?? 10;
+  async followRedirects(url: string, options: RequestOptions = {}): Promise<FollowResult> {
+    const maxHops = 10;
     const history: RedirectStep[] = [];
     let currentUrl = url;
     let currentOptions: RequestOptions = options;

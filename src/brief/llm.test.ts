@@ -1,41 +1,26 @@
 import { describe, expect, test } from 'bun:test';
+import { briefInput, sourceItem } from '../testing/brief-fixtures.ts';
 import { parseJsonLoosely, validateExtraction } from './llm.ts';
 import type { BriefInput, SourceItem } from './types.ts';
 
-const SOURCE: SourceItem = {
+const SOURCE: SourceItem = sourceItem({
   key: 'post:1',
-  kind: 'post',
   title: 'Myretuens løbedag',
   text: 'Kære alle.\n\nI morgen holder vi løbedag — det gør vi hver mandag fremover — og børnene må meget gerne have løbetøj og sko med, de kan løbe i!',
   at: '2026-08-10T11:42:00+00:00',
-  author: 'Palle',
-  authorRole: 'employee',
   groups: ['Myretuen'],
   childNames: ['Viggo Birk Eksempelsen'],
-  audience: 'class',
-  important: false,
-  url: null,
-  attachments: [],
-};
+});
 
-const INPUT: BriefInput = {
-  generatedAt: '2026-08-13T06:30:00Z',
-  today: '2026-08-13',
-  isoWeek: '2026-W33',
-  windowDays: 14,
+const INPUT: BriefInput = briefInput({
   family: {
-    guardian: 'Valdemar',
     children: [
       { name: 'Viggo Birk Eksempelsen', firstName: 'Viggo', institution: 'Eksemplet', className: 'Myretuen', presence: null },
     ],
     isSteppedUp: true,
   },
   items: [SOURCE],
-  health: [],
-  albums: [],
-  notificationCount: 0,
-  newMediaCount: 0,
-};
+});
 
 const good = {
   kind: 'bring',

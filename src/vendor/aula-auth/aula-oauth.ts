@@ -6,7 +6,7 @@
  * refresh-token grant, so both live here.
  */
 
-import { AulaAuthError } from './errors.ts';
+import { AulaAuthFlowError } from './errors.ts';
 import type { AulaHttpClient } from './http.ts';
 import type { Logger } from './logger.ts';
 import { silentLogger } from './logger.ts';
@@ -74,7 +74,7 @@ export interface AulaTokens {
   obtained_at: number;
 }
 
-export class OAuthError extends AulaAuthError {
+export class OAuthError extends AulaAuthFlowError {
   override readonly name: string = 'OAuthError';
 }
 

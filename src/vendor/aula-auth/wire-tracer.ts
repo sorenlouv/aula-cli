@@ -6,13 +6,9 @@
  * sanitize bodies that contain known-secret fields (passwords, auth codes,
  * SAML responses, tokens) so a transcript is safe to share for debugging.
  *
- * Three implementations:
- *   - NoopTracer: default; zero-cost.
- *   - InMemoryTracer: collects all entries in an array. Use for a single CLI
- *     run and dump at the end.
- *   - JsonlFileTracer: appends one JSONL row per entry. Survives crashes.
- *
- * `formatTraceText` turns a trace into a readable terminal report.
+ * Two implementations: `noopTracer` (the zero-cost default) and
+ * `JsonlFileTracer`, which `aula login --debug` points at
+ * `~/.aula/login-trace.jsonl` — append-only, so it survives crashes.
  */
 
 import { Buffer } from 'node:buffer';
@@ -47,17 +43,6 @@ export interface WireTracer {
 
 export const noopTracer: WireTracer = { record() {} };
 
-/** Collect entries in memory. */
-export class InMemoryTracer implements WireTracer {
-  readonly entries: WireEntry[] = [];
-  record(entry: WireEntry): void {
-    this.entries.push(entry);
-  }
-  clear(): void {
-    this.entries.length = 0;
-  }
-}
-
 /** Append-only JSONL file tracer. Creates the parent dir if needed. */
 export class JsonlFileTracer implements WireTracer {
   private dirReady = false;
@@ -71,14 +56,6 @@ export class JsonlFileTracer implements WireTracer {
       this.dirReady = true;
     }
     await appendFile(this.path, `${JSON.stringify(entry)}\n`, 'utf8');
-  }
-}
-
-/** Compose multiple tracers — handy for "in memory AND file". */
-export class CompositeTracer implements WireTracer {
-  constructor(private readonly tracers: WireTracer[]) {}
-  record(entry: WireEntry): void {
-    for (const t of this.tracers) t.record(entry);
   }
 }
 
@@ -158,7 +135,7 @@ export function sanitizeUrl(url: string): string {
 }
 
 /** Truncation cap for response bodies (bytes). */
-export const DEFAULT_BODY_CAP = 4_096;
+const DEFAULT_BODY_CAP = 4_096;
 
 export function sanitizeHeaders(headers: Record<string, string> | Headers): Record<string, string> {
   const out: Record<string, string> = {};
@@ -247,30 +224,4 @@ function truncateString(s: string, cap: number): string {
 function looksLikeJson(s: string): boolean {
   const trimmed = s.trimStart();
   return trimmed.startsWith('{') || trimmed.startsWith('[');
-}
-
-// --------------------------------------------------------------------------
-// Pretty-printing
-// --------------------------------------------------------------------------
-
-/** Render an InMemoryTracer's entries (or any list) as a human-readable log. */
-export function formatTraceText(entries: readonly WireEntry[]): string {
-  const lines: string[] = [];
-  for (const e of entries) {
-    lines.push(`\n# ${e.seq.toString().padStart(3, '0')}  ${e.ts}  ${e.method} ${e.url}`);
-    lines.push(`  request headers:`);
-    for (const [k, v] of Object.entries(e.requestHeaders)) lines.push(`    ${k}: ${v}`);
-    if (e.requestBody) lines.push(`  request body: ${e.requestBody}`);
-    lines.push(`  → ${e.status} (${e.durationMs} ms, ${e.responseBodyBytes} bytes)`);
-    lines.push(`  response headers:`);
-    for (const [k, v] of Object.entries(e.responseHeaders)) lines.push(`    ${k}: ${v}`);
-    if (e.responseBody) {
-      const indented = e.responseBody
-        .split('\n')
-        .map((l) => `    ${l}`)
-        .join('\n');
-      lines.push(`  response body:\n${indented}`);
-    }
-  }
-  return lines.join('\n');
 }

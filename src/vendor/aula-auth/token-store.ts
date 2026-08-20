@@ -1,18 +1,14 @@
 /**
- * Token persistence. The MCP server / CLI both load tokens from here so we
- * don't make the user re-do MitID for every process.
+ * Encrypted token persistence, so the user does not re-do MitID per process.
  *
- * Design:
- *   - `TokenStore` is the pluggable interface (load / save / clear).
- *   - `MemoryTokenStore` for tests + ephemeral runs.
- *   - `EncryptedFileTokenStore` writes a JSON envelope (version + IV +
- *     ciphertext + tag) at `~/.config/aula-mcp/tokens.json` (override path
- *     via constructor). The encryption key comes from one of:
- *       1. an explicit Buffer passed to the constructor (keychain integration
- *          can read its key and pass it in),
- *       2. process.env.AULA_MCP_KEY (hex-encoded 32-byte key),
- *       3. a key file at `~/.config/aula-mcp/.key` (created with chmod 600
- *          on first use). We warn that 1 or 2 are stronger.
+ * `EncryptedFileTokenStore` writes a JSON envelope (version + IV + ciphertext
+ * + tag) at the configured path. The AES-256-GCM key comes from one of:
+ *   1. an explicit Buffer passed to the constructor (the tests use this),
+ *   2. the configured env var (64 hex chars, or any passphrase — hashed),
+ *   3. the configured key file, created with chmod 600 on first use.
+ *
+ * Paths and the env-var name are supplied by `src/auth.ts` — this module has
+ * no defaults of its own, so it cannot quietly write outside `$AULA_DIR`.
  *
  * The persisted record includes the active identity (so multi-child guardians
  * don't have to re-pick on every refresh) and a `version` to allow future
@@ -21,10 +17,8 @@
 
 import { Buffer } from 'node:buffer';
 import { chmod, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import {
-  type AulaOAuthConfig,
   type AulaTokens,
   DEFAULT_OAUTH_CONFIG,
   isTokenExpired,
@@ -32,12 +26,11 @@ import {
 } from './aula-oauth.ts';
 import { aesGcmDecrypt, aesGcmEncrypt, randomBytes, sha256 } from './crypto.ts';
 import { hexToBytes } from './encoding.ts';
-import { AulaAuthError } from './errors.ts';
+import { AulaAuthFlowError } from './errors.ts';
 import type { AulaHttpClient } from './http.ts';
-import type { Logger } from './logger.ts';
 import { silentLogger } from './logger.ts';
 
-export class TokenStoreError extends AulaAuthError {
+export class TokenStoreError extends AulaAuthFlowError {
   override readonly name: string = 'TokenStoreError';
 }
 
@@ -53,48 +46,17 @@ export interface StoredTokenRecord {
   identityName?: string;
   /** When the record was last written. Unix epoch seconds. */
   saved_at: number;
-  /** Free-form metadata bag — debug only. */
-  meta?: Record<string, unknown>;
 }
-
-export interface TokenStore {
-  load(): Promise<StoredTokenRecord | null>;
-  save(record: StoredTokenRecord): Promise<void>;
-  clear(): Promise<void>;
-}
-
-// --------------------------------------------------------------------------
-// MemoryTokenStore
-// --------------------------------------------------------------------------
-
-export class MemoryTokenStore implements TokenStore {
-  private record: StoredTokenRecord | null = null;
-  async load(): Promise<StoredTokenRecord | null> {
-    return this.record;
-  }
-  async save(record: StoredTokenRecord): Promise<void> {
-    this.record = record;
-  }
-  async clear(): Promise<void> {
-    this.record = null;
-  }
-}
-
-// --------------------------------------------------------------------------
-// EncryptedFileTokenStore
-// --------------------------------------------------------------------------
 
 export interface EncryptedFileTokenStoreOptions {
-  /** Defaults to `~/.config/aula-mcp/tokens.json`. */
-  filePath?: string;
-  /** Defaults to `~/.config/aula-mcp/.key`. */
+  filePath: string;
+  /** Where the generated key lives. Without it (and without `key` or the env
+   *  var) there is no key source, and the store refuses to run. */
   keyFilePath?: string;
-  /** Force-supply the 32-byte AES-GCM key (e.g. from a keychain). Wins over
-   *  env / file. */
+  /** Force-supply the 32-byte AES-GCM key. Wins over env / file. */
   key?: Buffer;
-  /** Override env var lookup. */
+  /** Env var consulted for the key before falling back to the key file. */
   envVarName?: string;
-  logger?: Logger;
 }
 
 interface EncryptedEnvelope {
@@ -109,28 +71,20 @@ interface EncryptedEnvelope {
   tag: string;
 }
 
-const DEFAULT_DIR = join(homedir(), '.config', 'aula-mcp');
-const DEFAULT_FILE = join(DEFAULT_DIR, 'tokens.json');
-const DEFAULT_KEY_FILE = join(DEFAULT_DIR, '.key');
-const DEFAULT_ENV = 'AULA_MCP_KEY';
-
-export class EncryptedFileTokenStore implements TokenStore {
+export class EncryptedFileTokenStore {
   /** Resolved on-disk path. Exposed (read-only) so long-lived consumers can
-   *  watch it for external writes (e.g. `aula login` from another process
-   *  rotating tokens beneath a running MCP server). */
+   *  watch it for external writes. */
   readonly filePath: string;
-  private readonly keyFilePath: string;
-  private readonly envVar: string;
+  private readonly keyFilePath: string | undefined;
+  private readonly envVar: string | undefined;
   private readonly explicitKey?: Buffer;
-  private readonly logger: Logger;
   private cachedKey?: Buffer;
 
-  constructor(opts: EncryptedFileTokenStoreOptions = {}) {
-    this.filePath = opts.filePath ?? DEFAULT_FILE;
-    this.keyFilePath = opts.keyFilePath ?? DEFAULT_KEY_FILE;
-    this.envVar = opts.envVarName ?? DEFAULT_ENV;
+  constructor(opts: EncryptedFileTokenStoreOptions) {
+    this.filePath = opts.filePath;
+    this.keyFilePath = opts.keyFilePath;
+    this.envVar = opts.envVarName;
     if (opts.key) this.explicitKey = opts.key;
-    this.logger = opts.logger ?? silentLogger;
   }
 
   async load(): Promise<StoredTokenRecord | null> {
@@ -163,7 +117,7 @@ export class EncryptedFileTokenStore implements TokenStore {
       );
     } catch (e) {
       throw new TokenStoreError(
-        'Failed to decrypt token file. Wrong AULA_MCP_KEY, or the key file is missing/corrupted.',
+        `Failed to decrypt token file. Wrong ${this.envVar ?? 'key'}, or the key file is missing/corrupted.`,
         { cause: e },
       );
     }
@@ -211,11 +165,6 @@ export class EncryptedFileTokenStore implements TokenStore {
     }
   }
 
-  /** Where the encrypted JSON lives. Useful for `aula status`. */
-  get path(): string {
-    return this.filePath;
-  }
-
   // ---- key resolution ------------------------------------------------------
 
   private async resolveKey(): Promise<Buffer> {
@@ -225,14 +174,16 @@ export class EncryptedFileTokenStore implements TokenStore {
       this.cachedKey = this.explicitKey;
       return this.cachedKey;
     }
-    const envValue = process.env[this.envVar];
+    const envValue = this.envVar ? process.env[this.envVar] : undefined;
     if (envValue) {
-      const buf = decodeKeyMaterial(envValue);
-      this.cachedKey = buf;
-      this.logger.debug('token-store.key.from_env', { envVar: this.envVar });
+      this.cachedKey = decodeKeyMaterial(envValue);
       return this.cachedKey;
     }
-    // Fall back to a key file.
+    if (!this.keyFilePath) {
+      throw new TokenStoreError(
+        'No key source configured — pass `key`, `keyFilePath`, or set the env var.',
+      );
+    }
     let fileContents: string;
     try {
       fileContents = (await readFile(this.keyFilePath, 'utf8')).trim();
@@ -246,17 +197,12 @@ export class EncryptedFileTokenStore implements TokenStore {
         } catch {
           // best-effort
         }
-        this.logger.warn('token-store.key.generated', {
-          path: this.keyFilePath,
-          note: `For better security, set ${this.envVar}=<hex> or pass a keychain-managed key.`,
-        });
         this.cachedKey = fresh;
         return this.cachedKey;
       }
       throw new TokenStoreError(`Failed to read key file ${this.keyFilePath}`, { cause: e });
     }
-    const buf = decodeKeyMaterial(fileContents);
-    this.cachedKey = buf;
+    this.cachedKey = decodeKeyMaterial(fileContents);
     return this.cachedKey;
   }
 }
@@ -286,33 +232,28 @@ function isEnoent(e: unknown): boolean {
 // Refresh-on-load helper
 // --------------------------------------------------------------------------
 
-export interface WithFreshTokensArgs {
-  store: TokenStore;
-  http: AulaHttpClient;
-  /** Override OAuth config (defaults to production constants). */
-  oauth?: AulaOAuthConfig;
-  /** Buffer in seconds before expiry that triggers a refresh. Default 60. */
-  refreshBufferSeconds?: number;
-  logger?: Logger;
-}
-
 /**
- * Load the stored record and refresh the access token if it's near expiry.
- * Saves the new tokens back to the store. Returns the (possibly refreshed)
- * record. Throws if no record is present.
+ * Load the stored record and refresh the access token if it's within 60s of
+ * expiry. Saves the new tokens back to the store. Returns the (possibly
+ * refreshed) record. Throws if no record is present.
  */
-export async function withFreshTokens(args: WithFreshTokensArgs): Promise<StoredTokenRecord> {
-  const logger = args.logger ?? silentLogger;
-  const oauth = args.oauth ?? DEFAULT_OAUTH_CONFIG;
+export async function withFreshTokens(args: {
+  store: EncryptedFileTokenStore;
+  http: AulaHttpClient;
+}): Promise<StoredTokenRecord> {
   const record = await args.store.load();
   if (!record) {
-    throw new TokenStoreError('No tokens on disk. Run `aula login` first.');
+    throw new TokenStoreError('No tokens on disk. Run `bun run login` first.');
   }
-  if (!isTokenExpired(record.tokens, args.refreshBufferSeconds ?? 60)) {
+  if (!isTokenExpired(record.tokens, 60)) {
     return record;
   }
-  logger.info('token-store.refresh.start');
-  const refreshed = await refreshAccessToken(args.http, oauth, record.tokens.refresh_token, logger);
+  const refreshed = await refreshAccessToken(
+    args.http,
+    DEFAULT_OAUTH_CONFIG,
+    record.tokens.refresh_token,
+    silentLogger,
+  );
   const updated: StoredTokenRecord = {
     ...record,
     tokens: refreshed,

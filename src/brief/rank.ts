@@ -170,7 +170,7 @@ const ABOUT_THE_CHILD =
   /\b(jeres|dit|dine|deres) barn\b|\bbørnene\b|\beleverne\b|\bklassen\b|\bbarnet\b/i;
 const AN_OFFER = /\btilbud\b|\bforløb(et|ene)?\b|\bkursus\b|\bnetværk(et)?\b|målrettet forældre/i;
 
-export function looksLikeChildBusiness(item: { text: string; childNames: string[] }): boolean {
+function looksLikeChildBusiness(item: { text: string; childNames: string[] }): boolean {
   if (item.childNames.length > 0) return true;
   if (AN_OFFER.test(item.text)) return false;
   return ABOUT_THE_CHILD.test(item.text);

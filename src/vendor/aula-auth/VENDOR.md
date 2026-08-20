@@ -30,9 +30,34 @@ readable as intentional-vs-drift.
   'darwin'` — so carrying it meant `login` simply refused to run on a Linux
   devbox, and it made two encryption stories where one will do. Nothing else in
   the vendored tree referenced it.
+- **Pruned everything this CLI does not call** (2026-08-20 release audit).
+  Upstream is a library serving an MCP server as well; this is a CLI with one
+  login path. Removed, with their tests where they had any: `MemoryTokenStore`
+  and the `TokenStore` interface; the donor's `~/.config/aula-mcp` defaults and
+  `AULA_MCP_KEY` naming in `token-store.ts` (paths now always come from
+  `src/auth.ts`); the `meta` record field; `state.ts` (`generateState` was an
+  alias of `randomBase64Url`); `consoleLogger` (stdout is this CLI's data
+  channel — `login --debug` uses `stderrLogger`); `InMemoryTracer`,
+  `CompositeTracer` and `formatTraceText`; `pkcs7Pad`/`pkcs7Unpad`,
+  `bytesToHex`, `bigIntToHex` and `base64url.decode`; `extractText`,
+  `extractAllAttr` and `pageTitle`; `HtmlParseError`; the unused `aad`
+  parameter on the AES-GCM helpers; SRP's `publicAValue`/`K` accessors,
+  `authDecPin` and the class-level `N`/`g`; `MitidClientState`/`getState()`;
+  the never-passed `signal`/`pollIntervalMs`/`maxPollMs` login options and the
+  abort plumbing under them; `AulaLoginClient.refresh()` and the `oauth`
+  override; the `defaultHeaders`/`noDefaultHeaders`/`maxHops` HTTP options;
+  the base64 arm of `signFlowValueProof` (only the removed `/complete` path
+  used it); and the `CookieJar` back-compat constructor branch.
+- **Renamed the base error `AulaAuthError` → `AulaAuthFlowError`.** The main
+  codebase has its own `AulaAuthError` in `client.ts` ("credentials expired"),
+  and two unrelated classes sharing a name meant vendor errors missed the
+  CLI's exit-code-2 branch.
+- **`index.ts` re-exports only what `src/` imports.** Vendor-internal modules
+  import each other directly.
 
-Everything else is byte-identical to upstream, and typechecks and passes its own
-tests unmodified under this project's stricter `tsconfig.json`.
+The remaining code typechecks and passes its tests under this project's
+stricter `tsconfig.json`. Expect `vendor-diff.sh` to be noisy against upstream
+now — the list above is what makes it readable.
 
 ## Checking for upstream drift
 

@@ -95,6 +95,15 @@ function stripTags(input: string): string {
   return input.replace(/<[^>]*>/g, '');
 }
 
+/** For interpolating untrusted text into generated markup. */
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 /** Single-line preview for list output. */
 export function preview(text: string, max = 160): string {
   const flat = text.replace(/\s+/g, ' ').trim();

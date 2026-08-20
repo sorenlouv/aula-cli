@@ -1,9 +1,10 @@
 /**
- * The design system the composer works inside.
+ * The design system the rendered page is built from.
  *
- * The stylesheet is *not* generated. The model chooses which components to use,
- * in what order and at what emphasis, but it cannot redefine a colour or a
- * font — so a bad day costs an odd layout, never an unreadable page.
+ * The stylesheet is *not* generated. The model decides ordering and wording
+ * through its compose plan, but every element and colour on the page comes
+ * from here — so a bad model day costs an odd ordering, never an unreadable
+ * page.
  *
  * Derived from the mockup that was reviewed and approved, including the print
  * rules, which matter more than they look: the PDF is the copy that gets
@@ -25,7 +26,7 @@ const DARK_TOKENS = `
   --line:#302e37; --line-2:#26252c;
   --c1:#a5a0fb; --c2:#5eead4; --c3:#fda4af;
   --now:#fb923c; --now-bg:#2e1c10; --soon:#fbbf24; --soon-bg:#2a2210;
-  --ok:#86efac; --ok-bg:#14251a; --warn:#fbbf24; --warn-bg:#2a2210;
+  --warn:#fbbf24; --warn-bg:#2a2210;
   --quote:#26252c;
   --shadow:0 1px 2px rgba(0,0,0,.3),0 4px 16px -6px rgba(0,0,0,.5);
 `;
@@ -36,7 +37,7 @@ export const BRIEF_CSS = `
   --line:#e7e2db; --line-2:#f0ece6;
   --c1:#4f46e5; --c2:#0d9488; --c3:#be123c;
   --now:#c2410c; --now-bg:#fff1e7; --soon:#a16207; --soon-bg:#fdf6e3;
-  --ok:#15803d; --ok-bg:#effaf1; --warn:#b45309; --warn-bg:#fdf4e7;
+  --warn:#b45309; --warn-bg:#fdf4e7;
   --quote:#f7f4ef;
   --shadow:0 1px 2px rgba(28,26,23,.04),0 4px 16px -6px rgba(28,26,23,.10);
 }
@@ -62,7 +63,6 @@ h1{margin:0;font-size:34px;letter-spacing:-.02em;font-weight:650}
 .c1{background:var(--c1)} .c2{background:var(--c2)} .c3{background:var(--c3)}
 .topline{font-size:20px;line-height:1.5;letter-spacing:-.01em;margin:0 0 34px;padding:20px 22px;
   background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
-.topline .lead{font-weight:600}
 section{margin-bottom:34px}
 h2{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);
   font-weight:650;margin:0 0 12px;display:flex;align-items:center;gap:10px}
@@ -76,8 +76,6 @@ h2::after{content:"";flex:1;height:1px;background:var(--line)}
 .chip{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;padding:3px 9px;border-radius:6px}
 .chip.now{background:var(--now-bg);color:var(--now)}
 .chip.soon{background:var(--soon-bg);color:var(--soon)}
-.chip.later{background:var(--line-2);color:var(--ink-2)}
-.chip.ok{background:var(--ok-bg);color:var(--ok)}
 .chip.new{background:transparent;color:var(--ink-3);border:1px dashed var(--line)}
 .who{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-2);font-weight:550}
 .title{font-size:17.5px;font-weight:600;letter-spacing:-.01em;margin:0 0 6px}
@@ -87,22 +85,6 @@ blockquote{margin:0;padding:9px 14px;background:var(--quote);border-radius:8px;f
 .src{margin-top:9px;font-size:12px;color:var(--ink-3)}
 .src a{color:var(--ink-3);text-decoration:underline;text-underline-offset:2px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow)}
-.appt{display:flex;gap:16px;padding:13px 4px;border-bottom:1px solid var(--line-2)}
-.appt:last-child{border-bottom:0}
-.when{flex:none;width:112px;font-variant-numeric:tabular-nums}
-.when b{display:block;font-size:14.5px;font-weight:600}
-.when span{font-size:12px;color:var(--ink-3)}
-.what b{font-weight:600;font-size:15px}
-.what p{margin:3px 0 0;font-size:13.5px;color:var(--ink-2)}
-.week{display:grid;grid-template-columns:repeat(7,1fr);gap:7px}
-.day{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:11px 10px;
-  min-height:104px;box-shadow:var(--shadow)}
-.day.today{border-color:var(--now);background:var(--now-bg)}
-.day.weekend{background:transparent;border-style:dashed;box-shadow:none}
-.dname{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);font-weight:650}
-.dnum{font-size:19px;font-weight:600;margin:1px 0 8px;font-variant-numeric:tabular-nums}
-.ev{font-size:11.5px;line-height:1.35;margin-bottom:6px;display:flex;gap:5px}
-.ev .dot{margin-top:4px}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(272px,1fr));gap:12px}
 .cc{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow)}
 .cc h3{margin:0 0 2px;font-size:16.5px;font-weight:650;display:flex;align-items:center;gap:8px}
@@ -137,47 +119,15 @@ details.muted summary{font-size:12.5px;font-weight:500;color:var(--ink-3);paddin
 footer{margin-top:26px;text-align:center;color:var(--ink-3);font-size:12px}
 @media print{
   body{background:#fff}
-  .card,.cc,.day,.panel,details,.tile{box-shadow:none}
+  .card,.cc,.panel,details,.tile{box-shadow:none}
   details{opacity:1}
   summary::after{display:none}
-  .card,.cc,.di,.appt{break-inside:avoid}
+  .card,.cc,.di{break-inside:avoid}
 }
 @media (max-width:680px){
-  .week{grid-template-columns:repeat(2,1fr)}
   .wrap{padding:26px 16px 60px}
   h1{font-size:27px}
   .topline{font-size:17.5px}
 }
 `;
 
-/** Handed to the composer verbatim, so it builds from tested parts. */
-export const COMPONENT_GUIDE = `
-Wrapper (required, outermost): <div class="wrap"> … </div>
-
-header      <header><div><h1>Torsdag 13. august</h1><div class="meta">…</div></div>
-              <div class="kids"><div class="kid"><span class="dot c1"></span><b>Alma</b><span>2E · 07–17</span></div>…</div></header>
-topline     <p class="topline"><span class="lead">Kort konklusion.</span> Uddybning.</p>
-section     <section><h2>Overskrift <span class="count">3</span></h2> … </section>
-card        <div class="card now|soon" data-signal-id="…" data-source-id="…">
-              <div class="row"><span class="chip now|soon|later|ok|new">I DAG</span>
-                <span class="who"><span class="dot c1"></span>Alma</span></div>
-              <p class="title">…</p><p class="why">…</p>
-              <blockquote>«ordret citat»</blockquote>
-              <div class="src">kilde · <a href="…">åbn i Aula</a></div></div>
-list panel  <div class="panel"><div class="appt"><div class="when"><b>Fre 18/9</b><span>13.00–14.00</span></div>
-              <div class="what"><b>Titel</b><p>Detalje</p></div></div>…</div>
-week strip  <div class="week"><div class="day today|weekend"><div class="dname">Tor</div><div class="dnum">13</div>
-              <div class="ev"><span class="dot c1"></span><span>…</span></div></div>× 7</div>
-child cards <div class="grid"><div class="cc"><h3><span class="dot c1"></span>Alma</h3>
-              <div class="sub">2E · Eksempelskolen</div><ul><li><i>!</i><span>…</span></li></ul>
-              <div class="times">Planlagt i dag 07.00–17.00</div></div>…</div>
-collapsible <details><summary>4 opslag uden noget, du skal gøre</summary>
-              <div class="di"><b>Titel</b><p>…</p><div class="src">…</div></div>…</details>
-muted fold  <details class="muted"><summary>3 kommunale fællesbeskeder skjult</summary>…</details>
-tiles       <div class="chips"><div class="tile"><b>Album</b><span>…</span></div>…</div>
-status      <div class="panel" data-block="datastatus"><div class="st bad"><i>⚠</i><span>…</span></div>
-              <div class="st"><i>✓</i><span>…</span></div></div>
-footer      <footer>…</footer>
-
-Child colours: c1 = first child, c2 = second, c3 = third. Use the same one everywhere for a given child.
-`;

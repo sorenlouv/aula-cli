@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { briefInput, sourceItem } from '../testing/brief-fixtures.ts';
 import { classifyAudience } from './collect.ts';
 import { ACT_CAP, rank, signalsFromRules } from './rank.ts';
 import type { BriefInput, Signal, SourceItem } from './types.ts';
@@ -6,36 +7,11 @@ import type { BriefInput, Signal, SourceItem } from './types.ts';
 const TODAY = new Date(2026, 7, 13);
 
 function item(partial: Partial<SourceItem> & Pick<SourceItem, 'key'>): SourceItem {
-  return {
-    kind: 'post',
-    title: 'Titel',
-    text: '',
-    at: null,
-    author: null,
-    authorRole: 'employee',
-    groups: [],
-    childNames: [],
-    audience: 'class',
-    important: false,
-    url: null,
-    attachments: [],
-    ...partial,
-  };
+  return sourceItem({ title: 'Titel', at: null, author: null, ...partial });
 }
 
 function input(items: SourceItem[]): BriefInput {
-  return {
-    generatedAt: TODAY.toISOString(),
-    today: '2026-08-13',
-    isoWeek: '2026-W33',
-    windowDays: 14,
-    family: { guardian: 'Valdemar', children: [], isSteppedUp: true },
-    items,
-    health: [],
-    albums: [],
-    notificationCount: 0,
-    newMediaCount: 0,
-  };
+  return briefInput({ items });
 }
 
 describe('classifyAudience', () => {

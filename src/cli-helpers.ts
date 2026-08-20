@@ -4,7 +4,7 @@ import type { CommonFile } from './types.ts';
 import { isoWeekString, weekOffset } from './integrations/types.ts';
 import type { Contact, PresenceTemplates } from './types.ts';
 
-export const COPENHAGEN = 'Europe/Copenhagen';
+const COPENHAGEN = 'Europe/Copenhagen';
 
 export function indent(text: string, spaces: number): string {
   const pad = ' '.repeat(spaces);
@@ -63,7 +63,7 @@ export function parseSince(input: string): Date {
  * for years. Getting it wrong is quiet and bad: an off-by-one turns "på tur"
  * into "present" and "ferie/fri" into "sick".
  */
-export const PRESENCE_STATUS: Readonly<Record<number, { da: string; en: string }>> = Object.freeze({
+const PRESENCE_STATUS: Readonly<Record<number, { da: string; en: string }>> = Object.freeze({
   0: { da: 'Ikke kommet', en: 'not arrived' },
   1: { da: 'Syg', en: 'sick' },
   2: { da: 'Ferie/fri', en: 'holiday or day off' },
@@ -87,7 +87,7 @@ export function presenceStatusDanish(status: number | string | undefined): strin
  * "Henteform" — how a child is allowed to leave, on a komme/gå template.
  * Wire constants from Aula's presence frontend; do not renumber.
  */
-export const PRESENCE_ACTIVITY_TYPES: Readonly<Record<number, { da: string; en: string }>> =
+const PRESENCE_ACTIVITY_TYPES: Readonly<Record<number, { da: string; en: string }>> =
   Object.freeze({
     0: { da: 'Hentes af', en: 'collected by a named person' },
     1: { da: 'Selvbestemmer', en: 'may leave alone within a window' },
@@ -95,7 +95,7 @@ export const PRESENCE_ACTIVITY_TYPES: Readonly<Record<number, { da: string; en: 
     3: { da: 'Går hjem med', en: 'leaves with a named person' },
   });
 
-export function presenceActivityType(activityType: number | null | undefined): string | null {
+function presenceActivityType(activityType: number | null | undefined): string | null {
   if (activityType === null || activityType === undefined) return null;
   return PRESENCE_ACTIVITY_TYPES[activityType]?.en ?? `activityType ${activityType}`;
 }

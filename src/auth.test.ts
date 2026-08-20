@@ -44,27 +44,16 @@ function sandbox(overrides: Record<string, string> = {}) {
     ...overrides,
   };
 
-  const writer = join(dir, 'write-tokens.ts');
-  writeFileSync(
-    writer,
-    `import { tokenStore } from '${join(ROOT, 'src/auth.ts')}';\n` +
-      `await tokenStore().save({\n` +
-      `  version: 1,\n` +
-      `  username: 'valdemarex',\n` +
-      // Hours out, so `withFreshTokens` has no reason to attempt a refresh.
-      `  tokens: { access_token: '${ACCESS_TOKEN}', refresh_token: 'r', token_type: 'Bearer',\n` +
-      `            expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 7200 },\n` +
-      `  saved_at: Math.floor(Date.now() / 1000),\n` +
-      `});\n`,
-  );
-
   return {
     dir,
     env,
     tokenPath: join(dir, 'tokens.json'),
-    /** Stores a login without going through MitID. */
+    /** Stores a login without going through MitID — see src/testing/seed-tokens.ts. */
     storeTokens() {
-      const r = Bun.spawnSync({ cmd: ['bun', writer], env: { ...process.env, ...env } });
+      const r = Bun.spawnSync({
+        cmd: ['bun', join(ROOT, 'src/testing/seed-tokens.ts')],
+        env: { ...process.env, ...env, SEED_ACCESS_TOKEN: ACCESS_TOKEN },
+      });
       assert.equal(r.exitCode, 0, `writing tokens failed: ${r.stderr.toString()}`);
     },
     run(...args: string[]) {

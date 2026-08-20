@@ -69,11 +69,17 @@ test('an institution with no widget configuration detects nothing', () => {
   assert.deepEqual(detectWidgets(bare), []);
 });
 
-test('every widget in the registry that claims a capability has an integration', () => {
+test('the widget registry and the fetcher table cover exactly the same ids', () => {
   for (const [widgetId, info] of Object.entries(WIDGETS)) {
     assert.ok(
       SUPPORTED_WIDGET_IDS.includes(widgetId),
       `widget ${widgetId} (${info.name}) is registered but has no fetcher`,
+    );
+  }
+  for (const widgetId of SUPPORTED_WIDGET_IDS) {
+    assert.ok(
+      widgetId in WIDGETS,
+      `widget ${widgetId} has a fetcher but no registry entry — detection can never reach it`,
     );
   }
 });

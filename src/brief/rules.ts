@@ -10,7 +10,7 @@
  * date shown without the sentence it came from cannot be checked at a glance.
  */
 
-import { localIsoDate } from './../integrations/index.ts';
+import { localIsoDate } from '../integrations/types.ts';
 import type { SignalKind, Urgency } from './types.ts';
 
 /**
@@ -100,8 +100,6 @@ export function splitSentences(text: string): string[] {
   return out;
 }
 
-const iso = localIsoDate;
-
 /**
  * Picks the year for a day/month with none given.
  *
@@ -137,7 +135,7 @@ function nextWeekday(weekday: number, today: Date): Date {
 export function extractDates(sentence: string, today: Date): string[] {
   const found: string[] = [];
   const push = (date: Date) => {
-    const value = iso(date);
+    const value = localIsoDate(date);
     if (!found.includes(value)) found.push(value);
   };
 
@@ -214,7 +212,7 @@ export function urgencyFor(dueAt: string | null, today: Date, fallback: Urgency)
   if (!dueAt) return fallback;
   const due = Date.parse(`${dueAt}T00:00:00`);
   if (!Number.isFinite(due)) return fallback;
-  const days = Math.round((due - Date.parse(`${iso(today)}T00:00:00`)) / 86_400_000);
+  const days = Math.round((due - Date.parse(`${localIsoDate(today)}T00:00:00`)) / 86_400_000);
   if (days < 0) return 'fyi';
   if (days === 0) return 'now';
   if (days <= 7) return 'week';

@@ -20,6 +20,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BRIEF_DIR } from './brief/state.ts';
+import { escapeHtml } from './html.ts';
 
 /** Must match the `port` in `.claude/launch.json` — that is what the app opens. */
 const PORT = Number(process.env.PORT ?? 4317);
@@ -71,14 +72,6 @@ const GENERATING = page({
 <p>This takes a couple of minutes — the model reads two weeks of Aula. The
 page refreshes itself and will show the result as soon as it exists.</p>`,
 });
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
 
 function failedPage(reason: string): string {
   return page({

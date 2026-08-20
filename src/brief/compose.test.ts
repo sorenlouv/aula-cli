@@ -1,23 +1,20 @@
 import { describe, expect, test } from 'bun:test';
+import { briefInput, sourceItem } from '../testing/brief-fixtures.ts';
 import { fallbackPage, parsePlan, renderPlan } from './compose.ts';
 import type { BriefInput, RankedBrief, RankedSignal, SourceItem } from './types.ts';
 import { validatePage } from './validate.ts';
 
-const SOURCE: SourceItem = {
+const SOURCE: SourceItem = sourceItem({
   key: 'plan:x:0',
   kind: 'plan',
   title: 'Idræt',
   text: 'Husk skiftetøj og badeting til efter timen.',
   at: '2026-08-13T08:00:00',
   author: 'EasyIQ',
-  authorRole: 'employee',
-  groups: [],
   childNames: ['Alma Signe Eksempelsen'],
   audience: 'child',
-  important: false,
   url: 'https://www.aula.dk/portal/#/ugeplan',
-  attachments: [],
-};
+});
 
 const MUST_SHOW: RankedSignal = {
   id: 'plan:x:0#0',
@@ -62,13 +59,8 @@ const HIDDEN: RankedSignal = {
   source: { ...SOURCE, key: 'post:9', title: 'Forældrekursus', audience: 'municipal', groups: ['Alle forældre'] },
 };
 
-const INPUT: BriefInput = {
-  generatedAt: '2026-08-13T06:30:00Z',
-  today: '2026-08-13',
-  isoWeek: '2026-W33',
-  windowDays: 14,
+const INPUT: BriefInput = briefInput({
   family: {
-    guardian: 'Valdemar',
     children: [
       { name: 'Alma Signe Eksempelsen', firstName: 'Alma', institution: 'Eksempelskolen', className: '2E', presence: null },
     ],
@@ -78,10 +70,8 @@ const INPUT: BriefInput = {
   health: [
     { level: 'warn', message: 'Ugeplan for Viggo kunne ikke hentes — EasyIQ svarede HTTP 500.' },
   ],
-  albums: [{ title: 'Skovtur med 2E', at: '2026-08-12', groups: ['2E'], childNames: ['Alma'] }],
-  notificationCount: 0,
-  newMediaCount: 0,
-};
+  albums: [{ title: 'Skovtur med 2E', at: '2026-08-12', childNames: ['Alma'] }],
+});
 
 const BRIEF: RankedBrief = {
   input: INPUT,

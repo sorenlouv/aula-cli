@@ -48,25 +48,6 @@ export function extractAttr(input: HtmlInput, selector: string, attr: string): s
   return $(selector).first().attr(attr) ?? null;
 }
 
-/** All matching attribute values (e.g. every `data-loginoptions` JSON blob). */
-export function extractAllAttr(input: HtmlInput, selector: string, attr: string): string[] {
-  const $ = load(input);
-  const values: string[] = [];
-  $(selector).each((_, el) => {
-    const v = $(el).attr(attr);
-    if (v != null) values.push(v);
-  });
-  return values;
-}
-
-/** First matching element's text content (trimmed), or null. */
-export function extractText(input: HtmlInput, selector: string): string | null {
-  const $ = load(input);
-  const el = $(selector).first();
-  if (el.length === 0) return null;
-  return el.text().trim();
-}
-
 /**
  * Extract a `<meta http-equiv="refresh" content="0;url=...">` URL.
  * Returns the URL the page intends to redirect to via meta-refresh, or null

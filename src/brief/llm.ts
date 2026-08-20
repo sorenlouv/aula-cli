@@ -26,7 +26,17 @@ const KINDS: ReadonlySet<string> = new Set<SignalKind>([
 ]);
 const URGENCIES: ReadonlySet<string> = new Set<Urgency>(['now', 'week', 'later', 'fyi']);
 
-export class LlmUnavailableError extends Error {}
+/**
+ * Which model (and how hard it thinks) is the quality/speed dial for the whole
+ * brief. The env vars are the user's standing choice; `aula schedule` bakes
+ * them into the launchd agent (see BAKED_ENV in schedule.ts). Shared with
+ * deploy.ts so every `claude -p` in the pipeline runs on the same knobs.
+ */
+export function modelEffortArgs(): string[] {
+  const model = process.env.AULA_BRIEF_MODEL;
+  const effort = process.env.AULA_BRIEF_EFFORT;
+  return [...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])];
+}
 
 /**
  * Runs `claude -p` with tools disabled, data on stdin.
@@ -55,18 +65,10 @@ export class LlmUnavailableError extends Error {}
 export async function runClaude(
   instructions: string,
   stdin: string,
-  opts: { timeoutMs?: number; model?: string; effort?: string } = {},
+  opts: { timeoutMs?: number } = {},
 ): Promise<string> {
-  // Which model (and how hard it thinks) is the quality/speed dial for the
-  // whole brief. Per-call opts win; the env vars are the user's standing choice.
-  const model = opts.model ?? process.env.AULA_BRIEF_MODEL;
-  const effort = opts.effort ?? process.env.AULA_BRIEF_EFFORT;
   const proc = Bun.spawn(
-    [
-      'claude', '-p', instructions, '--tools', '', '--strict-mcp-config',
-      ...(model ? ['--model', model] : []),
-      ...(effort ? ['--effort', effort] : []),
-    ],
+    ['claude', '-p', instructions, '--tools', '', '--strict-mcp-config', ...modelEffortArgs()],
     {
       stdin: new TextEncoder().encode(stdin),
       stdout: 'pipe',
@@ -82,7 +84,7 @@ export async function runClaude(
       proc.exited,
     ]);
     if (code !== 0) {
-      throw new LlmUnavailableError(`claude -p exited ${code}: ${err.trim() || '(no stderr)'}`);
+      throw new Error(`claude -p exited ${code}: ${err.trim() || '(no stderr)'}`);
     }
     return out.trim();
   } finally {
@@ -307,7 +309,7 @@ function cacheKey(payload: unknown): string {
  */
 export async function extractSignals(
   input: BriefInput,
-  opts: { useCache?: boolean; timeoutMs?: number; model?: string; effort?: string } = {},
+  opts: { useCache?: boolean; timeoutMs?: number } = {},
 ): Promise<ExtractResult> {
   const payload = extractionPayload(input);
   const key = cacheKey(payload);
@@ -331,11 +333,7 @@ export async function extractSignals(
   // so letting it through still produces a brief — it just produces an honest
   // one. Nothing is written to the cache on this path either; a 06:30 outage
   // must not pin a degraded brief for the rest of the day.
-  const answer = await runClaude(INSTRUCTIONS, body, {
-    timeoutMs: opts.timeoutMs ?? 240_000,
-    ...(opts.model ? { model: opts.model } : {}),
-    ...(opts.effort ? { effort: opts.effort } : {}),
-  });
+  const answer = await runClaude(INSTRUCTIONS, body, { timeoutMs: opts.timeoutMs ?? 240_000 });
 
   let parsed: unknown;
   try {
@@ -358,11 +356,7 @@ export async function extractSignals(
 Dit forrige svar havde disse fejl. Ret dem og svar igen med det fulde JSON:
 ${result.problems.map((p) => `- ${p}`).join('\n')}`;
     try {
-      const second = await runClaude(retry, body, {
-        timeoutMs: opts.timeoutMs ?? 240_000,
-        ...(opts.model ? { model: opts.model } : {}),
-        ...(opts.effort ? { effort: opts.effort } : {}),
-      });
+      const second = await runClaude(retry, body, { timeoutMs: opts.timeoutMs ?? 240_000 });
       const reparsed = validateExtraction(input, parseJsonLoosely(second));
       // Keep the retry only if it is genuinely better.
       if (reparsed.problems.length < result.problems.length) {

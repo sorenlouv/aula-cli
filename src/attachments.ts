@@ -18,7 +18,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Attachment } from './types.ts';
 
-export const ATTACHMENTS_DIR =
+const ATTACHMENTS_DIR =
   process.env.AULA_ATTACHMENTS_DIR ?? join(homedir(), '.aula', 'attachments');
 
 /** Attachments are usually photos and PDFs; anything past this is a mistake. */
@@ -85,7 +85,6 @@ export async function downloadAttachment(opts: {
   prefix: string;
   /** Exact output path. Overrides the directory + generated filename. */
   out?: string;
-  dir?: string;
 }): Promise<DownloadResult> {
   // Deliberately plain `fetch`: no cookie, no Authorization, no custom headers.
   const res = await fetch(opts.attachment.url);
@@ -112,7 +111,7 @@ export async function downloadAttachment(opts: {
   }
 
   const filename = safeFilename(opts.attachment.name);
-  const path = opts.out ?? join(opts.dir ?? ATTACHMENTS_DIR, `${opts.prefix}-${filename}`);
+  const path = opts.out ?? join(ATTACHMENTS_DIR, `${opts.prefix}-${filename}`);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   // Same reasoning as the session file: this is personal data about children.
   writeFileSync(path, bytes, { mode: 0o600 });

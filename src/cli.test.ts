@@ -271,6 +271,29 @@ test('weekly plans are fetched for school children only, with no warning for the
   );
 });
 
+test('--page is refused by commands that are not paginated', () => {
+  const box = sandbox();
+  const result = box.run('messages', '--page', '2');
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /--page would have been ignored/);
+});
+
+test('--widget bypasses detection and reads the named vendor directly', () => {
+  const box = sandbox();
+  const plans = json(box.run('ugeplan', '--widget', '0004', '--no-cache'));
+  assert.equal(plans.length, 1);
+  assert.equal(plans[0].widgetId, '0004');
+  assert.equal(plans[0].provider, 'meebook');
+});
+
+test('--widget with an id that has no integration names the supported ones', () => {
+  const box = sandbox();
+  const result = box.run('ugeplan', '--widget', '9999', '--no-cache');
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /No integration for widget "9999"/);
+  assert.match(result.stderr, /0004/, 'the error should list the supported ids');
+});
+
 test('a failed read is not cached', () => {
   const box = sandbox({ FAKE_AULA_FAIL: 'posts.getAllPosts' });
   assert.notEqual(box.run('posts').code, 0);

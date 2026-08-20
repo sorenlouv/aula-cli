@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import { randomBytes } from './crypto.ts';
 import {
   EncryptedFileTokenStore,
-  MemoryTokenStore,
   type StoredTokenRecord,
   TokenStoreError,
 } from './token-store.ts';
@@ -27,31 +26,17 @@ const SAMPLE: StoredTokenRecord = {
   saved_at: 1_699_996_400,
 };
 
-describe('MemoryTokenStore', () => {
-  test('roundtrip: save → load → clear', async () => {
-    const store = new MemoryTokenStore();
-    expect(await store.load()).toBeNull();
-    await store.save(SAMPLE);
-    expect(await store.load()).toEqual(SAMPLE);
-    await store.clear();
-    expect(await store.load()).toBeNull();
-  });
-});
-
 describe('EncryptedFileTokenStore', () => {
   let dir: string;
-  let originalEnv: string | undefined;
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'aula-mcp-'));
-    originalEnv = process.env.AULA_MCP_KEY;
-    delete process.env.AULA_MCP_KEY;
+    dir = await mkdtemp(join(tmpdir(), 'aula-auth-'));
+    delete process.env.AULA_TEST_TOKEN_KEY;
   });
 
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
-    if (originalEnv !== undefined) process.env.AULA_MCP_KEY = originalEnv;
-    else delete process.env.AULA_MCP_KEY;
+    delete process.env.AULA_TEST_TOKEN_KEY;
   });
 
   test('roundtrip with explicit key', async () => {
@@ -67,9 +52,10 @@ describe('EncryptedFileTokenStore', () => {
 
   test('roundtrip with env-var key (hex)', async () => {
     const key = randomBytes(32).toString('hex');
-    process.env.AULA_MCP_KEY = key;
+    process.env.AULA_TEST_TOKEN_KEY = key;
     const store = new EncryptedFileTokenStore({
       filePath: join(dir, 'tokens.json'),
+      envVarName: 'AULA_TEST_TOKEN_KEY',
     });
     await store.save(SAMPLE);
     const loaded = await store.load();

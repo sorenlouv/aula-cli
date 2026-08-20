@@ -14,7 +14,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { AulaSessionError } from './errors.ts';
 import { AulaCookieJar, AulaHttpClient, EncryptedFileTokenStore } from './vendor/aula-auth/index.ts';
-import type { StoredTokenRecord, TokenStore } from './vendor/aula-auth/index.ts';
+import type { StoredTokenRecord } from './vendor/aula-auth/index.ts';
 import { TokenStoreError, withFreshTokens } from './vendor/aula-auth/index.ts';
 
 export const AULA_DIR = process.env.AULA_DIR ?? join(homedir(), '.aula');
@@ -61,7 +61,7 @@ export function ensureAulaDir(): string {
  * across in the same vendored package, is AES-256-GCM, and is already covered
  * by its own tests, so there is no reason to carry two implementations.
  */
-export function tokenStore(): TokenStore {
+export function tokenStore(): EncryptedFileTokenStore {
   ensureAulaDir();
   return new EncryptedFileTokenStore({
     filePath: TOKEN_PATH,
@@ -130,7 +130,7 @@ export async function loadFreshTokens(): Promise<StoredTokenRecord | undefined> 
  * needs `Csrfp-Token`. Login therefore keeps its jar, and the data client
  * replays it.
  */
-export async function loadCookieHeader(): Promise<string | undefined> {
+async function loadCookieHeader(): Promise<string | undefined> {
   if (!existsSync(COOKIE_JAR_PATH)) return undefined;
   try {
     const jar = await AulaCookieJar.deserialize(readFileSync(COOKIE_JAR_PATH, 'utf8'));

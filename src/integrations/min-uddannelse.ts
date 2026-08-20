@@ -6,8 +6,8 @@
  *
  * Both take `Authorization: Bearer <widget token>` and identify the family
  * entirely through the query string. `sessionUUID` is the Aula guardian id,
- * not the MitID username — MinUddannelse is one of the two vendors that gets
- * that right.
+ * not the MitID username that Meebook, Systematic and SkolePortal's ugeplan
+ * key on.
  */
 
 import { htmlToText } from '../html.ts';
@@ -16,9 +16,6 @@ import type { IntegrationContext, WeekPlan, WeekPlanItem } from './types.ts';
 
 const OPGAVER_URL = 'https://api.minuddannelse.net/aula/opgaveliste';
 const UGEBREV_URL = 'https://api.minuddannelse.net/aula/ugebrev';
-
-export const MU_OPGAVER_WIDGETS = ['0030', '0023'] as const;
-export const MU_UGEBREV_WIDGET = '0029';
 
 type MuOpgave = {
   /** The child the task belongs to — MinUddannelse calls this "kuvertnavn". */
@@ -67,7 +64,7 @@ async function fetchMu<T>(
 export async function getOpgaver(
   ctx: IntegrationContext,
   tokens: WidgetTokens,
-  widgetId: string = MU_OPGAVER_WIDGETS[0],
+  widgetId: string,
 ): Promise<WeekPlan> {
   const data = await fetchMu<{ opgaver?: MuOpgave[] }>(OPGAVER_URL, ctx, widgetId, tokens);
   const items: WeekPlanItem[] = [];
@@ -94,7 +91,7 @@ export async function getOpgaver(
 export async function getUgebrev(
   ctx: IntegrationContext,
   tokens: WidgetTokens,
-  widgetId: string = MU_UGEBREV_WIDGET,
+  widgetId: string,
 ): Promise<WeekPlan> {
   const data = await fetchMu<MuUgebrev>(UGEBREV_URL, ctx, widgetId, tokens);
   const items: WeekPlanItem[] = [];

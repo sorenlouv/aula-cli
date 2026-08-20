@@ -14,6 +14,7 @@
  * rarer than plain invention.
  */
 
+import { localIsoDate } from '../integrations/types.ts';
 import type { BriefInput } from './types.ts';
 
 /** Indexed as `Date#getDay()`: Sunday first. */
@@ -100,10 +101,6 @@ export type DateSupport = {
 
 const key = (month: number, day: number) => `${month}-${day}`;
 
-/** Local calendar date — `toISOString` would shift a local midnight into yesterday (UTC). */
-const localIso = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
 function isoDate(value: string): { iso: string; month: number; day: number; weekday: number } | null {
   const date = new Date(`${value.slice(0, 10)}T00:00:00`);
   if (Number.isNaN(date.getTime())) return null;
@@ -128,7 +125,7 @@ export function buildDateSupport(input: BriefInput): DateSupport {
     support.todayWeekday = todayParsed.weekday;
     const end = new Date(`${input.today}T00:00:00`);
     end.setDate(end.getDate() + Math.max(input.windowDays, 7));
-    support.windowEnd = localIso(end);
+    support.windowEnd = localIsoDate(end);
   }
   const week = Number(/-W(\d{1,2})$/.exec(input.isoWeek)?.[1]);
   if (Number.isFinite(week)) support.weeks.add(week);
@@ -188,7 +185,7 @@ export function unsupportedDateClaims(
       if (cursor.getDay() === day && support.dates.has(key(cursor.getMonth() + 1, cursor.getDate())))
         return true;
       cursor.setDate(cursor.getDate() + 1);
-      if (localIso(cursor) > support.windowEnd) break;
+      if (localIsoDate(cursor) > support.windowEnd) break;
     }
     return false;
   };
@@ -233,7 +230,7 @@ export function dueAtSupported(dueAt: string, sourceKey: string, support: DateSu
   if (per.relTomorrow) {
     const next = new Date(`${support.today}T00:00:00`);
     next.setDate(next.getDate() + 1);
-    if (parsed.iso === localIso(next)) return true;
+    if (parsed.iso === localIsoDate(next)) return true;
   }
   return false;
 }
