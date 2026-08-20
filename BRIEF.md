@@ -1,8 +1,8 @@
 # `aula new` — a daily overview that replaces checking Aula
 
 > **Status: built and running.** `bun src/cli.ts new` produces an HTML page in
-> `~/.aula/brief/`, and a launchd agent runs it weekdays at 06:30
-> (`scripts/install-brief-schedule.sh`). What follows is the design and the
+> `~/.aula/brief/`, and `aula schedule` runs it weekdays at 06:30 — a launchd
+> agent on macOS, a Scheduled Task on Windows. What follows is the design and the
 > reasoning behind it; the phase table at the end records what each stage cost.
 >
 > **HTML only.** PDF and PNG were dropped: they exist behind `--pdf` and `--png`

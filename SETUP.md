@@ -113,25 +113,21 @@ extraction and layout):
 bun src/cli.ts new
 ```
 
-If you want it every weekday morning (06:30 by default) on macOS:
+If you want it every weekday morning (06:30 by default):
 
 ```bash
-scripts/install-brief-schedule.sh
+bun src/cli.ts schedule
 ```
 
-`BRIEF_HOUR=7 BRIEF_MINUTE=0 scripts/install-brief-schedule.sh` changes the
-time; the script prints how to run it now and how to uninstall. On Linux, a
-cron line does the same job:
+`--at 07:00` picks another time; `aula schedule --remove` stops it. macOS gets
+a launchd agent, Windows a Scheduled Task; on Linux the command prints the
+cron line to add yourself.
 
-```cron
-30 6 * * 1-5 cd /path/to/aula-cli && bun src/cli.ts new --text
-```
-
-The agent bakes in the directories holding `bun`, `claude` and `node`, because
-launchd starts with a bare PATH. **Re-run the installer after changing node
-version** — `claude` shells out to node for plugin hooks, and a node it cannot
-find kills it with exit 143 after the work is done, which costs the brief its
-model output.
+On macOS the agent bakes in the directories holding `bun`, `claude` and
+`node`, because launchd starts with a bare PATH. **Re-run `aula schedule`
+after changing node version** — `claude` shells out to node for plugin hooks,
+and a node it cannot find kills it with exit 143 after the work is done, which
+costs the brief its model output.
 
 Design and reasoning: [BRIEF.md](BRIEF.md).
 
@@ -174,7 +170,7 @@ Ask Claude things like:
 - **The brief runs but loses the model's wording** — check
   `~/.aula/brief/launchd.log` for `exited 143` and a `command not found`. A
   plugin hook could not find its interpreter on launchd's bare PATH; re-run
-  `scripts/install-brief-schedule.sh` to bake the current directories back in.
+  `aula schedule` to bake the current directories back in.
 - **The hosted link is stale while the local page is current** — the same log
   carries the reason on the `Artifact blev ikke opdateret:` line. `claude`
   offers the Artifact tool only to sessions announcing themselves as the
@@ -184,8 +180,7 @@ Ask Claude things like:
 ## Uninstall
 
 ```bash
-launchctl bootout gui/$(id -u)/com.aula-cli.brief 2>/dev/null
-rm -f ~/Library/LaunchAgents/com.aula-cli.brief.plist
+aula schedule --remove
 rm -rf ~/.claude/skills/aula ~/.aula
 ```
 

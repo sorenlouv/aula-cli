@@ -85,6 +85,7 @@ bun src/cli.ts refresh-stepup
 | --- | --- |
 | `new [--explain] [--no-llm] [--pdf] [--png] [--no-deploy] [--no-open]` | Generate the "Aula AI oversigt" — local HTML in `~/.aula/brief` plus, where configured, the hosted copy — and open it. See [BRIEF.md](BRIEF.md) |
 | `open [--web]` | Open the newest overview without regenerating: the local page, or with `--web` the hosted copy |
+| `schedule [--at HH:MM] [--remove]` | Run `new` automatically every weekday morning — launchd on macOS, Task Scheduler on Windows, a printed cron line on Linux |
 | `digest [--days 14]` | Threads, posts, calendar, presence, weekly plans and an `attention` block in one payload |
 | `whoami` | Guardian, children, institutions, widgets, and the resolved id sets |
 | `messages [--full] [--unread]` | Message threads, newest first |
@@ -93,7 +94,7 @@ bun src/cli.ts refresh-stepup
 | `galleries [--since 30d]` | Photo albums — titles, dates and photographer, not the photos |
 | `calendar [--days 30]` | Upcoming events |
 | `presence` | Today's check-in/check-out |
-| `schedule [--from --to]` | The recurring komme/gå plan (drop-off and pickup times) |
+| `pickup-times [--from --to]` | The recurring komme/gå plan (drop-off and pickup times) |
 | `groups` | Which groups and classes each child belongs to |
 | `contacts [--group id]` | Class contact list ("kontaktliste") |
 | `birthdays` | Classmates' birthdays, soonest first |
