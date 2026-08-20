@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import { existsSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { downloadAttachment, listAttachments, type ResolvedAttachment } from './attachments.ts';
 import {
@@ -45,11 +47,12 @@ import {
 } from './digest.ts';
 import { runBrief } from './brief/index.ts';
 import { explain } from './brief/rank.ts';
+import { BRIEF_DIR } from './brief/state.ts';
 import { runDoctor } from './doctor.ts';
 import { UsageError } from './errors.ts';
 import { resolveFamily, selectChildren, type Family } from './family.ts';
 import { runLogin, runLogout, runRefreshStepUp, runStatus } from './login.ts';
-import { isoDate, SUPPORTED_WIDGET_IDS, type WeekPlan } from './integrations/index.ts';
+import { isoDate, localIsoDate, SUPPORTED_WIDGET_IDS, type WeekPlan } from './integrations/index.ts';
 import {
   AulaSessionError,
   SESSION_PATH,
@@ -63,7 +66,7 @@ import type { Capability } from './widgets.ts';
 const USAGE = `
 aula — read-only client for aula.dk
 
-Usage: bun src/cli.ts <command> [options]
+Usage: aula <command> [options]        (or: bun src/cli.ts <command>)
 
 Aula:
   whoami                       Guardian, children, institutions, widgets and the id sets
@@ -83,6 +86,7 @@ Aula:
   commonfiles                  "Fælles Filer" — the shared shelf (timetables, holiday plans)
   commonfile <id|title>        Download one shared file
   brief                        Generate the "Aula AI oversigt" as HTML in ~/.aula/brief
+  latest                       Open the newest generated brief (no regeneration, no login)
   digest                       Everything relevant in one payload — the summarisation entry point
 
 Weekly plans (third-party widgets):
@@ -216,6 +220,7 @@ async function main(): Promise<number> {
 
   if (command === 'session') return runSession(positionals);
   if (command === 'cache') return runCache(positionals, asText, ttlMs);
+  if (command === 'latest') return runLatest();
   if (command === 'login') {
     return runLogin({
       ...(values.username ? { username: values.username } : {}),
@@ -638,6 +643,28 @@ function runCache(positionals: string[], asText: boolean, ttlMs: number): number
   }
   console.error(`Unknown cache subcommand "${sub}". Use "status" or "clear".`);
   return 1;
+}
+
+/**
+ * Opens the newest generated brief without regenerating anything. The
+ * scheduled run refreshes `latest.html` each weekday morning, so this is the
+ * "just show me today's page" command — and it needs no credentials, so it
+ * works even when the login has expired.
+ */
+function runLatest(): number {
+  const path = join(BRIEF_DIR, 'latest.html');
+  if (!existsSync(path)) {
+    console.error(`No brief found at ${path} — run \`brief\` to generate one.`);
+    return 1;
+  }
+  const day = localIsoDate(new Date(statSync(path).mtimeMs));
+  const today = localIsoDate(new Date());
+  if (day !== today) {
+    console.error(`The latest brief is from ${day} — run \`brief\` to generate today's.`);
+  }
+  Bun.spawn([process.platform === 'darwin' ? 'open' : 'xdg-open', path]);
+  console.log(path);
+  return 0;
 }
 
 function renderCacheStats(stats: CacheStats): string {

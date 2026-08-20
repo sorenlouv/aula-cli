@@ -231,6 +231,12 @@ test('an expired widget token is still recoverable with the cache on', () => {
   );
 });
 
+test('latest without a generated brief fails with a pointer, not a blank page', () => {
+  const result = sandbox().run('latest');
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /brief/);
+});
+
 test('a failed read is not cached', () => {
   const box = sandbox({ FAKE_AULA_FAIL: 'posts.getAllPosts' });
   assert.notEqual(box.run('posts').code, 0);
