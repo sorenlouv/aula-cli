@@ -431,6 +431,32 @@ test("MinUddannelse's two opgave widget ids are not read twice", async () => {
   );
 });
 
+test('readCapability keeps daycare children away from the vendors', async () => {
+  await withVendor(
+    () => [],
+    async (calls, tokens) => {
+      const ctx = {
+        ...CTX,
+        children: [
+          { id: 4242, name: 'Alma Eksempelsen', userId: 'alma1234', institutionType: 'School' },
+          { id: 4343, name: 'Viggo Eksempelsen', userId: 'vigg5678', institutionType: 'Daycare' },
+        ],
+      };
+      const plans = await readCapability(
+        'ugeplan',
+        [{ widgetId: '0004', name: 'Meebook', provider: 'meebook', capability: 'ugeplan' }],
+        ctx,
+        tokens,
+      );
+      const vendor = calls.find((c) => c.url.includes('meebook'));
+      assert.ok(vendor, 'the school child must still be fetched');
+      assert.match(vendor.url, /alma1234/);
+      assert.doesNotMatch(vendor.url, /vigg5678/, 'the daycare child must not be queried');
+      assert.equal(plans[0]?.warnings, undefined, 'no warning for a child with no plan');
+    },
+  );
+});
+
 test('localIsoDate reads the calendar the user is on, not UTC', () => {
   // Denmark is UTC+1/+2, so between midnight and 01:00/02:00 the two disagree.
   // The brief dates itself and names its archive file from this, and getting it

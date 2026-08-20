@@ -71,12 +71,16 @@ const PROFILE_CONTEXT = {
     {
       institutionCode: '100001',
       institutionName: 'Eksempelskolen',
+      institutionType: 'School',
       institutionProfileId: 901,
       groups: [{ id: 5001, name: '2E' }],
     },
     {
       institutionCode: 'E10002',
       institutionName: 'Børnehuset Eksemplet',
+      // The live API labels institutions, and the label is what keeps daycare
+      // children away from the weekly-plan vendors.
+      institutionType: 'Daycare',
       institutionProfileId: 902,
       groups: [{ id: 5002, name: 'Myretuen' }],
     },

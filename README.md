@@ -254,6 +254,13 @@ JWT scoped to one widget, and the vendor's own API accepts it as a bearer token.
 `profiles.getProfileContext` lists which widgets a school exposes, so the right
 provider is detected rather than configured. Run `widgets` to see yours.
 
+These are school products, and the vendors do not decline cleanly when asked
+about a child they have never heard of — SkolePortal answers HTTP 500, which
+reads as an outage. So children whose institution Aula labels `Daycare` are
+never sent to the vendors at all; only school children are queried. An unknown
+label keeps the child in, because over-asking is noise while dropping a school
+child is a lie.
+
 | Widget | Product | Capability | Endpoint |
 | --- | --- | --- | --- |
 | `0001` | EasyIQ Ugeplan | ugeplan | `POST api.easyiqcloud.dk/api/aula/weekplaninfo` |

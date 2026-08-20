@@ -49,6 +49,14 @@ export type IntegrationChild = {
    * so an empty string here means those providers cannot serve this child.
    */
   userId: string;
+  /**
+   * Aula's label for the child's institution — `'School'`, `'Daycare'`, ….
+   * Weekly plans and homework are school products, and a vendor asked about a
+   * child it has never heard of does not decline cleanly (SkolePortal answers
+   * HTTP 500), so the dispatcher keeps daycare children away from the vendors
+   * entirely. Absent when Aula did not say.
+   */
+  institutionType?: string;
 };
 
 /** One item of a weekly plan, homework list or reminder list. */

@@ -104,9 +104,10 @@ same way:
   could not be fetched (the vendor answered HTTP 500), so I can't see whether
   anything is planned" — and never claim the week is empty.
 - **Items present with warnings** → partial. Report what you have *and* which
-  child is missing. Daycare institutions often have no weekly-plan vendor at
-  all, so a standing warning naming a daycare child can be normal rather than
-  an outage.
+  child is missing. Daycare children are excluded from the vendors
+  automatically (weekly plans are school products), so a warning naming a
+  child is a real fetch problem for a school child — never dismiss it as "the
+  little ones just don't have a plan".
 
 The same applies to `digest`: read `weeklyPlans[].warnings`, and a plan whose
 `provider` is `"unavailable"` means that whole capability threw.

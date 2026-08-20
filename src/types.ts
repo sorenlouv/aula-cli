@@ -98,6 +98,8 @@ export type ProfileContext = {
   institutions: Array<{
     institutionCode: string;
     institutionName?: string;
+    /** Aula's label: `'School'`, `'Daycare'`, … Decides who has weekly plans. */
+    institutionType?: string;
     institutionProfileId: number;
     groups?: Array<{ id: number; name: string }>;
   }>;
