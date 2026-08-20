@@ -186,7 +186,11 @@ async function cached(
   };
   const hit = cache.get<WeekPlan>(`widget-${widgetId}`, key);
   if (hit !== undefined) return withSessionWarning(widgetId, ctx, hit);
-  const plan = await read();
+  const fetched = await read();
+  // Judged on the *warned* plan, so a missing MitID username still counts as a
+  // failure signal — it is one of the reasons these vendors answer empty, and
+  // it moved out of the adapters into `withSessionWarning`.
+  const plan = withSessionWarning(widgetId, ctx, fetched);
   // A plan with no items and a warning is a vendor that failed, not a quiet
   // week — and cache.ts's rule is that nothing which failed gets pinned for the
   // TTL. Storing it would throw away the retry that leaving widget tokens
@@ -196,8 +200,10 @@ async function cached(
   // warnings there are usually structural (a child whose institution has no
   // such widget at all) and the items are real.
   const failedOutright = plan.items.length === 0 && (plan.warnings ?? []).length > 0;
-  if (!failedOutright) cache.set(`widget-${widgetId}`, key, plan);
-  return withSessionWarning(widgetId, ctx, plan);
+  // The *unwarned* plan is what gets stored: the warning is re-applied on every
+  // read, so baking it in would double it on a hit.
+  if (!failedOutright) cache.set(`widget-${widgetId}`, key, fetched);
+  return plan;
 }
 
 /**

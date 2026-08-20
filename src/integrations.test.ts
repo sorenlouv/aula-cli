@@ -8,6 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import type { ResponseCache } from './cache.ts';
 import type { AulaClient } from './client.ts';
 import * as easyiq from './integrations/easyiq.ts';
 import * as skoleportal from './integrations/easyiq-skoleportal.ts';
@@ -48,6 +49,16 @@ async function withVendor<T>(
   } finally {
     globalThis.fetch = original;
   }
+}
+
+/** In-memory stand-in, so a cache test never touches the real ~/.aula. */
+function fakeCache(): ResponseCache {
+  const store = new Map<string, unknown>();
+  return {
+    get: (namespace: string, key: unknown) => store.get(`${namespace} ${JSON.stringify(key)}`),
+    set: (namespace: string, key: unknown, value: unknown) =>
+      store.set(`${namespace} ${JSON.stringify(key)}`, value),
+  } as unknown as ResponseCache;
 }
 
 const CTX: IntegrationContext = {
@@ -139,12 +150,49 @@ test('a missing MitID username is warned about rather than failing silently', as
     async (_calls, tokens) => {
       const plan = await readWidget('0004', { ...CTX, sessionIdIsFallback: true }, tokens);
       assert.match(plan.warnings?.join('\n') ?? '', /MitID username/);
-      const lektier = await readWidget('0029', { ...CTX, sessionIdIsFallback: true }, tokens);
-      assert.equal(
-        lektier.warnings,
-        undefined,
-        'a vendor keyed on the guardian id must not carry the warning',
+      // 0142 is the one to guard: it shares a file with the flagged 0128 and
+      // differs only in sending the guardian id as `x-login`, so it is what a
+      // maintainer would wrongly flag while editing its sibling.
+      const lektier = await readWidget('0142', { ...CTX, sessionIdIsFallback: true }, tokens);
+      assert.doesNotMatch(
+        lektier.warnings?.join('\n') ?? '',
+        /MitID username/,
+        'Lektier keys x-login on the guardian id, so it must not carry the warning',
       );
+    },
+  );
+});
+
+test('an empty week caused by the missing MitID username is not pinned for the TTL', async () => {
+  // The warning is what marks this as a failed read rather than a quiet week,
+  // and it is applied by the dispatcher — so the cache decision has to see it.
+  const cache = fakeCache();
+  await withVendor(
+    () => [],
+    async (calls, tokens) => {
+      const ctx = { ...CTX, sessionIdIsFallback: true };
+      await readWidget('0004', ctx, tokens, cache);
+      await readWidget('0004', ctx, tokens, cache);
+      assert.equal(calls.length, 2, 'the vendor must be asked again, not answered from cache');
+    },
+  );
+});
+
+test('the fallback-session warning is re-applied per read, never accumulated', async () => {
+  const cache = fakeCache();
+  await withVendor(
+    () => [
+      { name: 'Alma Eksempelsen', weekPlan: [{ date: 'mandag', tasks: [{ type: 'task', content: 'Læs' }] }] },
+    ],
+    async (calls, tokens) => {
+      const ctx = { ...CTX, sessionIdIsFallback: true };
+      const first = await readWidget('0004', ctx, tokens, cache);
+      const second = await readWidget('0004', ctx, tokens, cache);
+      assert.equal(calls.length, 1, 'a plan with items is still cached');
+      const count = (plan: { warnings?: string[] }) =>
+        (plan.warnings ?? []).filter((w) => /MitID username/.test(w)).length;
+      assert.equal(count(first), 1);
+      assert.equal(count(second), 1, 'a cache hit must not stack a second copy of the warning');
     },
   );
 });
