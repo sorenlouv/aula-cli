@@ -37,6 +37,9 @@ const good = {
   sourceKey: 'post:1',
 };
 
+/** Every source is owed a verdict; a well-formed answer carries one for post:1. */
+const verdicts = { relevance: { 'post:1': 'normal' } };
+
 describe('withPreferences', () => {
   const BASE = 'Du læser Aula-indhold.';
 
@@ -74,7 +77,7 @@ describe('parseJsonLoosely', () => {
 
 describe('validateExtraction', () => {
   test('keeps a well-formed signal', () => {
-    const result = validateExtraction(INPUT, { topline: 'Rolig uge.', signals: [good] });
+    const result = validateExtraction(INPUT, { topline: 'Rolig uge.', signals: [good], ...verdicts });
     expect(result.problems).toEqual([]);
     expect(result.signals).toHaveLength(1);
     expect(result.signals[0]?.origin).toBe('model');
@@ -98,8 +101,41 @@ describe('validateExtraction', () => {
   });
 
   test('a title may echo the weekday of its own grounded dueAt', () => {
-    const result = validateExtraction(INPUT, { signals: [good] });
+    const result = validateExtraction(INPUT, { signals: [good], ...verdicts });
     expect(result.problems).toEqual([]); // "på mandag" + dueAt on a Monday
+  });
+
+  test('keeps a verdict for a known source', () => {
+    const result = validateExtraction(INPUT, { signals: [good], relevance: { 'post:1': 'high' } });
+    expect(result.relevance).toEqual({ 'post:1': 'high' });
+    expect(result.problems).toEqual([]);
+  });
+
+  test('a verdict outside the four words reads as normal; one for an unknown source is reported', () => {
+    // Same treatment as an unknown kind and an unknown sourceKey respectively:
+    // the safe reading for the one, a reported problem for the other.
+    const result = validateExtraction(INPUT, {
+      signals: [good],
+      relevance: { 'post:1': 'meget', 'post:999': 'high' },
+    });
+    expect(result.relevance).toEqual({ 'post:1': 'normal' });
+    expect(result.problems).toEqual(['relevance: ukendt sourceKey "post:999"']);
+  });
+
+  test('a missing verdict map is a problem worth the retry; an empty input is owed none', () => {
+    // The family's list reaches the ranking through these verdicts and
+    // nothing else, so an answer without them has skipped the question.
+    const without = validateExtraction(INPUT, { signals: [good] });
+    expect(without.relevance).toEqual({});
+    expect(without.problems).toEqual(['relevance: mangler — én vurdering pr. kilde']);
+    expect(validateExtraction(briefInput({ items: [] }), { signals: [] }).problems).toEqual([]);
+  });
+
+  test('a partial verdict map is taken as it is — the rest read as normal downstream', () => {
+    const two = briefInput({ ...INPUT, items: [SOURCE, { ...SOURCE, key: 'post:2' }] });
+    const result = validateExtraction(two, { signals: [], relevance: { 'post:2': 'hide' } });
+    expect(result.relevance).toEqual({ 'post:2': 'hide' });
+    expect(result.problems).toEqual([]);
   });
 
   test('nulls a topline with an invented date and reports it', () => {

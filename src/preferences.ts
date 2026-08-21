@@ -4,7 +4,8 @@
  * One plain sentence per line, written by the user — *"beskeder fra John
  * (Hjaltes far) er altid vigtige"*, *"jeg er ligeglad med billeder"*. The file
  * is the whole feature: `aula remember` appends to it, the brief's prompts
- * carry it, and `rank.ts` re-checks the part of it that can be checked.
+ * carry it, and the model answers with a verdict per source that `rank.ts`
+ * acts on — see `Relevance` in `brief/types.ts`. Nothing else reads the prose.
  *
  * Three choices worth keeping:
  *
@@ -58,30 +59,17 @@ export const MAX_PREFERENCES = 30;
  * edit to this file can loosen those.
  *
  * Phrased as the user would phrase it, because that is what the file is: from
- * the moment it exists, every line in it is theirs.
+ * the moment it exists, every line in it is theirs — including the municipal
+ * one, which is the only line that asks for something to be *hidden* rather
+ * than sorted. Nothing in the code matches these by wording: reword one and
+ * the model reads the new wording, drop it and the model stops applying it.
  */
-/**
- * The one default that is also read by `rank.ts`, and therefore has to be
- * matched exactly rather than understood.
- *
- * Municipal breadth is the only place the brief *suppresses* rather than
- * merely sorts low, and prose is not something the ranker can read. So the
- * deterministic gate is tied to this literal line: keep it and the gate stays
- * shut, drop it or reword it and the gate opens and the model's own judgement
- * decides. Rewording therefore loses the deterministic half while keeping the
- * instruction — which fails towards *showing* a family more than they asked
- * for, the cheaper of the two failures for a tool whose worst outcome is a
- * miss.
- */
-export const MUNICIPAL_IS_NOISE =
-  "Fællesbeskeder til alle forældre i kommunen er aldrig relevante for os.";
-
 export const DEFAULT_PREFERENCES: readonly string[] = [
   "Det vigtigste for mig er ting der skal medbringes, afleveres, tilmeldes eller besvares — og nye faste aftaler i ugen.",
   "Beskeder og opslag fra mit barns egen klasse eller stue er næsten altid relevante.",
   "En besked til hele skolen tæller kun, når den handler om mit barns dag: skolefoto, som hele klassen skal med til, er relevant — et forældrekursus er ikke.",
   "Tilbud vi selv kan vælge til — kurser, forløb, netværk, temaaftener, foredrag — er mindre relevante.",
-  MUNICIPAL_IS_NOISE,
+  "Fællesbeskeder til alle forældre i kommunen er aldrig relevante for os.",
 ];
 
 /**
