@@ -107,10 +107,20 @@ const POSITIONALS: Partial<Record<CliCommand, { min: number; max?: number; usage
   forget: { min: 1, max: 1, usage: 'forget <n>' },
   thread: { min: 1, max: 1, usage: 'thread <threadId>' },
   attachments: { min: 1, max: 1, usage: 'attachments <threadId>' },
-  attachment: { min: 2, max: 2, usage: 'attachment <threadId> <index>' },
+  attachment: { min: 1, max: 2, usage: 'attachment <threadId> [index]' },
   commonfile: { min: 1, max: 1, usage: 'commonfile <id|title>' },
   raw: { min: 1, usage: 'raw <method> [key=value ...]' },
 };
+
+/** Every option `command` acts on — the allow-list above, as the user types it. */
+export function optionsFor(command: CliCommand): string[] {
+  return COMMAND_OPTIONS[command].map((name) => `--${name}`);
+}
+
+/** The positional signature for `command`, for help and usage errors alike. */
+export function usageFor(command: CliCommand): string {
+  return POSITIONALS[command]?.usage ?? command;
+}
 
 export function isCliCommand(value: string): value is CliCommand {
   return Object.hasOwn(COMMAND_OPTIONS, value);

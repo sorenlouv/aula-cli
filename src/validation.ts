@@ -53,8 +53,26 @@ export function expectType<T>(
   predicate: (candidate: unknown) => candidate is T,
   description: string,
 ): T {
-  if (!predicate(value)) throw new Error(`Expected ${description}`);
+  if (!predicate(value)) throw new Error(`Expected ${description}, got ${describeShape(value)}`);
   return value;
+}
+
+/**
+ * The same decode, for a boundary where "nothing" is a legitimate answer.
+ *
+ * A vendor with no week to report answers `null` or an empty body about as
+ * often as it answers `[]`, and every adapter here used to spell that
+ * `(await widgetFetch(...)) ?? []`. Nullish keeps meaning "empty"; the shape
+ * check applies to whatever did arrive.
+ */
+export function expectOptionalType<T>(
+  value: unknown,
+  predicate: (candidate: unknown) => candidate is T,
+  description: string,
+  whenEmpty: T,
+): T {
+  if (value === null || value === undefined) return whenEmpty;
+  return expectType(value, predicate, description);
 }
 
 export type IsoDateParts = Readonly<{

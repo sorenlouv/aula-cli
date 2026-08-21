@@ -17,7 +17,7 @@
 
 import { type WidgetTokens, widgetFetch } from '../widgets.ts';
 import {
-  expectType,
+  expectOptionalType,
   isArrayOf,
   isOptional,
   isRecord,
@@ -28,18 +28,18 @@ import type { IntegrationContext, WeekPlan, WeekPlanItem } from './types.ts';
 const MEEBOOK_URL = 'https://app.meebook.com/aulaapi/relatedweekplan/all';
 
 type MeebookTask = {
-  type?: string;
+  type?: string | null;
   /** Subject chip. Literally "Ingen fag tilknyttet" when there is none. */
-  pill?: string;
-  title?: string;
-  content?: string;
-  editUrl?: string;
+  pill?: string | null;
+  title?: string | null;
+  content?: string | null;
+  editUrl?: string | null;
 };
 
 type MeebookPerson = {
-  name?: string;
-  weekPlan?: Array<{ date?: string; tasks?: MeebookTask[] }>;
-  exceptionMessage?: string;
+  name?: string | null;
+  weekPlan?: Array<{ date?: string | null; tasks?: MeebookTask[] | null }> | null;
+  exceptionMessage?: string | null;
 };
 
 type MeebookDay = NonNullable<MeebookPerson['weekPlan']>[number];
@@ -67,8 +67,8 @@ function isMeebookPerson(value: unknown): value is MeebookPerson {
 }
 
 function decodePeople(value: unknown): MeebookPerson[] {
-  return expectType(value, (people): people is MeebookPerson[] =>
-    isArrayOf(people, isMeebookPerson), 'a Meebook week plan');
+  return expectOptionalType(value, (people): people is MeebookPerson[] =>
+    isArrayOf(people, isMeebookPerson), 'a Meebook week plan', []);
 }
 
 const NO_SUBJECT = 'Ingen fag tilknyttet';

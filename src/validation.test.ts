@@ -2,6 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import {
   describeShape,
   errorMessage,
+  expectOptionalType,
+  expectType,
+  isArrayOf,
   isIsoWeek,
   isOptional,
   isRecord,
@@ -17,6 +20,48 @@ describe('runtime validation', () => {
     expect(isRecord(null)).toBe(false);
     expect(isRecord([])).toBe(false);
     expect(isRecord('object-ish')).toBe(false);
+  });
+
+  /**
+   * JSON has no `undefined`: a backend that omits an optional field and one
+   * that writes `null` mean the same thing. Accepting only `undefined` made a
+   * single null-valued field reject the whole payload it arrived in.
+   */
+  test('optional means absent, and null is a spelling of absent', () => {
+    expect(isOptional(undefined, isString)).toBe(true);
+    expect(isOptional(null, isString)).toBe(true);
+    expect(isOptional('present', isString)).toBe(true);
+    expect(isOptional(42, isString)).toBe(false);
+  });
+
+  test('one null field does not reject the record it sits in', () => {
+    const isRow = (value: unknown): value is { a?: string; b?: string } =>
+      isRecord(value) && isOptional(value.a, isString) && isOptional(value.b, isString);
+    expect(isArrayOf([{ a: 'x', b: null }, { a: null }], isRow)).toBe(true);
+    expect(isArrayOf([{ a: 'x' }, { a: 7 }], isRow)).toBe(false);
+  });
+
+  test('a nullish payload decodes to the empty value, a wrong one still throws', () => {
+    const isNames = (value: unknown): value is string[] => isArrayOf(value, isString);
+    expect(expectOptionalType(null, isNames, 'a name list', [])).toEqual([]);
+    expect(expectOptionalType(undefined, isNames, 'a name list', [])).toEqual([]);
+    expect(expectOptionalType(['a'], isNames, 'a name list', [])).toEqual(['a']);
+    expect(() => expectOptionalType(42, isNames, 'a name list', [])).toThrow('Expected a name list');
+  });
+
+  /**
+   * A boundary error naming only what was expected cannot tell a vendor outage
+   * from a shape change, so what arrived has to survive into the message —
+   * summarised, since the payload is the family's own data.
+   */
+  test('a decode failure says what arrived, not just what was wanted', () => {
+    const isNames = (value: unknown): value is string[] => isArrayOf(value, isString);
+    expect(() => expectType(null, isNames, 'a name list')).toThrow('Expected a name list, got null');
+    expect(() => expectType({ Children: 1 }, isNames, 'a name list')).toThrow(
+      'Expected a name list, got {Children: number}',
+    );
+    // The shape, never the values — these payloads carry salts and signatures.
+    expect(describeShape({ token: 'hemmelig' })).not.toContain('hemmelig');
   });
 
   test('unknown thrown values still have a useful message', () => {
