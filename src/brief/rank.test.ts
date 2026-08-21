@@ -207,6 +207,37 @@ describe('rank', () => {
     expect(brief.signals[0]?.mergedSourceKeys).toHaveLength(1);
   });
 
+  test('an item Aula flagged important is never merged away into one it did not', () => {
+    // The loser of a cross-source merge survives only as a bare key in
+    // `mergedSourceKeys`, which counts as covered everywhere downstream: no
+    // card, no "Godt at vide", no muted foot, and not even `unusedSources`.
+    // The vigtig floor only ever inspects the winner, so once the flagged item
+    // has lost there is nothing left to rescue it. The class-level copy
+    // outscores it here — breadth beats the +12 — which is exactly when the
+    // flag matters most.
+    const items = [
+      item({
+        key: 'post:30',
+        title: 'Sommerfest',
+        text: 'Husk at tilmelde jer senest d. 20/8.',
+        audience: 'class',
+      }),
+      item({
+        key: 'post:31',
+        title: 'Sommerfest',
+        text: 'Husk at tilmelde jer senest d. 20/8.',
+        audience: 'institution',
+        important: true,
+      }),
+    ];
+    const brief = rank(input(items), signalsFromRules(input(items), TODAY));
+    const flagged = brief.signals.find((s) => s.sourceKey === 'post:31');
+    expect(flagged).toBeDefined();
+    expect(flagged?.tier === 'context' || flagged?.tier === 'hidden').toBe(false);
+    // And it stands on its own rather than being absorbed by the other copy.
+    expect(brief.signals.flatMap((s) => s.mergedSourceKeys)).not.toContain('post:31');
+  });
+
   test('two obligations in one post both survive, on their own dates', () => {
     // Every rule hit inherits the item's title, so a title-only dedupe key
     // collapsed these into one and the 25/8 deadline disappeared — not even
