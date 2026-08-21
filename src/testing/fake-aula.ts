@@ -63,6 +63,8 @@ const PROFILES = {
  *   FAKE_AULA_FAIL=<method>  that one method answers 403
  *   FAKE_AULA_FAIL_THREAD=<id>  that one thread's messages answer 403
  *   FAKE_AULA_STALE_TOKEN=1  every widget token is rejected once as expired
+ *   FAKE_AULA_REJECT_TOKEN=1 Aula will not accept the access token
+ *   FAKE_AULA_DOWN=1         Aula is broken for everyone, credentials or not
  */
 const PROFILE_CONTEXT = {
   userId: 'mikk42a1',
@@ -234,6 +236,29 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
   if (method === process.env.FAKE_AULA_FAIL) {
     return new Response(JSON.stringify({ status: { code: 403 }, data: null }), {
       status: 403,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+
+  // Verbatim from aula.dk: an access token it will not accept comes back as an
+  // HTTP 500 carrying a status code 0 — *success* — envelope, with the error
+  // in `data` where the payload belongs. Reproduced exactly, because the whole
+  // difficulty of that failure was that nothing in the body admits to being
+  // about credentials. A credential-free request is still answered properly,
+  // which is what lets the client tell this apart from Aula being down.
+  const INTERN_FEJL = { status: { code: 0, message: 'intern fejl' }, data: 'intern fejl' };
+  if (process.env.FAKE_AULA_DOWN === '1') {
+    return new Response(JSON.stringify(INTERN_FEJL), {
+      status: 500,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+  if (process.env.FAKE_AULA_REJECT_TOKEN === '1') {
+    const body = url.searchParams.has('access_token')
+      ? INTERN_FEJL
+      : { status: { code: 448 }, data: null };
+    return new Response(JSON.stringify(body), {
+      status: url.searchParams.has('access_token') ? 500 : 403,
       headers: { 'content-type': 'application/json' },
     });
   }

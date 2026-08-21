@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { type Auth, loginInstructions, resolveAuth } from './auth.ts';
 import { type CacheSettings, ResponseCache, openCache } from './cache.ts';
+import { type Remedy, formatRemedy } from './errors.ts';
 import type {
   Album,
   CalendarEvent,
@@ -21,6 +22,9 @@ import { isRecord, parseInteger } from './validation.ts';
 const FALLBACK_API_VERSION = 24;
 const MAX_API_VERSION_TO_PROBE = FALLBACK_API_VERSION + 12;
 const BASE = 'https://www.aula.dk/api';
+const USER_AGENT = 'aula-cli/0.1 (+personal read-only client)';
+/** The health probe runs on a path that has already failed — it may not hang. */
+const HEALTH_PROBE_TIMEOUT_MS = 5_000;
 
 /**
  * Hard read-only guard.
@@ -131,11 +135,17 @@ const COMMON_FILES_PAGE_SIZE = 50;
  */
 const NEVER_CACHED = new Set<string>(['aulaToken.getAulaToken']);
 
+/**
+ * Both error types take either a bare string or a {@link Remedy}. The string
+ * form is for failures the user cannot act on — the read-only guard refusing a
+ * method is a programming mistake, not something to go and fix — and every
+ * failure that *does* have a fix is expected to spell it out.
+ */
 export class AulaApiError extends Error {
   readonly code: number;
   readonly method: string;
-  constructor(method: string, code: number, message: string) {
-    super(message);
+  constructor(method: string, code: number, problem: string | Remedy) {
+    super(typeof problem === 'string' ? problem : formatRemedy(problem));
     this.name = 'AulaApiError';
     this.code = code;
     this.method = method;
@@ -144,10 +154,21 @@ export class AulaApiError extends Error {
 
 export class AulaAuthError extends Error {
   /** Always ends with the fix, because MitID is the only credential there is. */
-  constructor(message: string, guidance: string = loginInstructions()) {
-    super(`${message}\n\n${guidance}`);
+  constructor(problem: string | Remedy, guidance: string = loginInstructions()) {
+    super(typeof problem === 'string' ? `${problem}\n\n${guidance}` : formatRemedy(withLogin(problem)));
     this.name = 'AulaAuthError';
   }
+}
+
+/**
+ * Every credential failure has the same fix, so it is filled in rather than
+ * repeated at each throw site — but only when the caller has not named a more
+ * specific one, since a Remedy that already carries commands has thought about
+ * it harder than this default can.
+ */
+function withLogin(problem: Remedy): Remedy {
+  if (problem.commands?.length) return problem;
+  return { ...problem, action: problem.action ?? 'Log in again with MitID:', commands: ['bun run login'] };
 }
 
 export type QueryValue = string | number | boolean | Array<string | number>;
@@ -177,6 +198,8 @@ export class AulaClient {
    */
   #versionProbe: Promise<void> | undefined;
   #sessionBootstrap: Promise<void> | undefined;
+  /** Memoised answer to "is Aula up?" — see `#serviceReachable`. */
+  #healthProbe: Promise<boolean | undefined> | undefined;
   #cache: ResponseCache;
 
   /**
@@ -235,10 +258,6 @@ export class AulaClient {
    */
   get mitidUsername(): string | undefined {
     return this.#auth.kind === 'token' ? this.#auth.username : undefined;
-  }
-
-  #authGuidance(): string {
-    return loginInstructions();
   }
 
   // ---------------------------------------------------------------- transport
@@ -361,7 +380,7 @@ export class AulaClient {
 
     const headers: Record<string, string> = {
       Accept: 'application/json',
-      'User-Agent': 'aula-cli/0.1 (+personal read-only client)',
+      'User-Agent': USER_AGENT,
     };
     // Sent in both modes: on token auth this carries the session the token was
     // exchanged for, which is what actually authorises the module endpoints.
@@ -382,24 +401,38 @@ export class AulaClient {
 
     // An expired session redirects to the MitID login flow instead of answering.
     if (res.status >= 300 && res.status < 400) {
-      throw new AulaAuthError(
-        'Aula redirected to login — the credentials have expired.',
-        this.#authGuidance(),
-      );
+      throw new AulaAuthError({
+        headline: 'Your Aula login has expired.',
+        detail: `Aula answered ${method} with a redirect to the MitID login page instead of data.`,
+      });
     }
 
     const raw = await res.text();
+
+    // Checked before the envelope, because on a 5xx the envelope lies: Aula
+    // reports an access token it will not accept as HTTP 500 carrying a
+    // *status code 0* — "success" — envelope. Reading the envelope first
+    // therefore turns a dead login into a shape error three layers downstream,
+    // which is exactly the confusion this branch exists to prevent.
+    if (res.status >= 500) throw await this.#serverError(method, res.status);
+
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
     } catch {
       if (/<html/i.test(raw)) {
-        throw new AulaAuthError(
-          'Aula returned an HTML page instead of JSON — the credentials have expired.',
-          this.#authGuidance(),
-        );
+        throw new AulaAuthError({
+          headline: 'Your Aula login has expired.',
+          detail: `Aula returned its login page instead of data for ${method}.`,
+        });
       }
-      throw new AulaApiError(method, res.status, `Non-JSON response: ${raw.slice(0, 300)}`);
+      throw new AulaApiError(method, res.status, {
+        headline: 'Aula sent a response aula-cli could not read.',
+        detail:
+          `${method} answered with HTTP ${res.status} and a body that is not JSON. ` +
+          `It starts: ${raw.slice(0, 200)}`,
+        fallback: 'If this keeps happening, Aula has changed something and aula-cli needs updating.',
+      });
     }
     const envelope = parseEnvelope(method, parsed);
 
@@ -410,31 +443,101 @@ export class AulaClient {
     if (code === 0) return envelope.data;
 
     if (code === STATUS_NOT_AUTHENTICATED || code === 401) {
-      throw new AulaAuthError(
-        `Aula rejected the credentials (status code ${code}).`,
-        this.#authGuidance(),
-      );
+      throw new AulaAuthError({
+        headline: 'Aula rejected the credentials.',
+        detail:
+          `${method} came back with status code ${code} — not authenticated. ` +
+          `The stored MitID login is no longer valid.`,
+      });
     }
     if (code === STATUS_FORBIDDEN) {
-      throw new AulaApiError(
-        method,
-        code,
-        `Access denied by Aula (code 403). The session is still valid — this is ` +
-          `almost always the wrong institution-profile id set. calendar and presence ` +
-          `accept children ids only; posts needs guardian ids *and* children ids. ` +
-          `See API.md "The three id spaces".`,
-      );
+      throw new AulaApiError(method, code, {
+        headline: `Aula would not let you read ${method} (code 403).`,
+        detail:
+          `The session itself is fine, so this is almost always the wrong ` +
+          `institution-profile id set. calendar and presence accept children ids ` +
+          `only; posts needs guardian ids *and* children ids.`,
+        action: 'Check which ids this login actually has:',
+        commands: ['bun run aula whoami'],
+        fallback: 'API.md, "The three id spaces", explains which id belongs where.',
+      });
     }
     if (code === STATUS_BAD_PARAMETERS) {
-      throw new AulaApiError(method, code, `Aula rejected the parameters for ${method} (code 40).`);
+      throw new AulaApiError(method, code, {
+        headline: `Aula rejected the parameters for ${method} (code 40).`,
+        detail:
+          'Aula does not say which parameter was at fault. A date range that is too ' +
+          'wide, or an id that belongs to a different id space, are the usual causes.',
+      });
     }
-    throw new AulaApiError(
-      method,
-      code,
-      `Aula rejected ${method} with status code ${code}${
-        envelope.status?.message ? ` (${envelope.status.message})` : ''
-      }.`,
-    );
+    throw new AulaApiError(method, code, {
+      headline: `Aula rejected ${method} with status code ${code}.`,
+      ...(envelope.status?.message ? { detail: `Aula said: ${envelope.status.message}` } : {}),
+      action: 'See which endpoints are working:',
+      commands: ['bun run aula doctor --text'],
+    });
+  }
+
+  /**
+   * Turns a 5xx into something the reader can act on.
+   *
+   * Aula reports an access token it will not accept as HTTP 500 with the body
+   * `{"status":{"code":0,"message":"intern fejl"},"data":"intern fejl"}` — the
+   * same response it gives when the service itself is broken. Nothing in that
+   * body separates "your login is dead" from "Aula is down", and the two need
+   * opposite reactions: one is a two-minute MitID login, the other is waiting.
+   *
+   * They are still separable, just not by reading. While Aula is healthy an
+   * *unauthenticated* request is answered cleanly (403, status code 448); while
+   * it is not, that request 5xxes like everything else. So one credential-free
+   * request settles it, and the message can name the cause instead of listing
+   * both and leaving the reader to guess.
+   */
+  async #serverError(method: string, status: number): Promise<Error> {
+    switch (await this.#serviceReachable()) {
+      case true:
+        return new AulaAuthError({
+          headline: 'Aula rejected your login.',
+          detail:
+            `Aula answered ${method} with HTTP ${status}, but answered a ` +
+            `credential-free request quite normally — so Aula is up, and it is the ` +
+            `stored MitID login it will not accept. (Aula reports a token it rejects ` +
+            `as a server error rather than as an authentication failure, which is why ` +
+            `this does not read like a login problem.)`,
+        });
+      case false:
+        return new AulaApiError(method, status, {
+          headline: 'Aula is having trouble at the moment.',
+          detail:
+            `Aula answered ${method} with HTTP ${status}, and answered a request ` +
+            `carrying no credentials the same way — so this is Aula's problem, not ` +
+            `your login. Nothing here will fix it.`,
+          fallback: 'Wait a few minutes and try again; aula.dk in a browser will show the same.',
+        });
+      default:
+        return new AulaApiError(method, status, {
+          headline: `Aula answered ${method} with HTTP ${status}.`,
+          detail:
+            'Aula could not be reached a second time to tell whether the service is ' +
+            'down or your login has been rejected, so this may be either — or simply ' +
+            'no network. Aula reports both as a server error.',
+          action: 'Try, in order:',
+          commands: ['bun run aula doctor --text', 'bun run login'],
+        });
+    }
+  }
+
+  /**
+   * Is Aula answering at all, credentials aside? Memoised: a fan-out of six
+   * reads that all fail should ask once, not six times, and the answer cannot
+   * meaningfully change inside one command.
+   *
+   * `undefined` means the probe itself could not complete — no network, or a
+   * timeout — which is a third answer, not a failure to get one.
+   */
+  #serviceReachable(): Promise<boolean | undefined> {
+    this.#healthProbe ??= probeServiceReachable(this.#version);
+    return this.#healthProbe;
   }
 
   /**
@@ -483,11 +586,14 @@ export class AulaClient {
         continue;
       }
     }
-    throw new AulaApiError(
-      'profiles.getProfilesByLogin',
-      STATUS_RETIRED_VERSION,
-      'Could not find a live Aula API version.',
-    );
+    throw new AulaApiError('profiles.getProfilesByLogin', STATUS_RETIRED_VERSION, {
+      headline: 'Aula has retired every API version aula-cli knows about.',
+      detail:
+        `Versions ${MAX_API_VERSION_TO_PROBE} down to 15 all answered "retired". ` +
+        `Aula has moved further than this client expects, so aula-cli needs updating.`,
+      action: 'If you know the live version, point this run at it:',
+      commands: ['AULA_API_VERSION=<version> bun run aula whoami'],
+    });
   }
 
   // ---------------------------------------------------------------- endpoints
@@ -761,7 +867,13 @@ type ParsedEnvelope = {
 
 function parseEnvelope(method: string, value: unknown): ParsedEnvelope {
   if (!isRecord(value) || !isRecord(value.status) || typeof value.status.code !== 'number') {
-    throw new AulaApiError(method, -1, `Malformed JSON envelope from ${method}.`);
+    throw new AulaApiError(method, -1, {
+      headline: 'Aula sent a response aula-cli could not read.',
+      detail:
+        `${method} answered with JSON, but not with the {"status": {"code": …}, ` +
+        `"data": …} envelope every Aula endpoint normally replies with.`,
+      ...unexpectedPayloadAdvice(method),
+    });
   }
   const message = typeof value.status.message === 'string' ? value.status.message : undefined;
   return {
@@ -774,15 +886,77 @@ function parseEnvelope(method: string, value: unknown): ParsedEnvelope {
  * The wire payload is outside TypeScript's trust boundary. These two helpers
  * keep the unavoidable assertions in one place and at least prove the top-level
  * collection shape before endpoint code can use it.
+ *
+ * Reaching one of these means Aula called the request a success and then sent
+ * something else, so the message says what arrived instead — "a string
+ * (\"intern fejl\")" is a diagnosis, where "malformed payload" is a shrug.
  */
 function expectObject<T extends object>(method: string, value: unknown): T {
-  if (!isRecord(value)) throw new AulaApiError(method, -1, `Malformed object payload from ${method}.`);
+  if (!isRecord(value)) throw payloadError(method, 'an object', value);
   return value as T;
 }
 
 function expectArray<T>(method: string, value: unknown): T[] {
-  if (!Array.isArray(value)) throw new AulaApiError(method, -1, `Malformed list payload from ${method}.`);
+  if (!Array.isArray(value)) throw payloadError(method, 'a list', value);
   return value as T[];
+}
+
+function payloadError(method: string, expected: string, value: unknown): AulaApiError {
+  return new AulaApiError(method, -1, {
+    headline: 'Aula returned data that aula-cli does not understand.',
+    detail:
+      `${method} should answer with ${expected}, but Aula sent ${describeValue(value)}. ` +
+      `Aula reported the call as successful, so this is a change in what Aula sends ` +
+      `rather than something wrong with the request.`,
+    ...unexpectedPayloadAdvice(method),
+  });
+}
+
+/** The same two lines wherever Aula's shape is the problem rather than the call. */
+function unexpectedPayloadAdvice(method: string): Pick<Remedy, 'action' | 'commands' | 'fallback'> {
+  return {
+    action: 'See exactly what Aula sent:',
+    commands: [`bun run aula raw ${method} --no-cache`],
+    fallback:
+      'If what that prints looks nothing like it used to, Aula has changed their ' +
+      'API and aula-cli needs updating.',
+  };
+}
+
+/** Enough of an unexpected value to recognise it, and never more than a line. */
+function describeValue(value: unknown): string {
+  if (value === null) return 'null';
+  if (value === undefined) return 'nothing at all';
+  if (Array.isArray(value)) return `a list of ${value.length}`;
+  if (typeof value === 'string') {
+    const preview = value.length > 60 ? `${value.slice(0, 60)}…` : value;
+    return `a string ("${preview}")`;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return `${typeof value} (${value})`;
+  return `a ${typeof value}`;
+}
+
+/**
+ * Ask Aula whether it is answering, deliberately without credentials.
+ *
+ * Sends no cookie and no access token, which is the whole point: a healthy
+ * Aula turns that into a clean "not authenticated" (HTTP 403), and an unwell
+ * one 5xxes regardless. Anything below 500 therefore means the service is up.
+ */
+async function probeServiceReachable(version: number): Promise<boolean | undefined> {
+  const url = new URL(`${BASE}/v${version}/`);
+  url.searchParams.set('method', 'profiles.getProfilesByLogin');
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json', 'User-Agent': USER_AGENT },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS),
+    });
+    return res.status < 500;
+  } catch {
+    return undefined;
+  }
 }
 
 function defaultApiVersion(): number {

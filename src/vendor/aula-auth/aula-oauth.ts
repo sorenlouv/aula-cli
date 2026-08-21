@@ -6,6 +6,7 @@
  * refresh-token grant, so both live here.
  */
 
+import { formatRemedy } from '../../errors.ts';
 import { isRecord } from '../../validation.ts';
 import { AulaAuthFlowError } from './errors.ts';
 import type { AulaHttpClient } from './http.ts';
@@ -153,12 +154,36 @@ export async function refreshAccessToken(
     },
     body,
   });
-  if (res.status !== 200) {
-    throw new OAuthError(`Token refresh failed (status ${res.status}): ${res.body.slice(0, 300)}`);
-  }
+  if (res.status !== 200) throw refreshFailure(res.status, res.body);
   const tokens = parseTokenResponse(res.body, refreshToken);
   logger.info('oauth.refresh.success', { expires_in: tokens.expires_in });
   return tokens;
+}
+
+/**
+ * A refresh that fails is, from where the user sits, simply being logged out —
+ * so it says that, rather than quoting an OAuth error body at them.
+ *
+ * `invalid_grant` is the expected way for a refresh token to die: revoked,
+ * expired, rotated away, or encrypted under a key this machine no longer has.
+ * None of those are recoverable without MitID, and none of them are the user's
+ * mistake, so there is nothing to explain beyond what to do next. Any other
+ * status is unexpected enough that the raw body is worth keeping.
+ */
+function refreshFailure(status: number, body: string): OAuthError {
+  const isDeadGrant = status === 400 && /invalid_grant/.test(body);
+  return new OAuthError(
+    formatRemedy({
+      headline: 'Your Aula login has expired and could not be renewed.',
+      detail: isDeadGrant
+        ? 'The stored refresh token is no longer accepted, which happens when a login ' +
+          'is revoked, ages out, or was replaced. Renewing it is not possible; only a ' +
+          'fresh MitID login is.'
+        : `The token endpoint answered with HTTP ${status}: ${body.slice(0, 200)}`,
+      action: 'Log in again with MitID:',
+      commands: ['bun run login'],
+    }),
+  );
 }
 
 /**

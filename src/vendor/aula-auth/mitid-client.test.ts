@@ -158,3 +158,68 @@ describe('MitID wire response parsers', () => {
     expect(() => parseFinalizationResponse('null')).toThrow(MitidError);
   });
 });
+
+/**
+ * The regression that broke `login` outright.
+ *
+ * MitID does not omit optional fields when it has nothing to put in them — it
+ * sends `null`. A `/next` reporting an error carries `"nextAuthenticator":
+ * null` and `"nextSessionId": null`, and a guard that accepted only
+ * `undefined` rejected the whole response as an unexpected shape. The message
+ * underneath was CAP008, which this client already handles kindly, so the cost
+ * of that strictness was a clear "your session was cancelled, wait a minute"
+ * turning into an unactionable parse complaint.
+ *
+ * The body below is the shape aula.dk actually returned, with the text MitID
+ * actually sent.
+ */
+describe('a /next response with nulls where optional fields would be', () => {
+  const REAL_CAP008 = JSON.stringify({
+    selectCombination: false,
+    defaultCombinationId: 'S3',
+    flowCancelled: false,
+    errors: [
+      {
+        errorCode: 'control.authenticator_cannot_be_started',
+        message: 'Unable to start authenticator %s',
+        continueText: null,
+        userMessage: {
+          title: { text: 'Session cancelled', textAria: '' },
+          text: {
+            text: 'You have used your user ID in two places at the same time. ' +
+              'Due to this, your session has been cancelled. Try again',
+            textAria: '',
+          },
+          severity: 'ERROR',
+          supportErrorId: 'CAP008',
+        },
+        correlationId: '00000000-1111-2222-3333-444444444444',
+      },
+    ],
+    nextAuthenticator: null,
+    combinations: [{ id: 'S3', combinationItems: [{ name: 'MitID app', iconURL: 'x' }] }],
+    terms: null,
+    nextSessionId: null,
+  });
+
+  test('parses, instead of being rejected as an unexpected shape', () => {
+    const parsed = parseNextAuthenticatorResponse(REAL_CAP008);
+    expect(parsed.nextAuthenticator).toBeNull();
+    expect(parsed.nextSessionId).toBeNull();
+    expect(parsed.combinations).toHaveLength(1);
+  });
+
+  test('carries the error through, so the CAP008 handler can see it', () => {
+    const parsed = parseNextAuthenticatorResponse(REAL_CAP008);
+    const err = parsed.errors?.[0];
+    expect(err?.errorCode).toBe('control.authenticator_cannot_be_started');
+    expect(err?.userMessage?.supportErrorId).toBe('CAP008');
+    expect(err?.userMessage?.text?.text).toMatch(/two places at the same time/);
+  });
+
+  test('a null optional is not confused with a wrong-typed one', () => {
+    // null passes; a number where a string belongs must still be refused.
+    expect(() => parseNextAuthenticatorResponse('{"nextSessionId":42}')).toThrow(MitidError);
+    expect(parseNextAuthenticatorResponse('{"nextSessionId":null}').nextSessionId).toBeNull();
+  });
+});
