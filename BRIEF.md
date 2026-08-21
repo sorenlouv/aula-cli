@@ -160,7 +160,9 @@ These are the whole point, and each becomes a test:
   *Godt at vide*. The brief may reorder; it may not hide.
 - **A missing section and a failed fetch look different.** Today's EasyIQ 500
   must read as *"ugeplan for Viggo og Ida kunne ikke hentes"*, never as a
-  quiet empty week. Confusing the two is how a brief starts lying.
+  quiet empty week. Confusing the two is how a brief starts lying. The same
+  goes for a thread Aula refuses the body of: its subject still arrives, so
+  without a warning it renders as a message card with nothing in it.
 - **Every model-derived claim carries its source** — id, link, and the exact
   quote it was drawn from. A deadline is shown next to
   «Ansøgningsfristen er tirsdag den 1. september 2026», so it can be believed

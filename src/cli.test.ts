@@ -570,6 +570,42 @@ test('new --catch-up runs when the last run was incomplete', () => {
   assert.equal(state.lastRun.day, day);
 });
 
+// -------------------------------------------------- unreadable message threads
+
+// A thread whose body Aula refuses still arrives with its subject, because the
+// subject comes off the thread *list*. So it used to render as a perfectly
+// ordinary card with nothing in it — the one failure the finished page could
+// not show. `withFullMessages` hides the error on purpose (one bad thread must
+// not sink the digest), and BRIEF.md's promise is that a missing section and a
+// failed fetch look different. These two are that promise.
+test('a thread whose messages cannot be fetched is named on the page, not silently emptied', () => {
+  const box = sandbox({ FAKE_AULA_FAIL_THREAD: '5001' });
+  const result = box.run('new', '--no-llm', '--no-deploy', '--no-open');
+  assert.equal(result.code, 0, result.stderr);
+
+  const page = readFileSync(join(box.dir, 'brief', 'latest.html'), 'utf8');
+  assert.match(page, /Beskederne i tråden «Lejrskole for 2E» kunne ikke hentes/);
+  // The other two were readable, so nothing else may be claimed as missing.
+  assert.ok(!/tråde kunne ikke hentes/.test(page), 'only one thread failed');
+
+  // Nothing reported the page as short of a required warning: `validate.ts`
+  // rule 3 checks each `warn` note reached the HTML, and a miss would land in
+  // `notes` as a rejected layout rather than failing the run.
+  const notes: string[] = JSON.parse(result.stdout).notes;
+  assert.deepEqual(notes.filter((n) => /datastatus/.test(n)), []);
+});
+
+test('a total messaging outage is one line naming a few, not one warning per thread', () => {
+  const box = sandbox({ FAKE_AULA_FAIL: 'messaging.getMessagesForThread' });
+  const result = box.run('new', '--no-llm', '--no-deploy', '--no-open');
+  assert.equal(result.code, 0, result.stderr);
+
+  const page = readFileSync(join(box.dir, 'brief', 'latest.html'), 'utf8');
+  assert.match(page, /Beskederne i 3 tråde kunne ikke hentes/);
+  assert.match(page, /heriblandt «Lejrskole for 2E» og «Lukkedag i Myretuen»/);
+  assert.equal(page.match(/kunne ikke hentes/g)?.length, 1, 'three failures, one line');
+});
+
 // -------------------------------------------------------------- preferences
 
 test('remember, preferences, forget — the curation round trip', () => {

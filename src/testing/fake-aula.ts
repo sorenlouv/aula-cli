@@ -60,6 +60,7 @@ const PROFILES = {
  *   FAKE_AULA_NO_STEPUP=1    sensitive threads would read as empty
  *   FAKE_AULA_EMPTY_POSTS=1  the "wrong id set looks like an empty feed" trap
  *   FAKE_AULA_FAIL=<method>  that one method answers 403
+ *   FAKE_AULA_FAIL_THREAD=<id>  that one thread's messages answer 403
  *   FAKE_AULA_STALE_TOKEN=1  every widget token is rejected once as expired
  */
 const PROFILE_CONTEXT = {
@@ -235,6 +236,16 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
       });
     case 'messaging.getMessagesForThread': {
       const threadId = Number(url.searchParams.get('threadId'));
+      // One unreadable thread among readable ones. `FAKE_AULA_FAIL` can only
+      // take out the whole method, and the interesting case is the other one:
+      // a single thread the guardian has lost access to, which the digest
+      // swallows so the rest of the run survives.
+      if (String(threadId) === process.env.FAKE_AULA_FAIL_THREAD) {
+        return new Response(JSON.stringify({ status: { code: 403 }, data: null }), {
+          status: 403,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
       return envelope({
         id: threadId,
         subject: THREADS.find((t) => t.id === threadId)?.subject ?? '?',

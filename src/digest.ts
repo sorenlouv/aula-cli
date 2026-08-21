@@ -409,12 +409,18 @@ export async function withFullMessages(client: AulaClient, threads: ThreadSummar
   return threads.map((thread, i) => {
     const base = normaliseThread(thread);
     const detail = details[i];
+    // Set on both branches rather than only the failing one. A thread whose
+    // body could not be fetched is indistinguishable from a thread with no
+    // body — same subject, same empty `messages` — so this flag is the only
+    // thing telling them apart downstream, and a caller that has to narrow a
+    // union before it can ask is a caller that will forget to ask.
     if (!detail) return { ...base, messages: [], messagesUnavailable: true };
     return {
       ...base,
       totalMessageCount: detail.totalMessageCount,
       moreMessagesExist: detail.moreMessagesExist ?? false,
       messages: (detail.messages ?? []).map(normaliseMessage),
+      messagesUnavailable: false,
     };
   });
 }
