@@ -10,15 +10,24 @@
  * offer that happens to match a child's situation is still a municipal course
  * offer, and promoting it on topic alone is a mistake this file exists to
  * prevent.
+ *
+ * **The family's list reaches this file as verdicts, never as prose.** The
+ * model reads `~/.aula/preferences.md` and answers `hide | low | normal | high`
+ * per source (see `Relevance`); this file only compares those words to
+ * structured fields. It used to regex sender names and negation words out of
+ * the lines itself, and got the canonical example wrong — a wish about *John
+ * (Hjaltes far)* floored every message from a teacher called Hjalte. Prose is the
+ * model's to read; what a rule can check is the verdict, the audience, the
+ * kind, the date and Aula's own `important` flag, and nothing else.
  */
 
-import { MUNICIPAL_IS_NOISE } from '../preferences.ts';
 import { extractHits, urgencyFor } from './rules.ts';
 import type {
   Audience,
   BriefInput,
   RankedBrief,
   RankedSignal,
+  Relevance,
   Signal,
   SignalKind,
   Tier,
@@ -37,8 +46,28 @@ const AUDIENCE_SCORE: Record<Audience, number> = {
   institution: 5,
   // Heavily penalised, but not infinitely: a municipal message that genuinely
   // concerns our children should sort low, not vanish. What keeps the course
-  // offers out is `concernsChild` in `tierOf`, not this number.
+  // offers out of the cards is `concernsChild` in `tierOf`, and what hides
+  // them is the family's own list, read by the model — not this number.
   municipal: -40,
+};
+
+/**
+ * The family's say, as the model read it. Enough to decide what survives the
+ * action cap and what is first to overflow it; not enough to outweigh a child's
+ * own weekly plan with a municipal post.
+ *
+ * `hide` scores zero rather than lowest, and that is not the same as "never
+ * scored": a `hide` that `tierOf`'s child floor lifted into `context` is sorted
+ * there like anything else, and comes out above a `low` on -25. Ordering inside
+ * one fold, so it changes nothing about placement — but it does mean the thing
+ * the family asked to put away sits above the thing they merely deprioritised,
+ * which is worth knowing before treating these four numbers as a ranking.
+ */
+const RELEVANCE_SCORE: Record<Relevance, number> = {
+  high: 25,
+  normal: 0,
+  low: -25,
+  hide: 0,
 };
 
 const KIND_SCORE: Record<SignalKind, number> = {
@@ -114,6 +143,7 @@ function scoreOf(
   signal: Signal,
   audience: Audience,
   important: boolean,
+  relevance: Relevance,
 ): { score: number; reasons: string[] } {
   const reasons: string[] = [];
   let score = 0;
@@ -139,6 +169,12 @@ function scoreOf(
     score += 15;
     reasons.push('concerns our child +15');
   }
+  if (relevance !== 'normal') {
+    score += RELEVANCE_SCORE[relevance];
+    reasons.push(
+      `relevance:${relevance} ${RELEVANCE_SCORE[relevance] >= 0 ? '+' : ''}${RELEVANCE_SCORE[relevance]}`,
+    );
+  }
   return { score, reasons };
 }
 
@@ -146,21 +182,37 @@ function tierOf(
   signal: Signal,
   audience: Audience,
   important: boolean,
-  municipalIsNoise: boolean,
+  relevance: Relevance,
 ): Tier {
+  // The family's list, as the model read it, is the only thing that hides —
+  // with two things it yields to.
+  //
+  // Aula's own vigtig flag is the first: a school shouting is not something a
+  // preference can mute, and `important` is set rarely enough to mean it.
+  //
+  // `concernsChild` is the second, and it is a floor rather than an exemption:
+  // something that asks us for something about our own child is demoted to
+  // "Godt at vide" instead of hidden. The wish is still honoured — it never
+  // becomes a card — but the item stays findable. This is the closure case,
+  // and it is the reason `hide` is not simply absolute: *"fællesbeskeder til
+  // alle forældre i kommunen er aldrig relevante"* is a fair thing to want and
+  // a bad thing to apply to "alle skoler er lukket på mandag". One verdict is
+  // one model's reading on one morning, and the tier it can reach on its own
+  // is bounded accordingly: the worst outcome here is a fold, never a miss.
+  if (relevance === 'hide' && !important) return signal.concernsChild ? 'context' : 'hidden';
+  // "Matters less" keeps it off the cards, not off the page — same reasoning,
+  // so a verdict the model got wrong costs a fold, not the item.
+  if (relevance === 'low' && !important) return 'context';
   // Who it was sent to is a strong prior, never a veto. The content decides.
   // A message to every school in the municipality saying the schools are shut
   // on Friday still shuts ours, and burying it because of its address would be
-  // the same mistake as promoting a course offer because of its deadline.
-  //
-  // `municipalIsNoise` is the family's own say in it. This is the only gate in
-  // the pipeline that hides rather than sorts, so it is the only one that must
-  // not be beyond a user's reach: it stays shut exactly as long as their list
-  // says municipal broadcasts are noise. See `MUNICIPAL_IS_NOISE`.
-  if (municipalIsNoise && audience === 'municipal' && !signal.concernsChild && !important) return 'hidden';
-  // A school-wide message earns a place only when it asks something of us about
-  // our own child. Photo-day sign-up does; a parenting course on offer does not.
-  if (audience === 'institution' && !signal.concernsChild && !important) return 'context';
+  // the same mistake as promoting a course offer because of its deadline. So a
+  // broad message earns a card only when it asks something of us about our own
+  // child: photo-day sign-up does, a parenting course on offer does not — and
+  // a municipal offer with a genuine deadline is still an offer.
+  if ((audience === 'institution' || audience === 'municipal') && !signal.concernsChild && !important) {
+    return 'context';
+  }
 
   if (ACTIONABLE.has(signal.kind) && (signal.urgency === 'now' || signal.urgency === 'week')) {
     return 'act';
@@ -181,51 +233,20 @@ const ABOUT_THE_CHILD =
   /\b(jeres|dit|dine|deres) barn\b|\bbørnene\b|\beleverne\b|\bklassen\b|\bbarnet\b/i;
 const AN_OFFER = /\btilbud\b|\bforløb(et|ene)?\b|\bkursus\b|\bnetværk(et)?\b|målrettet forældre/i;
 
+/**
+ * On the `hide` path this is not a fallback — it is the only reader.
+ *
+ * The comment above says the model does this better, and it does, but it only
+ * ever gets the chance on a source it wrote a signal for. A `hide` verdict is
+ * by its nature a source the model found nothing worth extracting from, so the
+ * `concernsChild` that `tierOf`'s floor consults there comes from these regexes
+ * every time. Loosening them loosens the floor; that is the trade, and it is
+ * why the floor demotes to `context` rather than promoting anything.
+ */
 function looksLikeChildBusiness(item: { text: string; childNames: string[] }): boolean {
   if (item.childNames.length > 0) return true;
   if (AN_OFFER.test(item.text)) return false;
   return ABOUT_THE_CHILD.test(item.text);
-}
-
-/**
- * Words that turn a wish into its opposite.
- *
- * The preference floor below only ever *promotes*, so a line asking for less of
- * something must never be read as asking for more. This is a short closed list,
- * not an attempt at Danish negation in general: a line it fails to classify is
- * simply left to the model, which reads "jeg er ligeglad med billeder"
- * perfectly well. A miss here costs a preference honoured by judgement alone —
- * the same treatment every fuzzy preference gets — rather than one honoured
- * backwards.
- */
-const NOT_WANTED = /\b(ikke|aldrig|ligeglad|udelad\w*|skjul\w*|drop|spring over|uden|nedprioriter\w*)\b/i;
-
-/**
- * Does the family's own list name the person who wrote this?
- *
- * A name is the one part of a free-text wish that can be matched without
- * interpreting it: the author comes from Aula, the line comes from the user,
- * and either the line contains that name or it does not. That is why
- * *"beskeder fra John (Hjaltes far) er altid vigtige"* survives a bad model day
- * while *"hold øje med noget om svømning"* does not — by design, not by
- * omission. The topical half is the model's job, and it is better at it.
- *
- * Matched as a whole word, with the Danish genitive -s allowed, so "Ida" hits
- * "Idas mor" and not "sidan". Parts shorter than three letters are skipped:
- * initials and particles ("van", "de") match everything and mean nothing.
- */
-export function namedInPreferences(author: string | null, preferences: string[]): string | null {
-  if (!author) return null;
-  const names = author
-    .split(/\s+/)
-    .map((part) => part.replace(/[^\p{L}]/gu, ''))
-    .filter((part) => part.length >= 3);
-  for (const line of preferences) {
-    for (const name of names) {
-      if (new RegExp(`(^|\\P{L})${name}s?(\\P{L}|$)`, 'iu').test(line)) return line;
-    }
-  }
-  return null;
 }
 
 /**
@@ -236,6 +257,10 @@ export function namedInPreferences(author: string | null, preferences: string[])
  * "Netværksmøde" in one thread and "Møde ang. Alma d. 18/9" in another, and
  * showing both is exactly the noise this is meant to remove. Undated signals
  * fall back to matching on the subject, which is all there is to go on.
+ *
+ * Identity only: what a signal *is*, never where it ended up. Where it ended up
+ * is `interchangeable`'s question, and mixing the two would make this key
+ * depend on a tier that later steps still mutate.
  */
 function mergeKey(signal: Signal): string {
   if (signal.dueAt) return `${signal.child ?? 'alle'}|${signal.dueAt}|${signal.kind}`;
@@ -251,26 +276,47 @@ function mergeKey(signal: Signal): string {
  * Whether one of these two may stand for the other on the page.
  *
  * `mergeKey` says which signals are *candidates* to merge — the same subject on
- * the same date. This says which of those candidates one entry can honestly
- * represent, and the answer is no across Aula's own `vigtig` flag. The loser of
- * a merge survives only as a key in the winner's `mergedSourceKeys`, which
- * counts as covered everywhere downstream: it reaches no card, no "Godt at
- * vide", no muted foot, and not even `unusedSources`. The floor below only ever
- * inspects the winner, so a flagged item that lost is past rescuing. Same
- * subject, same date, but only one of them is the school shouting, so: two
- * entries.
+ * the same date. This says which of those candidates the page can honestly
+ * represent with one entry, and there are two boundaries it will not cross.
  *
- * Asked of the source, not of the tier — the tiers below this point are still
- * being rewritten, and a predicate that read them would depend on when it ran.
+ * The hidden one: absorbing a hidden signal into a visible one shows what the
+ * family asked to put away, and absorbing a visible one into a hidden one takes
+ * it off the page altogether. Same subject, same date, different answer to "do
+ * you want this".
+ *
+ * And Aula's own `vigtig` flag, which is the same loss reached from the other
+ * side: the loser of a merge survives only as a key in the winner's
+ * `mergedSourceKeys`, which counts as covered everywhere downstream — no card,
+ * no "Godt at vide", no muted foot, not even `unusedSources` — and the vigtig
+ * floor below only ever inspects the winner, so a flagged item that lost is
+ * past rescuing. Only one of the two is the school shouting, so: two entries.
+ *
+ * Both are read where they have settled: `tierOf` has run and the floors below
+ * have not, which is what makes the hidden read well-defined here, and the flag
+ * is the source's own and never moves at all.
  */
 function interchangeable(a: RankedSignal, b: RankedSignal): boolean {
-  return a.source.important === b.source.important;
+  return (
+    (a.tier === 'hidden') === (b.tier === 'hidden') &&
+    a.source.important === b.source.important
+  );
 }
 
-export function rank(input: BriefInput, signals: Signal[]): RankedBrief {
+/**
+ * `relevance` is the model's verdict per source key — see `Relevance`. Absent
+ * (the rules-only path, or a source the model skipped) means `normal`, so a
+ * brief built without the model ranks on breadth and content alone and hides
+ * nothing: failing towards showing a family more than they asked for, the
+ * cheaper failure for a tool whose worst outcome is a miss.
+ */
+export function rank(
+  input: BriefInput,
+  signals: Signal[],
+  relevance: Record<string, Relevance> = {},
+): RankedBrief {
   const itemByKey = new Map(input.items.map((item) => [item.key, item]));
   const degraded: string[] = [];
-  const municipalIsNoise = input.preferences.includes(MUNICIPAL_IS_NOISE);
+  const verdictOf = (key: string): Relevance => relevance[key] ?? 'normal';
 
   const scored: RankedSignal[] = [];
   for (const signal of signals) {
@@ -281,14 +327,16 @@ export function rank(input: BriefInput, signals: Signal[]): RankedBrief {
       degraded.push(`Udeladt: signal "${signal.title}" peger på en ukendt kilde (${signal.sourceKey}).`);
       continue;
     }
-    const { score, reasons } = scoreOf(signal, source.audience, source.important);
-    const tier = tierOf(signal, source.audience, source.important, municipalIsNoise);
+    const verdict = verdictOf(source.key);
+    const { score, reasons } = scoreOf(signal, source.audience, source.important, verdict);
+    const tier = tierOf(signal, source.audience, source.important, verdict);
     scored.push({
       ...signal,
       score,
       tier,
       mustShow: tier === 'act' || tier === 'week',
       audience: source.audience,
+      relevance: verdict,
       reasons,
       source,
       mergedSourceKeys: [],
@@ -322,7 +370,8 @@ export function rank(input: BriefInput, signals: Signal[]): RankedBrief {
   // Then across sources: the same subject on the same date is one thing said
   // twice, however many institutions sent it. Highest scorer first, so it is
   // the one the others are folded into — but only where they may stand for one
-  // another, so a key can hold a flagged entry and an unflagged one.
+  // another, so a key can hold a hidden entry and a visible one, or a
+  // flagged entry and an unflagged one.
   const byKey = new Map<string, RankedSignal[]>();
   for (const signal of [...bySource.values()].sort((a, b) => b.score - a.score)) {
     const key = mergeKey(signal);
@@ -368,60 +417,78 @@ export function rank(input: BriefInput, signals: Signal[]): RankedBrief {
     }
   }
 
-  // ------------------------------------------------- preference floor
-  // The family's own list, honoured a second time.
+  // -------------------------------------------------- relevance floor
+  // The family's own list, as the model read it — the promotion half.
   //
-  // The model already has these wishes in its instructions and handles the
-  // fuzzy ones better than anything here could. But "sig altid til når John
-  // skriver" is a promise, and a promise kept only by a model is kept only on
-  // a good day — when it is not, the page looks exactly like a quiet week.
-  // So the checkable half is checked here too: a message from someone the list
-  // names by name cannot end below the fold. Same shape as the vigtig floor
-  // above, deliberately — the model may promote it further, it can no longer
-  // sink it. An explicit wish also outranks the audience prior, which is the
-  // one thing allowed to lift an item back out of `hidden`.
-  const wanted = input.preferences.filter((line) => !NOT_WANTED.test(line));
+  // `tierOf` only ever lets a verdict push *down* (`hide`, `low`); `high` is
+  // applied here, after the cap, so it has the same shape as the vigtig floor:
+  // a source the family says matters cannot end below the fold, whatever the
+  // audience prior or the kind of signal made of it. The model may place it
+  // higher; it can no longer lose it. Never `act`, though — that tier is for
+  // things to do, and a wish makes something wanted, not actionable.
   for (const signal of merged) {
-    if (signal.tier !== 'context' && signal.tier !== 'hidden') continue;
-    const named = namedInPreferences(signal.source.author, wanted);
-    if (!named) continue;
-    signal.tier = 'week';
-    signal.mustShow = true;
-    signal.reasons.push(`preference floor → week («${named}»)`);
+    if (signal.relevance === 'high' && signal.tier === 'context') {
+      signal.tier = 'week';
+      signal.mustShow = true;
+      signal.reasons.push('relevance:high floor → week');
+    }
   }
 
+  // Sources no signal covered. The tier is decided here rather than by
+  // `tierOf`, and the one place that shows is `hide`: a source nothing could be
+  // extracted from is hidden even where `looksLikeChildBusiness` would have
+  // floored it to `context`. That is deliberate, and it is the weaker half of
+  // the floor that is being declined. The floor exists for things that ask us
+  // for something about our own child, and here neither the model nor the
+  // Danish rules found anything being asked at all — so the only evidence left
+  // is `childNames`, which Aula attaches to a photo album as readily as to a
+  // sign-up. Running the floor on that alone would resurrect exactly the quiet
+  // child-tagged posts a family says "never" about. Taking their word costs a
+  // fold: the source is still listed in the muted foot.
+  //
+  // "Sig altid til når John skriver" is a promise,
+  // and a model that extracted nothing from his message is exactly the day it
+  // is tested — so a `high` source gets a plain rule-made signal, like an
+  // important one. A `hide` source gets one too, in the hidden tier: it would
+  // otherwise surface under "Godt at vide" as an unused source, which is the
+  // opposite of what the family asked, and the muted foot is where hidden
+  // things are accounted for. Nothing is silently lost either way.
   const covered = new Set(merged.flatMap((s) => [s.sourceKey, ...s.mergedSourceKeys]));
   for (const item of input.items) {
     if (covered.has(item.key)) continue;
-    // Nothing was extracted from it — which for a named sender is precisely
-    // the case the wish was made about.
-    const named = namedInPreferences(item.author, wanted);
-    if (!item.important && !named) continue;
+    const verdict = verdictOf(item.key);
+    if (!item.important && verdict !== 'high' && verdict !== 'hide') continue;
+    const tier: Tier = item.important || verdict === 'high' ? 'week' : 'hidden';
     const base: Signal = {
-      id: `rule:${item.important ? 'important' : 'preference'}:${item.key}`,
+      id: `rule:${item.important ? 'important' : verdict}:${item.key}`,
       kind: 'info',
       title: item.title,
       child: item.childNames.length === 1 ? firstName(item.childNames[0] ?? '') : null,
       dueAt: null,
-      urgency: 'week',
+      urgency: tier === 'week' ? 'week' : 'fyi',
       quote: null,
       why: null,
       sourceKey: item.key,
       origin: 'rule',
       concernsChild: looksLikeChildBusiness(item),
     };
-    const { score, reasons } = scoreOf(base, item.audience, item.important);
+    const { score, reasons } = scoreOf(base, item.audience, item.important, verdict);
     merged.push({
       ...base,
       score,
-      tier: 'week',
-      mustShow: true,
+      tier,
+      mustShow: tier === 'week',
       audience: item.audience,
+      relevance: verdict,
       reasons: [
         ...reasons,
+        // English, like every other reason in this file: `--explain` is a
+        // maintainer's surface, not the page.
         item.important
-          ? 'aula-important floor: intet signal dækkede den'
-          : `preference floor: intet signal dækkede den («${named}»)`,
+          ? 'aula-important floor: no signal covered it'
+          : tier === 'week'
+            ? 'relevance:high floor: no signal covered it'
+            : 'relevance:hide: hidden, no signal covered it',
       ],
       source: item,
       mergedSourceKeys: [],

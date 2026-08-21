@@ -105,7 +105,7 @@ same gate:
 | Every claim is attributable | each claim block has `data-source-id` and a link |
 | Every card can be ticked off | each card carries `data-done-keys` |
 | Failures are visible | the datastatus block exists and names every failed fetch |
-| Noise stays down | no municipality-wide signal in the action region |
+| Noise stays down | nothing in the hidden tier is rendered as a card |
 | Portable | HTML parses; zero external resource references |
 | Legible | colours come from the token set; contrast ratios pass |
 | Print-safe | `<details>` are forced open in print, so nothing hides in the PDF |
@@ -245,7 +245,8 @@ the user has. The benchmarked failure of mid-tier models was under-reading a
 vigtig-marked mandatory sign-up into the fold, so `rank` carries a
 deterministic floor: an Aula-important item is never tiered below `week`,
 and one that no signal covered at all gets a plain rule-made signal. The
-model can promote it further; it cannot sink it.
+model can promote it further; it cannot sink it. The family's own `high`
+verdicts (below) get the same floor, for the same reason.
 
 | File | Responsibility |
 | --- | --- |
@@ -298,7 +299,8 @@ the family's list in its instructions, and must return:
     "quote": "Ansøgningsfristen er tirsdag den 1. september 2026",
     "why": "…"
   }],
-  "childSummaries": { "Alma": "…" }
+  "childSummaries": { "Alma": "…" },
+  "relevance": { "post:13311009": "hide|low|normal|high" }   // one per source
 }
 ```
 
@@ -308,6 +310,9 @@ Validation before anything is rendered:
 2. **`quote` must be a literal substring of that source's text.** Cheap to
    check, and it is the strongest anti-fabrication guard available here.
 3. `dueAt` must parse, and must not be in the past relative to its source.
+4. `relevance` keys must be sources that were supplied; a value outside the
+   four words reads as `normal`; a map left out entirely is fed back for the
+   retry, since the family's list reaches the ranking through nothing else.
 
 Failures are fed back for exactly one retry; a second failure falls through to
 rules-only output and the page is marked degraded in *Datastatus*. Extraction is
@@ -315,8 +320,10 @@ cached against a hash of the input, so a re-run on unchanged data costs nothing.
 
 ### Ranking stays deterministic
 
-The model proposes urgency; `rank.ts` decides placement. `--explain` prints the
-breakdown, which is what makes tuning possible rather than superstitious.
+The model proposes urgency and, per source, a relevance verdict; `rank.ts`
+decides placement from those and from structured fields alone. `--explain`
+prints the breakdown, which is what makes tuning possible rather than
+superstitious.
 
 **Audience breadth is the primary axis, and it is computed, not judged.** How
 specifically a message addresses one of these three children predicts relevance
@@ -328,7 +335,7 @@ better than its topic does, and `groups[]` gives it away for free:
 | The child's own class or stue | `2E`, `Myretuen` | High |
 | Weekly plan for their class | *Husk skiftetøj og badeting* | High |
 | Their actual school or daycare | `Eksempelskolen …`, `Børnehuset Eksemplet` | Depends on content |
-| Across institutions | `Alle forældre alle skoler` | Suppressed unless it concerns the child — while the family's list says so |
+| Across institutions | `Alle forældre alle skoler` | Never a card unless it concerns the child; hidden when the family's list says so and it does not |
 
 **Breadth is a prior, not a veto. The content decides.** School photo day and a
 parenting course are both addressed to the whole school; one needs doing and one
@@ -364,15 +371,15 @@ invent no dates, answer in this shape — so a user can disagree with the
 judgement without being able to loosen the guards. An emptied list is a
 legitimate state: the brief then ranks on breadth and content alone.
 
-One line is load-bearing in two places, and that is deliberate.
-`MUNICIPAL_IS_NOISE` is matched *literally* by `rank.ts`, because municipal
-breadth is the only gate in the pipeline that hides rather than sorts, and prose
-is not something the ranker can read. Keep the line and the gate stays shut;
-drop or reword it and the gate opens and the model decides. A setting the user
-can change that visibly does nothing would be worse than no setting at all.
+Nothing in the code matches a line by its wording. Reword one and the model
+reads the new wording; drop one and the model stops applying it — including the
+municipal line, which is the only shipped opinion that asks for something to be
+*hidden* rather than sorted. A setting the user can change that visibly does
+nothing would be worse than no setting at all, and the way to avoid that is to
+have exactly one reader of the prose.
 
-There is then one way in — the user says something, it becomes a line — and two
-independent attempts to honour it.
+There is then one way in — the user says something, it becomes a line — and one
+reader, whose reading is then acted on deterministically.
 
 **They travel in the instructions, never in the payload.** stdin is Danish prose
 written by school staff and other parents, none of it trusted. Put preferences
@@ -382,18 +389,38 @@ apart. The argv side is the user's, so that is where their wishes go — and the
 outrank the model's own sense of what matters, while never licensing an invented
 source, date or quote.
 
-**Then `rank.ts` checks the half that can be checked.** A wish naming a person
-is verifiable without interpreting it: the author comes from Aula, the line
-comes from the user, and either the line names them or it does not. So a message
-from someone the list names cannot sink below the fold, exactly as with Aula's
-own `vigtig` flag — the model may promote it further, it can no longer lose it.
-The topical half (*"jeg er ligeglad med billeder"*) stays the model's job,
-because it is better at it than any rule here would be. A line asking for *less*
-of something is skipped by the floor entirely; the floor only pushes up.
+**The model answers with a verdict per source, and `rank.ts` acts on the
+verdict.** Alongside the signals, the extraction returns `relevance`: for every
+source, one of `hide | low | normal | high`, read against the list. Four words
+rather than a number, because a model sorts into labelled buckets far more
+consistently than it calibrates a scale, and a score that wobbled from run to
+run would make a good model day and a bad one produce structurally different
+briefs. What each word does is fixed:
 
-Two layers rather than one because "sig altid til når John skriver" is a
-promise, and a promise kept only by a model is kept only on a good day — with a
-failure that is silent and looks exactly like a quiet week.
+- `hide` → the hidden tier, listed only in the muted foot. This is how *"aldrig
+  relevante for os"* takes a municipal offer off the page. It yields to two
+  things: Aula's own `vigtig` flag, and `concernsChild` — something that asks us
+  for something about our own child is demoted to *Godt at vide* rather than
+  hidden, so the worst a wrong `hide` costs is a fold. A closure that shuts our
+  school stays findable however broadly it was addressed.
+- `low` → at most *Godt at vide*, never a card — a verdict the model got wrong
+  costs a fold, not the item.
+- `normal` → content and breadth decide.
+- `high` → never below *Kommende*, and on the page even when the model
+  extracted nothing concrete from it. This is how *"sig altid til når John
+  skriver"* is kept on the day the model skims his message: a `high` source no
+  signal covered gets a plain rule-made signal, like an Aula-important one.
+
+Aula's own `vigtig` flag beats `hide` and `low`. No verdict — the rules-only
+path, or a source the model skipped — means `normal`, so a brief built without
+the model ranks on breadth and content alone and hides nothing.
+
+An earlier version had `rank.ts` read the prose itself, regex-matching sender
+names and negation words out of the lines as a deterministic second opinion. It
+got the canonical example wrong — a wish about *John (Hjaltes far)* floored every
+message from a teacher called Hjalte, and *"beskeder fra John er ligegyldige"*
+promoted him. Prose is the model's to read; a rule's job is to compare the
+verdict to structured fields and nothing else.
 
 ## Testing
 
