@@ -77,17 +77,18 @@ export function buildFamily(
     if (inst.institutionType) typeByCode.set(inst.institutionCode, inst.institutionType);
   }
 
-  const children = (profile.children ?? []).map((child) => ({
-    ...child,
-    institutionName:
-      child.institutionName ??
-      child.institutionProfile?.institutionName ??
-      nameByCode.get(child.institutionCode) ??
-      child.institutionCode,
-    ...(typeByCode.has(child.institutionCode)
-      ? { institutionType: typeByCode.get(child.institutionCode) as string }
-      : {}),
-  }));
+  const children = (profile.children ?? []).map((child) => {
+    const institutionType = typeByCode.get(child.institutionCode);
+    return {
+      ...child,
+      institutionName:
+        child.institutionName ??
+        child.institutionProfile?.institutionName ??
+        nameByCode.get(child.institutionCode) ??
+        child.institutionCode,
+      ...(institutionType ? { institutionType } : {}),
+    };
+  });
 
   const guardianInstitutionProfileIds = (profile.institutionProfiles ?? []).map((ip) => ip.id);
   const childInstitutionProfileIds = children.map((c) => c.id);
@@ -140,18 +141,25 @@ export function buildFamily(
 export function selectChildren(family: Family, ref?: string): Family['children'] {
   if (!ref) return family.children;
   const needle = ref.trim().toLowerCase();
-  const matches = family.children.filter(
+  const exactMatches = family.children.filter(
     (c) =>
       String(c.id) === needle ||
       String(c.profileId) === needle ||
       c.shortName?.toLowerCase() === needle ||
-      c.name.toLowerCase().includes(needle),
+      c.name.toLowerCase() === needle,
   );
-  if (matches.length === 0) {
-    const known = family.children.map((c) => `${c.name} (${c.shortName}, id ${c.id})`).join('; ');
-    throw new UsageError(`No child matches "${ref}". Known children: ${known}`);
+  if (exactMatches.length === 1) return exactMatches;
+
+  const partialMatches = family.children.filter((c) => c.name.toLowerCase().includes(needle));
+  if (partialMatches.length === 1) return partialMatches;
+
+  const matches = exactMatches.length > 1 ? exactMatches : partialMatches;
+  const describe = (children: Family['children']) =>
+    children.map((c) => `${c.name} (${c.shortName ?? 'no short name'}, id ${c.id})`).join('; ');
+  if (matches.length > 1) {
+    throw new UsageError(`Child reference "${ref}" is ambiguous. Matches: ${describe(matches)}`);
   }
-  return matches;
+  throw new UsageError(`No child matches "${ref}". Known children: ${describe(family.children)}`);
 }
 
 /**

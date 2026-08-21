@@ -9,6 +9,7 @@
  */
 
 import { Cookie, CookieJar } from 'tough-cookie';
+import { errorMessage } from '../../validation.ts';
 import type { Logger } from './logger.ts';
 import { silentLogger } from './logger.ts';
 
@@ -45,7 +46,7 @@ export class AulaCookieJar {
           name: parsed.key,
           domain: parsed.domain ?? '<implicit>',
           requestUrl,
-          error: (e as Error).message,
+          error: errorMessage(e),
         });
       }
     }

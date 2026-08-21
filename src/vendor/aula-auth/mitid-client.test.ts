@@ -1,6 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import { Buffer } from 'node:buffer';
-import { MitidError, parseAuxResponse } from './mitid-client.ts';
+import {
+  MitidError,
+  parseAppInitAuthResponse,
+  parseAppPollResponse,
+  parseAuthenticationSessionResponse,
+  parseAuxResponse,
+  parseFinalizationResponse,
+  parseM2Response,
+  parseNextAuthenticatorResponse,
+  parseSrpInitResponse,
+} from './mitid-client.ts';
 import { normalizeAuthenticatorType } from './mitid-types.ts';
 
 describe('parseAuxResponse', () => {
@@ -50,6 +60,7 @@ describe('parseAuxResponse', () => {
 
   test('throws when Aux missing', () => {
     expect(() => parseAuxResponse('{}')).toThrow(MitidError);
+    expect(() => parseAuxResponse('not json')).toThrow(MitidError);
   });
 
   test('throws when Aux is not valid base64-JSON', () => {
@@ -73,5 +84,77 @@ describe('normalizeAuthenticatorType', () => {
     expect(normalizeAuthenticatorType('APP')).toBe('APP');
     expect(normalizeAuthenticatorType('PASSWORD')).toBe('PASSWORD');
     expect(normalizeAuthenticatorType('CODE_TOKEN')).toBe('CODE_TOKEN');
+  });
+
+  test('rejects a new server value instead of lying about its union type', () => {
+    expect(() => normalizeAuthenticatorType('NEW_DEVICE')).toThrow(/Unknown MitID authenticator type/);
+  });
+});
+
+describe('MitID wire response parsers', () => {
+  test('parses the authentication-session fields the flow proof needs', () => {
+    const response = parseAuthenticationSessionResponse(JSON.stringify({
+      brokerSecurityContext: 'context',
+      serviceProviderName: 'Aula',
+      referenceTextHeader: 'header',
+      referenceTextBody: 'body',
+      ignoredByThisClient: true,
+    }));
+    expect(response.serviceProviderName).toBe('Aula');
+    expect(() => parseAuthenticationSessionResponse('{}')).toThrow(MitidError);
+  });
+
+  test('accepts both APP startup success and a typed error response', () => {
+    expect(parseAppInitAuthResponse('{"pollUrl":"https://poll","ticket":"t"}')).toEqual({
+      pollUrl: 'https://poll',
+      ticket: 't',
+    });
+    expect(parseAppInitAuthResponse('{"errorCode":"parallel"}')).toEqual({ errorCode: 'parallel' });
+    expect(() => parseAppInitAuthResponse('{"pollUrl":42}')).toThrow(MitidError);
+  });
+
+  test('validates poll payloads before the state machine reads them', () => {
+    expect(parseAppPollResponse('{"status":"timeout"}')).toEqual({ status: 'timeout' });
+    expect(() => parseAppPollResponse('{"status":"OK","payload":{"response":42}}')).toThrow(
+      MitidError,
+    );
+  });
+
+  test('validates SRP init and prove wrappers', () => {
+    expect(parseSrpInitResponse(JSON.stringify({
+      srpSalt: { value: 'salt' },
+      randomB: { value: 'random' },
+      pbkdf2Salt: { value: 'pbkdf' },
+    })).randomB.value).toBe('random');
+    expect(parseM2Response('{"m2":{"value":"proof"}}')).toBe('proof');
+    expect(() => parseSrpInitResponse('{"srpSalt":{},"randomB":{"value":"x"}}')).toThrow(
+      MitidError,
+    );
+  });
+
+  test('validates nested /next combinations, authenticators and error messages', () => {
+    const parsed = parseNextAuthenticatorResponse(JSON.stringify({
+      nextAuthenticator: {
+        authenticatorType: 'APP',
+        authenticatorSessionFlowKey: 'flow',
+        eafeHash: 'hash',
+        authenticatorSessionId: 'session',
+      },
+      combinations: [{ id: 'S3', combinationItems: [{ name: 'MitID app' }] }],
+      errors: [{ errorCode: 'x', userMessage: { supportErrorId: 'CAP008', text: { text: 'busy' } } }],
+    }));
+    expect(parsed.combinations?.[0]?.combinationItems[0]?.name).toBe('MitID app');
+    expect(parsed.errors?.[0]?.userMessage?.supportErrorId).toBe('CAP008');
+    expect(() => parseNextAuthenticatorResponse('{"combinations":[{"id":"S3"}]}')).toThrow(
+      MitidError,
+    );
+  });
+
+  test('keeps finalization absence explicit for the caller to diagnose', () => {
+    expect(parseFinalizationResponse('{}')).toEqual({});
+    expect(parseFinalizationResponse('{"authorizationCode":"code"}')).toEqual({
+      authorizationCode: 'code',
+    });
+    expect(() => parseFinalizationResponse('null')).toThrow(MitidError);
   });
 });

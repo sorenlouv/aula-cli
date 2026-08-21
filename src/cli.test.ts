@@ -81,10 +81,45 @@ function sandbox(overrides: Record<string, string> = {}) {
   };
 }
 
+function runWithoutLogin(...args: string[]): RunResult {
+  const dir = mkdtempSync(join(tmpdir(), 'aula-cli-unauthed-test-'));
+  sandboxes.push(dir);
+  const log = join(dir, 'requests.log');
+  writeFileSync(log, '');
+  const result = Bun.spawnSync({
+    cmd: ['bun', '--preload', PRELOAD, ENTRY, ...args],
+    env: { ...process.env, AULA_DIR: dir, FAKE_AULA_LOG: log, NO_COLOR: '1' },
+  });
+  return {
+    code: result.exitCode,
+    stdout: result.stdout.toString(),
+    stderr: result.stderr.toString(),
+    requests: readFileSync(log, 'utf8').split('\n').filter(Boolean),
+  };
+}
+
 function json(result: RunResult): any {
   assert.equal(result.code, 0, `expected success, got ${result.code}:\n${result.stderr}`);
   return JSON.parse(result.stdout);
 }
+
+test('unknown commands and malformed arguments are rejected before authentication', () => {
+  const cases: Array<{ args: string[]; message: RegExp }> = [
+    { args: ['not-a-command'], message: /Unknown command/ },
+    { args: ['calendar', '--days', 'many'], message: /--days must be an integer/ },
+    { args: ['contacts', '--role', 'teacher'], message: /--role must be "child" or "guardian"/ },
+    { args: ['pickup-times', '--from', '2026-02-31'], message: /--from must be a real date/ },
+    { args: ['thread', '1.5'], message: /id must be a positive integer/ },
+  ];
+
+  for (const { args, message } of cases) {
+    const result = runWithoutLogin(...args);
+    assert.equal(result.code, 1, args.join(' '));
+    assert.match(result.stderr, message);
+    assert.doesNotMatch(result.stderr, /login|token file/i);
+    assert.deepEqual(result.requests, []);
+  }
+});
 
 // ------------------------------------------------------------------- --child
 
@@ -134,7 +169,7 @@ test('digest --child reaches the standalone commands too', () => {
 test('--child is refused by commands that cannot honour it', () => {
   const result = sandbox().run('thread', '5001', '--child', 'Alma');
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /cannot narrow to one child/);
+  assert.match(result.stderr, /does not accept --child.*otherwise be ignored/);
   assert.match(result.stderr, /digest/, 'should name the commands that do');
   assert.equal(result.requests.length, 0, 'must be refused before spending a request');
 });
@@ -276,7 +311,7 @@ test('--page is refused by commands that are not paginated', () => {
   const box = sandbox();
   const result = box.run('messages', '--page', '2');
   assert.notEqual(result.code, 0);
-  assert.match(result.stderr, /--page would have been ignored/);
+  assert.match(result.stderr, /does not accept --page.*otherwise be ignored/);
 });
 
 test('--widget bypasses detection and reads the named vendor directly', () => {

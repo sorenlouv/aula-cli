@@ -1,13 +1,5 @@
 /** Shapes returned by the Aula API. Only the fields we actually consume are typed. */
 
-export type AulaEnvelope<T> = {
-  status: { code: number; message?: string; subCode?: number };
-  data: T | null;
-  version?: number;
-  module?: string;
-  method?: string;
-};
-
 export type ProfilePicture = { url?: string | null } | null;
 
 /**

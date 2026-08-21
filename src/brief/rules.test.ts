@@ -70,6 +70,10 @@ describe('extractDates', () => {
 
   test('rejects impossible dates', () => {
     expect(extractDates('Sag nr. 45/99 er afsluttet', TODAY)).toEqual([]);
+    expect(extractDates('Mødet er 31/2', TODAY)).toEqual([]);
+    expect(extractDates('Turen er 31. april', TODAY)).toEqual([]);
+    expect(extractDates('Fristen er 29. februar 2026', TODAY)).toEqual([]);
+    expect(extractDates('Fristen er 29. februar 2028', TODAY)).toEqual(['2028-02-29']);
   });
 });
 

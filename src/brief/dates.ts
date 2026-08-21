@@ -15,6 +15,7 @@
  */
 
 import { localIsoDate } from '../integrations/types.ts';
+import { isValidCalendarDate, parseIsoDateParts } from '../validation.ts';
 import type { BriefInput } from './types.ts';
 
 /** Indexed as `Date#getDay()`: Sunday first. */
@@ -67,19 +68,19 @@ export function findDateClaims(text: string): DateClaim[] {
     const month = Number(m[2]);
     // Clock times ("kl. 17.30", "9.05") look identical; an impossible month
     // rules most out, and an explicit "kl." rules out the rest.
-    if (month < 1 || month > 12 || day < 1 || day > 31) continue;
+    if (!isValidCalendarDate(2000, month, day)) continue;
     if (/kl\.?\s*$/i.test(text.slice(Math.max(0, (m.index ?? 0) - 6), m.index))) continue;
     claims.push({ kind: 'date', month, day, raw: m[0] });
   }
   for (const m of text.matchAll(NAMED_DATE_RE)) {
     const day = Number(m[1]);
     const month = monthIndex(m[2] ?? '');
-    if (month >= 1 && day >= 1 && day <= 31) claims.push({ kind: 'date', month, day, raw: m[0] });
+    if (isValidCalendarDate(2000, month, day)) claims.push({ kind: 'date', month, day, raw: m[0] });
   }
   for (const m of text.matchAll(RANGE_START_RE)) {
     const day = Number(m[1]);
     const month = monthIndex(m[2] ?? '');
-    if (month >= 1 && day >= 1 && day <= 31) claims.push({ kind: 'date', month, day, raw: m[0] });
+    if (isValidCalendarDate(2000, month, day)) claims.push({ kind: 'date', month, day, raw: m[0] });
   }
   for (const m of text.matchAll(WEEK_RE)) {
     claims.push({ kind: 'week', week: Number(m[1]), raw: m[0] });
@@ -102,9 +103,9 @@ export type DateSupport = {
 const key = (month: number, day: number) => `${month}-${day}`;
 
 function isoDate(value: string): { iso: string; month: number; day: number; weekday: number } | null {
-  const date = new Date(`${value.slice(0, 10)}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return null;
-  return { iso: value.slice(0, 10), month: date.getMonth() + 1, day: date.getDate(), weekday: date.getDay() };
+  const parsed = parseIsoDateParts(value.slice(0, 10));
+  if (!parsed) return null;
+  return { iso: parsed.iso, month: parsed.month, day: parsed.day, weekday: parsed.weekday };
 }
 
 /** Everything the sources, their timestamps, and today can vouch for. */

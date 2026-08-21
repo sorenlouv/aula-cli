@@ -11,6 +11,13 @@
  */
 
 import { htmlToText } from '../html.ts';
+import {
+  expectType,
+  isArrayOf,
+  isOptional,
+  isRecord,
+  isString,
+} from '../validation.ts';
 import { type WidgetTokens, widgetFetch } from '../widgets.ts';
 import type { IntegrationContext, WeekPlan, WeekPlanItem } from './types.ts';
 
@@ -35,11 +42,51 @@ type MuUgebrev = {
   }>;
 };
 
+type MuOpgaverResponse = { opgaver?: MuOpgave[] };
+
+function isNamed(value: unknown): value is { name?: string } {
+  return isRecord(value) && isOptional(value.name, isString);
+}
+
+function isMuOpgave(value: unknown): value is MuOpgave {
+  return isRecord(value) &&
+    isOptional(value.kuvertnavn, isString) &&
+    isOptional(value.title, isString) &&
+    isOptional(value.ugedag, isString) &&
+    isOptional(value.opgaveType, isString) &&
+    isOptional(value.hold, (groups): groups is Array<{ name?: string }> => isArrayOf(groups, isNamed)) &&
+    isOptional(value.forloeb, (course): course is { navn?: string } =>
+      isRecord(course) && isOptional(course.navn, isString));
+}
+
+function isMuOpgaverResponse(value: unknown): value is MuOpgaverResponse {
+  return isRecord(value) &&
+    isOptional(value.opgaver, (tasks): tasks is MuOpgave[] => isArrayOf(tasks, isMuOpgave));
+}
+
+function isMuUgebrev(value: unknown): value is MuUgebrev {
+  const isLetter = (candidate: unknown): candidate is { indhold?: string } =>
+    isRecord(candidate) && isOptional(candidate.indhold, isString);
+  const isInstitution = (candidate: unknown): candidate is { ugebreve?: Array<{ indhold?: string }> } =>
+    isRecord(candidate) &&
+    isOptional(candidate.ugebreve, (letters): letters is Array<{ indhold?: string }> =>
+      isArrayOf(letters, isLetter));
+  const isPerson = (candidate: unknown): candidate is NonNullable<MuUgebrev['personer']>[number] =>
+    isRecord(candidate) &&
+    isOptional(candidate.navn, isString) &&
+    isOptional(candidate.institutioner, (institutions): institutions is NonNullable<NonNullable<MuUgebrev['personer']>[number]['institutioner']> =>
+      isArrayOf(institutions, isInstitution));
+  return isRecord(value) &&
+    isOptional(value.personer, (people): people is NonNullable<MuUgebrev['personer']> =>
+      isArrayOf(people, isPerson));
+}
+
 async function fetchMu<T>(
   url: string,
   ctx: IntegrationContext,
   widgetId: string,
   tokens: WidgetTokens,
+  decode: (value: unknown) => T,
 ): Promise<T> {
   return tokens.withToken(widgetId, async (token) => {
     const params = new URLSearchParams({
@@ -53,11 +100,11 @@ async function fetchMu<T>(
       sessionUUID: ctx.guardianId,
       userProfile: 'guardian',
     });
-    return widgetFetch<T>({
+    return widgetFetch({
       url: `${url}?${params}`,
       widgetId,
       headers: { authorization: `Bearer ${token}`, accept: 'application/json' },
-    });
+    }, decode);
   });
 }
 
@@ -66,7 +113,8 @@ export async function getOpgaver(
   tokens: WidgetTokens,
   widgetId: string,
 ): Promise<WeekPlan> {
-  const data = await fetchMu<{ opgaver?: MuOpgave[] }>(OPGAVER_URL, ctx, widgetId, tokens);
+  const data = await fetchMu(OPGAVER_URL, ctx, widgetId, tokens, (value) =>
+    expectType(value, isMuOpgaverResponse, 'a MinUddannelse assignment response'));
   const items: WeekPlanItem[] = [];
   for (const opgave of data?.opgaver ?? []) {
     const subjects = (opgave.hold ?? []).map((h) => h.name).filter(Boolean);
@@ -93,7 +141,8 @@ export async function getUgebrev(
   tokens: WidgetTokens,
   widgetId: string,
 ): Promise<WeekPlan> {
-  const data = await fetchMu<MuUgebrev>(UGEBREV_URL, ctx, widgetId, tokens);
+  const data = await fetchMu(UGEBREV_URL, ctx, widgetId, tokens, (value) =>
+    expectType(value, isMuUgebrev, 'a MinUddannelse weekly letter response'));
   const items: WeekPlanItem[] = [];
   for (const person of data?.personer ?? []) {
     for (const institution of person.institutioner ?? []) {

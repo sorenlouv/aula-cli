@@ -10,18 +10,21 @@
  */
 
 import { type WidgetTokens, widgetFetch } from '../widgets.ts';
+import {
+  expectType,
+  isArrayOf,
+  isOptional,
+  isRecord,
+  isString,
+} from '../validation.ts';
 import { type IntegrationContext, isoDate, type WeekPlan, type WeekPlanItem } from './types.ts';
 
 const SYSTEMATIC_URL = 'https://systematic-momo.dk/api/aula/reminders/v1';
 
 type Reminder = {
-  id?: number;
-  institutionName?: string;
   dueDate?: string;
-  teamId?: number;
   teamName?: string;
   reminderText?: string;
-  createdBy?: string;
   subjectName?: string;
   /** Assignment reminders carry this instead of `reminderText`. */
   assignmentText?: string;
@@ -30,11 +33,33 @@ type Reminder = {
 
 type Person = {
   userName?: string;
-  userId?: number;
   teamReminders?: Reminder[];
   courseReminders?: Reminder[];
   assignmentReminders?: Reminder[];
 };
+
+function isReminder(value: unknown): value is Reminder {
+  return isRecord(value) &&
+    isOptional(value.dueDate, isString) &&
+    isOptional(value.teamName, isString) &&
+    isOptional(value.reminderText, isString) &&
+    isOptional(value.subjectName, isString) &&
+    isOptional(value.assignmentText, isString) &&
+    isOptional(value.teamNames, (names): names is string[] => isArrayOf(names, isString));
+}
+
+function isPerson(value: unknown): value is Person {
+  const reminders = (candidate: unknown): candidate is Reminder[] => isArrayOf(candidate, isReminder);
+  return isRecord(value) &&
+    isOptional(value.userName, isString) &&
+    isOptional(value.teamReminders, reminders) &&
+    isOptional(value.courseReminders, reminders) &&
+    isOptional(value.assignmentReminders, reminders);
+}
+
+function decodePeople(value: unknown): Person[] {
+  return expectType(value, (people): people is Person[] => isArrayOf(people, isPerson), 'a reminder list');
+}
 
 export async function getReminders(
   ctx: IntegrationContext,
@@ -52,7 +77,7 @@ export async function getReminders(
   });
 
   const people = await tokens.withToken(widgetId, async (token) => {
-    return ((await widgetFetch<Person[]>({
+    return await widgetFetch({
       url: `${SYSTEMATIC_URL}?${params}`,
       widgetId,
       headers: {
@@ -63,7 +88,7 @@ export async function getReminders(
         referer: 'https://www.aula.dk/',
         zone: 'Europe/Copenhagen',
       },
-    })) ?? []);
+    }, decodePeople);
   });
 
   const items: WeekPlanItem[] = [];

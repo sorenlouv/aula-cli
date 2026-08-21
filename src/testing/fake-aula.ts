@@ -16,6 +16,7 @@
  */
 
 import { appendFileSync } from 'node:fs';
+import { isNumber, isRecord } from '../validation.ts';
 
 // -------------------------------------------------------------------- fixture
 
@@ -308,8 +309,11 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
       return envelope(page === 0 ? [tagged, ...visible] : []);
     }
     case 'calendar.getEventsByProfileIdsAndResourceIds': {
-      const body = JSON.parse(String(init?.body ?? '{}')) as { instProfileIds?: number[] };
-      const ids = new Set(body.instProfileIds ?? []);
+      const body: unknown = JSON.parse(String(init?.body ?? '{}'));
+      const rawIds = isRecord(body) && Array.isArray(body.instProfileIds)
+        ? body.instProfileIds.filter(isNumber)
+        : [];
+      const ids = new Set(rawIds);
       return envelope(
         EVENTS.filter((e) => ids.has(e.forId)).map((e) => ({
           id: e.id,

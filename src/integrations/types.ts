@@ -9,6 +9,7 @@
  */
 
 import type { Capability, Provider } from '../widgets.ts';
+import { isIsoWeek } from '../validation.ts';
 
 export type IntegrationContext = {
   /** ISO week, e.g. `2026-W33`. Every ugeplan provider is week-oriented. */
@@ -111,8 +112,10 @@ export function isoWeekString(date: Date = new Date()): string {
 
 /** The Monday 00:00 UTC of an ISO week. Inverse of {@link isoWeekString}. */
 export function isoWeekToMonday(isoWeek: string): Date {
-  const match = /^(\d{4})-W(\d{1,2})$/.exec(isoWeek);
-  if (!match) throw new Error(`Not an ISO week string: "${isoWeek}" (expected e.g. 2026-W33).`);
+  const match = /^(\d{4})-W(\d{2})$/.exec(isoWeek);
+  if (!match || !isIsoWeek(isoWeek)) {
+    throw new Error(`Not an ISO week string: "${isoWeek}" (expected e.g. 2026-W33).`);
+  }
   const year = Number(match[1]);
   const week = Number(match[2]);
   // 4 January is always in ISO week 1, so walk back to that week's Monday.

@@ -36,6 +36,16 @@ describe('findDateClaims', () => {
     expect(findDateClaims('Vi mødes kl. 17.30 og slutter 19.45.')).toEqual([]);
     expect(findDateClaims('Hallen er åben kl. 9.05.')).toEqual([]);
   });
+
+  test('does not treat impossible calendar dates as evidence', () => {
+    expect(findDateClaims('Møde 31/2 og tur 31. april.')).toEqual([]);
+    expect(findDateClaims('Skuddag 29/2.')).toContainEqual({
+      kind: 'date',
+      month: 2,
+      day: 29,
+      raw: '29/2',
+    });
+  });
 });
 
 describe('buildDateSupport', () => {
@@ -112,5 +122,10 @@ describe('dueAtSupported', () => {
   test('an ungrounded date fails', () => {
     const s = buildDateSupport(input([item('post:1', 'Husk turtasken.')]));
     expect(dueAtSupported('2026-08-24', 'post:1', s)).toBe(false);
+  });
+
+  test('an impossible ISO date always fails', () => {
+    const s = buildDateSupport(input([item('post:1', 'Frist 31/2.')]));
+    expect(dueAtSupported('2026-02-31', 'post:1', s)).toBe(false);
   });
 });

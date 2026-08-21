@@ -8,6 +8,7 @@
  * persistence and a manual redirect loop on top.
  */
 
+import { errorMessage } from '../../validation.ts';
 import { AulaCookieJar } from './cookies.ts';
 import { RedirectLoopError } from './errors.ts';
 import type { Logger } from './logger.ts';
@@ -113,7 +114,7 @@ export class AulaHttpClient {
       // The wire trace is the user's primary debugging surface, so we record
       // the failure as a synthetic status-0 entry before re-throwing.
       const durationMs = Date.now() - start;
-      const message = (e as Error).message ?? String(e);
+      const message = errorMessage(e);
       if (this.tracer !== noopTracer) {
         this.tracer.record({
           ts: new Date().toISOString(),

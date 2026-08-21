@@ -40,13 +40,13 @@ export const AUTHENTICATOR_TO_COMBINATION_ID: Readonly<Record<MitidAuthenticator
  * `selectAuthenticator('CODE_TOKEN')` guard then throws because the strings
  * don't match.
  *
- * `APP` and `PASSWORD` pass through unchanged. Unknown values are returned
- * as-is (cast), so a genuinely new authenticator surfaces loudly downstream
- * rather than being silently swallowed.
+ * `APP` and `PASSWORD` pass through unchanged. Unknown values fail here, at
+ * the wire boundary, rather than entering the client under a false union type.
  */
 export function normalizeAuthenticatorType(raw: string): MitidAuthenticatorType {
   if (raw === 'TOKEN') return 'CODE_TOKEN';
-  return raw as MitidAuthenticatorType;
+  if (raw === 'APP' || raw === 'CODE_TOKEN' || raw === 'PASSWORD') return raw;
+  throw new Error(`Unknown MitID authenticator type: ${raw}`);
 }
 
 /** Returned by `GET /authentication-sessions/{id}` on construction. */
@@ -75,7 +75,7 @@ export interface NextAuthenticatorResponse {
   errors?: ReadonlyArray<{
     errorCode?: string;
     message?: string;
-    userMessage?: { text?: { text?: string } };
+    userMessage?: { text?: { text?: string }; supportErrorId?: string };
   }>;
   /** Set after PASSWORD prove; named differently because MitID. */
   nextSessionId?: string;
@@ -83,8 +83,8 @@ export interface NextAuthenticatorResponse {
 
 /** Returned by `POST /init-auth` (APP). Polled via `pollUrl`. */
 export interface AppInitAuthResponse {
-  pollUrl: string;
-  ticket: string;
+  pollUrl?: string;
+  ticket?: string;
   errorCode?: string;
 }
 
@@ -109,7 +109,7 @@ export interface SrpInitResponse {
 
 /** Response from `PUT /finalization`. */
 export interface FinalizationResponse {
-  authorizationCode: string;
+  authorizationCode?: string;
 }
 
 /** What `identifyAsUser` returns to the caller — the available auth methods. */

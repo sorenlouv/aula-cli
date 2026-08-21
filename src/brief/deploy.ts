@@ -44,6 +44,7 @@
  */
 
 import { CONFIG_PATH, readConfig, writeConfig } from '../config.ts';
+import { errorMessage } from '../validation.ts';
 import { modelEffortArgs, parseClaudeJson, spawnClaude } from './llm.ts';
 
 /** Stable across redeploys on purpose: a changed favicon reads as a new page. */
@@ -205,7 +206,7 @@ export async function deployArtifact(
         env: { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' },
       });
     } catch (error) {
-      return { status: 'failed', reason: (error as Error).message };
+      return { status: 'failed', reason: errorMessage(error) };
     }
     if (run.timedOut) continue;
 

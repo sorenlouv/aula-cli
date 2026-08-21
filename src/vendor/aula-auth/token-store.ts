@@ -18,6 +18,7 @@
 import { Buffer } from 'node:buffer';
 import { chmod, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { isRecord } from '../../validation.ts';
 import {
   type AulaTokens,
   DEFAULT_OAUTH_CONFIG,
@@ -97,14 +98,11 @@ export class EncryptedFileTokenStore {
     }
     let envelope: EncryptedEnvelope;
     try {
-      envelope = JSON.parse(raw) as EncryptedEnvelope;
+      const parsed: unknown = JSON.parse(raw);
+      envelope = parseEncryptedEnvelope(parsed);
     } catch (e) {
+      if (e instanceof TokenStoreError) throw e;
       throw new TokenStoreError('Token file is not valid JSON', { cause: e });
-    }
-    if (envelope.version !== 1 || envelope.alg !== 'aes-256-gcm') {
-      throw new TokenStoreError(
-        `Unsupported token file envelope (version=${envelope.version}, alg=${envelope.alg})`,
-      );
     }
     const key = await this.resolveKey();
     let plaintext: Buffer;
@@ -123,12 +121,11 @@ export class EncryptedFileTokenStore {
     }
     let record: StoredTokenRecord;
     try {
-      record = JSON.parse(plaintext.toString('utf8')) as StoredTokenRecord;
+      const parsed: unknown = JSON.parse(plaintext.toString('utf8'));
+      record = parseStoredTokenRecord(parsed);
     } catch (e) {
+      if (e instanceof TokenStoreError) throw e;
       throw new TokenStoreError('Decrypted token blob is not valid JSON', { cause: e });
-    }
-    if (record.version !== 1) {
-      throw new TokenStoreError(`Unsupported token record version ${record.version}`);
     }
     return record;
   }
@@ -207,6 +204,70 @@ export class EncryptedFileTokenStore {
   }
 }
 
+function parseEncryptedEnvelope(value: unknown): EncryptedEnvelope {
+  if (!isRecord(value)) throw new TokenStoreError('Token file envelope must be an object');
+  if (value.version !== 1 || value.alg !== 'aes-256-gcm') {
+    throw new TokenStoreError(
+      `Unsupported token file envelope (version=${String(value.version)}, alg=${String(value.alg)})`,
+    );
+  }
+  if (typeof value.iv !== 'string' || typeof value.ct !== 'string' || typeof value.tag !== 'string') {
+    throw new TokenStoreError('Token file envelope is missing encrypted string fields');
+  }
+  return { version: 1, alg: 'aes-256-gcm', iv: value.iv, ct: value.ct, tag: value.tag };
+}
+
+function parseStoredTokenRecord(value: unknown): StoredTokenRecord {
+  if (!isRecord(value) || value.version !== 1 || !isRecord(value.tokens)) {
+    throw new TokenStoreError('Decrypted token record has an unsupported shape');
+  }
+  const tokens = value.tokens;
+  const expiresIn = nonNegativeInteger(tokens.expires_in);
+  const expiresAt = nonNegativeInteger(tokens.expires_at);
+  const obtainedAt = nonNegativeInteger(tokens.obtained_at);
+  const savedAt = nonNegativeInteger(value.saved_at);
+  const identityIndex = value.identityIndex === undefined
+    ? undefined
+    : positiveInteger(value.identityIndex);
+  if (
+    typeof value.username !== 'string' || !value.username ||
+    savedAt === undefined ||
+    typeof tokens.access_token !== 'string' || !tokens.access_token ||
+    typeof tokens.refresh_token !== 'string' || !tokens.refresh_token ||
+    tokens.token_type !== 'Bearer' ||
+    expiresIn === undefined ||
+    expiresAt === undefined ||
+    obtainedAt === undefined ||
+    (value.identityIndex !== undefined && identityIndex === undefined) ||
+    (value.identityName !== undefined && typeof value.identityName !== 'string')
+  ) {
+    throw new TokenStoreError('Decrypted token record has invalid fields');
+  }
+  return {
+    version: 1,
+    username: value.username,
+    tokens: {
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      token_type: 'Bearer',
+      expires_in: expiresIn,
+      expires_at: expiresAt,
+      obtained_at: obtainedAt,
+    },
+    saved_at: savedAt,
+    ...(identityIndex !== undefined ? { identityIndex } : {}),
+    ...(typeof value.identityName === 'string' ? { identityName: value.identityName } : {}),
+  };
+}
+
+function nonNegativeInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 ? value : undefined;
+}
+
 function decodeKeyMaterial(material: string): Buffer {
   const trimmed = material.trim();
   // Accept hex (64 chars) or base64 (44 chars including padding).
@@ -225,7 +286,7 @@ function assertKeyLength(key: Buffer): void {
 }
 
 function isEnoent(e: unknown): boolean {
-  return typeof e === 'object' && e !== null && (e as { code?: string }).code === 'ENOENT';
+  return isRecord(e) && e.code === 'ENOENT';
 }
 
 // --------------------------------------------------------------------------

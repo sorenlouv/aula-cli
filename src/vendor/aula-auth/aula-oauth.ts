@@ -6,6 +6,7 @@
  * refresh-token grant, so both live here.
  */
 
+import { isRecord } from '../../validation.ts';
 import { AulaAuthFlowError } from './errors.ts';
 import type { AulaHttpClient } from './http.ts';
 import type { Logger } from './logger.ts';
@@ -160,33 +161,29 @@ export async function refreshAccessToken(
   return tokens;
 }
 
-interface RawTokenResponse {
-  access_token?: string;
-  refresh_token?: string;
-  token_type?: string;
-  expires_in?: number;
-}
-
 /**
  * Parse a token endpoint response. `fallbackRefresh` lets us preserve the
  * caller's refresh token when the server's refresh-token grant response omits
  * it (some IdPs only return a new refresh token if rotation is enabled).
  */
 export function parseTokenResponse(rawBody: string, fallbackRefresh?: string): AulaTokens {
-  let parsed: RawTokenResponse;
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(rawBody) as RawTokenResponse;
+    parsed = JSON.parse(rawBody);
   } catch (e) {
     throw new OAuthError('Token response was not valid JSON', { cause: e });
   }
-  if (!parsed.access_token) throw new OAuthError('Token response missing access_token');
+  if (!isRecord(parsed)) throw new OAuthError('Token response must be a JSON object');
+  if (typeof parsed.access_token !== 'string' || !parsed.access_token) {
+    throw new OAuthError('Token response missing access_token');
+  }
   if (parsed.token_type && parsed.token_type !== 'Bearer') {
     throw new OAuthError(`Unexpected token_type: ${parsed.token_type}`);
   }
-  if (typeof parsed.expires_in !== 'number') {
+  if (typeof parsed.expires_in !== 'number' || !Number.isFinite(parsed.expires_in)) {
     throw new OAuthError('Token response missing numeric expires_in');
   }
-  const refreshToken = parsed.refresh_token ?? fallbackRefresh;
+  const refreshToken = typeof parsed.refresh_token === 'string' ? parsed.refresh_token : fallbackRefresh;
   if (!refreshToken) throw new OAuthError('Token response missing refresh_token (no fallback)');
 
   const now = Math.floor(Date.now() / 1000);
