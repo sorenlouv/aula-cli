@@ -32,6 +32,7 @@ const MUST_SHOW: RankedSignal = {
   tier: 'act',
   mustShow: true,
   audience: 'child',
+  relevance: 'normal',
   reasons: [],
   source: SOURCE,
   mergedSourceKeys: [],
@@ -55,6 +56,7 @@ const HIDDEN: RankedSignal = {
   tier: 'hidden',
   mustShow: false,
   audience: 'municipal',
+  relevance: 'hide',
   sourceKey: 'post:9',
   source: { ...SOURCE, key: 'post:9', title: 'Forældrekursus', audience: 'municipal', groups: ['Alle forældre'] },
 };
@@ -220,6 +222,137 @@ describe('renderPlan', () => {
     const { plan } = parsePlan({ handling: [{ signalId: MUST_SHOW.id }] }, BRIEF);
     const html = renderPlan(BRIEF, plan, { isNew: (key) => key === MUST_SHOW.sourceKey });
     expect(html).toContain('<span class="chip new">Ny</span>');
+  });
+});
+
+// The reader's escape hatch: a card is a summary, and a summary is only worth
+// trusting if the thing it summarises is one tap away.
+describe('læs mere', () => {
+  const conversation = (count: number, extra: Partial<{ total: number; truncated: boolean }> = {}) => ({
+    messages: Array.from({ length: count }, (_, i) => ({
+      from: i % 2 === 0 ? 'Lone Lærke' : 'Søren',
+      at: `2026-08-1${i}T09:0${i}:00`,
+      text: `Besked nummer ${i}.`,
+    })),
+    total: extra.total ?? count,
+    truncated: extra.truncated ?? false,
+  });
+
+  const threadBrief = (
+    source: Partial<SourceItem>,
+    signal: Partial<RankedSignal> = {},
+  ): RankedBrief => {
+    const item = sourceItem({ key: 'thread:9', kind: 'thread', title: 'Møde om Alma', ...source });
+    const ranked: RankedSignal = { ...MUST_SHOW, sourceKey: item.key, source: item, ...signal };
+    return { ...BRIEF, signals: [ranked], input: { ...INPUT, items: [item] } };
+  };
+
+  test('a conversation opens as the whole exchange, sender and time on each message', () => {
+    const brief = threadBrief({ text: 'Møde om Alma', conversation: conversation(4) });
+    const html = fallbackPage(brief);
+    expect(html).toContain('Læs hele samtalen · 4 beskeder');
+    for (let i = 0; i < 4; i++) expect(html).toContain(`Besked nummer ${i}.`);
+    expect(html).toContain('<b>Lone Lærke</b>');
+    expect(html).toContain('10. aug');
+    expect(validatePage(html, brief)).toEqual([]);
+  });
+
+  test('it is collapsed by default — most days the summary is enough', () => {
+    const html = fallbackPage(threadBrief({ text: 'Møde om Alma', conversation: conversation(4) }));
+    expect(html).toContain('<details class="more">');
+    expect(html).not.toContain('<details class="more" open');
+  });
+
+  test('a thread fetched in part says so rather than passing for the whole', () => {
+    const brief = threadBrief({
+      text: 'Møde om Alma',
+      conversation: conversation(3, { total: 11, truncated: true }),
+    });
+    const html = fallbackPage(brief);
+    expect(html).toContain('Læs samtalen · 3 af 11 beskeder');
+    expect(html).toContain('Ikke alle beskeder i tråden vises her');
+  });
+
+  test('the conversation summary sits on the card, above the exchange', () => {
+    const brief = threadBrief({ text: 'Møde om Alma', conversation: conversation(4) });
+    const html = fallbackPage(brief, {
+      conversations: { 'thread:9': 'Lone foreslår tre datoer; I har ikke svaret endnu.' },
+    });
+    expect(html).toContain('<p class="gist">Lone foreslår tre datoer; I har ikke svaret endnu.</p>');
+    expect(html.indexOf('class="gist"')).toBeLessThan(html.indexOf('<details class="more">'));
+  });
+
+  test('a post longer than its quote gets a plain "Læs mere" with the whole text', () => {
+    const long = sourceItem({
+      key: 'post:7',
+      title: 'Skolefoto',
+      text: 'Kære forældre.\n\nVi holder skolefoto på tirsdag.\n\nHusk pænt tøj.',
+    });
+    const brief: RankedBrief = {
+      ...BRIEF,
+      signals: [{ ...MUST_SHOW, sourceKey: long.key, source: long, quote: 'Husk pænt tøj.' }],
+      input: { ...INPUT, items: [long] },
+    };
+    const html = fallbackPage(brief);
+    expect(html).toContain('Læs mere');
+    expect(html).toContain('<p>Kære forældre.</p>');
+    expect(html).toContain('<p>Vi holder skolefoto på tirsdag.</p>');
+  });
+
+  test('no toggle when the card already shows the whole source', () => {
+    const short = sourceItem({ key: 'post:7', title: 'Fri', text: 'Vi holder fri på fredag.' });
+    const brief: RankedBrief = {
+      ...BRIEF,
+      signals: [
+        { ...MUST_SHOW, sourceKey: short.key, source: short, quote: 'Vi holder fri på fredag.' },
+      ],
+      input: { ...INPUT, items: [short] },
+    };
+    expect(fallbackPage(brief)).not.toContain('class="more"');
+  });
+
+  test('source prose is escaped, not rendered', () => {
+    const nasty = sourceItem({
+      key: 'thread:9',
+      kind: 'thread',
+      title: 'Hej',
+      text: 'x',
+      conversation: {
+        messages: [
+          { from: '<img src=x onerror=alert(1)>', at: null, text: 'a' },
+          { from: 'Lone', at: null, text: '<script>alert(1)</script>' },
+          { from: 'Lone', at: null, text: 'Se @import url(https://evil.example/x.css)' },
+        ],
+        total: 3,
+        truncated: false,
+      },
+    });
+    const brief: RankedBrief = {
+      ...BRIEF,
+      signals: [{ ...MUST_SHOW, sourceKey: nasty.key, source: nasty, quote: null }],
+      input: { ...INPUT, items: [nasty] },
+    };
+    const html = fallbackPage(brief);
+    expect(html).not.toContain('<script>');
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;script&gt;');
+    // A parent quoting a stylesheet URL must not fail the whole layout — the
+    // self-contained rule is about tags this renderer wrote, not about prose.
+    expect(validatePage(html, brief)).toEqual([]);
+  });
+
+  test('Godt at vide carries it too — that is where the unexplained things live', () => {
+    const item = sourceItem({
+      key: 'thread:12',
+      kind: 'thread',
+      title: 'Legeaftale',
+      text: 'Legeaftale',
+      conversation: conversation(3),
+    });
+    const brief: RankedBrief = { ...BRIEF, signals: [], unusedSources: [item] };
+    const html = fallbackPage(brief, { conversations: { 'thread:12': 'Fire forældre aftaler en legedag.' } });
+    expect(html).toContain('Fire forældre aftaler en legedag.');
+    expect(html).toContain('Læs hele samtalen · 3 beskeder');
   });
 });
 

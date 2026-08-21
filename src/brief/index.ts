@@ -25,7 +25,7 @@ import {
   saveState,
   whichAreNew,
 } from './state.ts';
-import type { RankedBrief } from './types.ts';
+import type { RankedBrief, Relevance } from './types.ts';
 import { validatePage } from './validate.ts';
 
 export type BriefOptions = {
@@ -73,7 +73,11 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   // ------------------------------------------------------------- extraction
   let topline: string | null = null;
   let summaries: Record<string, string> = {};
+  let conversations: Record<string, string> = {};
   let modelSignals: ReturnType<typeof signalsFromRules> = [];
+  // The family's list, as the model read it per source. Empty on the
+  // rules-only path, which then hides nothing — see `rank`.
+  let relevance: Record<string, Relevance> = {};
   let extractionRan = opts.useModel === false;
 
   if (opts.useModel !== false) {
@@ -81,7 +85,9 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
       const extracted = await extractSignals(input, { useCache: opts.useCache !== false });
       topline = extracted.topline;
       summaries = extracted.childSummaries;
+      conversations = extracted.conversationSummaries;
       modelSignals = extracted.signals;
+      relevance = extracted.relevance;
       extractionRan = true;
       for (const problem of extracted.problems) {
         notes.push(`Udtræk afvist: ${problem}`);
@@ -91,7 +97,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
     }
   }
 
-  const brief = rank(input, [...modelSignals, ...signalsFromRules(input, now)]);
+  const brief = rank(input, [...modelSignals, ...signalsFromRules(input, now)], relevance);
 
   // ---------------------------------------------------------------- compose
   const state = loadState();
@@ -103,7 +109,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
 
   if (opts.useModel !== false) {
     try {
-      const composed = await composePage(brief, { topline, summaries, isNew });
+      const composed = await composePage(brief, { topline, summaries, conversations, isNew });
       for (const problem of composed.problems) {
         notes.push(`Layoutplan: ${problem}`);
       }
@@ -125,6 +131,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
     body = fallbackPage(brief, {
       topline,
       summaries,
+      conversations,
       note: opts.useModel === false ? undefined : 'reservelayout',
     });
     // The fallback is held to the same standard as the model's output.

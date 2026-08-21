@@ -37,6 +37,9 @@ const good = {
   sourceKey: 'post:1',
 };
 
+/** Every source is owed a verdict; a well-formed answer carries one for post:1. */
+const verdicts = { relevance: { 'post:1': 'normal' } };
+
 describe('withPreferences', () => {
   const BASE = 'Du læser Aula-indhold.';
 
@@ -74,7 +77,7 @@ describe('parseJsonLoosely', () => {
 
 describe('validateExtraction', () => {
   test('keeps a well-formed signal', () => {
-    const result = validateExtraction(INPUT, { topline: 'Rolig uge.', signals: [good] });
+    const result = validateExtraction(INPUT, { topline: 'Rolig uge.', signals: [good], ...verdicts });
     expect(result.problems).toEqual([]);
     expect(result.signals).toHaveLength(1);
     expect(result.signals[0]?.origin).toBe('model');
@@ -98,8 +101,41 @@ describe('validateExtraction', () => {
   });
 
   test('a title may echo the weekday of its own grounded dueAt', () => {
-    const result = validateExtraction(INPUT, { signals: [good] });
+    const result = validateExtraction(INPUT, { signals: [good], ...verdicts });
     expect(result.problems).toEqual([]); // "på mandag" + dueAt on a Monday
+  });
+
+  test('keeps a verdict for a known source', () => {
+    const result = validateExtraction(INPUT, { signals: [good], relevance: { 'post:1': 'high' } });
+    expect(result.relevance).toEqual({ 'post:1': 'high' });
+    expect(result.problems).toEqual([]);
+  });
+
+  test('a verdict outside the four words reads as normal; one for an unknown source is reported', () => {
+    // Same treatment as an unknown kind and an unknown sourceKey respectively:
+    // the safe reading for the one, a reported problem for the other.
+    const result = validateExtraction(INPUT, {
+      signals: [good],
+      relevance: { 'post:1': 'meget', 'post:999': 'high' },
+    });
+    expect(result.relevance).toEqual({ 'post:1': 'normal' });
+    expect(result.problems).toEqual(['relevance: ukendt sourceKey "post:999"']);
+  });
+
+  test('a missing verdict map is a problem worth the retry; an empty input is owed none', () => {
+    // The family's list reaches the ranking through these verdicts and
+    // nothing else, so an answer without them has skipped the question.
+    const without = validateExtraction(INPUT, { signals: [good] });
+    expect(without.relevance).toEqual({});
+    expect(without.problems).toEqual(['relevance: mangler — én vurdering pr. kilde']);
+    expect(validateExtraction(briefInput({ items: [] }), { signals: [] }).problems).toEqual([]);
+  });
+
+  test('a partial verdict map is taken as it is — the rest read as normal downstream', () => {
+    const two = briefInput({ ...INPUT, items: [SOURCE, { ...SOURCE, key: 'post:2' }] });
+    const result = validateExtraction(two, { signals: [], relevance: { 'post:2': 'hide' } });
+    expect(result.relevance).toEqual({ 'post:2': 'hide' });
+    expect(result.problems).toEqual([]);
   });
 
   test('nulls a topline with an invented date and reports it', () => {
@@ -174,6 +210,72 @@ describe('validateExtraction', () => {
     expect(validateExtraction(INPUT, null).signals).toEqual([]);
     expect(validateExtraction(INPUT, { signals: 'nope' }).signals).toEqual([]);
     expect(validateExtraction(INPUT, { signals: [null] }).signals).toEqual([]);
+  });
+
+  describe('conversation summaries', () => {
+    const message = (from: string, at: string, text: string) => ({ from, at, text });
+    const thread = (count: number) =>
+      sourceItem({
+        key: 'thread:9',
+        kind: 'thread',
+        title: 'Møde om Viggo',
+        text: 'Møde om Viggo\n\nLone: Kan I mødes?\n\nJer: Ja.\n\nLone: Fint.',
+        conversation: {
+          messages: Array.from({ length: count }, (_, i) =>
+            message('Lone Lærke', `2026-08-1${i}T09:00:00`, `Besked ${i}`),
+          ),
+          total: count,
+          truncated: false,
+        },
+      });
+
+    const withThread = (count: number) => briefInput({ ...INPUT, items: [SOURCE, thread(count)] });
+
+    test('keeps a summary for a thread that is genuinely an exchange', () => {
+      const result = validateExtraction(withThread(4), {
+        signals: [],
+        ...verdicts,
+        conversationSummaries: { 'thread:9': '  Lone foreslår et møde; I har sagt ja.  ' },
+      });
+      expect(result.conversationSummaries).toEqual({
+        'thread:9': 'Lone foreslår et møde; I har sagt ja.',
+      });
+      expect(result.problems).toEqual([]);
+    });
+
+    test('refuses to summarise something that is not a conversation', () => {
+      const result = validateExtraction(withThread(1), {
+        signals: [],
+        ...verdicts,
+        conversationSummaries: { 'thread:9': 'Lone skrev en besked.' },
+      });
+      expect(result.conversationSummaries).toEqual({});
+      expect(result.problems.join(' ')).toContain('er ikke en samtale');
+    });
+
+    test('refuses a summary for a source that was never supplied', () => {
+      const result = validateExtraction(withThread(4), {
+        signals: [],
+        ...verdicts,
+        conversationSummaries: { 'thread:404': 'Noget helt andet.' },
+      });
+      expect(result.conversationSummaries).toEqual({});
+      expect(result.problems.join(' ')).toContain('ukendt sourceKey');
+    });
+
+    test('drops a summary that asserts a date nothing supports', () => {
+      const result = validateExtraction(withThread(4), {
+        signals: [],
+        ...verdicts,
+        conversationSummaries: { 'thread:9': 'Mødet er aftalt til den 3. november.' },
+      });
+      expect(result.conversationSummaries).toEqual({});
+      expect(result.problems.join(' ')).toContain('dato uden kilde');
+    });
+
+    test('is empty, not absent, when the model said nothing about threads', () => {
+      expect(validateExtraction(INPUT, { signals: [], ...verdicts }).conversationSummaries).toEqual({});
+    });
   });
 });
 

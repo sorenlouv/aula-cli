@@ -32,6 +32,7 @@ const MUST_SHOW: RankedSignal = {
   tier: 'act',
   mustShow: true,
   audience: 'child',
+  relevance: 'normal',
   reasons: [],
   source: SOURCE,
   mergedSourceKeys: [],
@@ -44,6 +45,7 @@ const HIDDEN: RankedSignal = {
   tier: 'hidden',
   mustShow: false,
   audience: 'municipal',
+  relevance: 'hide',
   sourceKey: 'post:9',
   source: { ...SOURCE, key: 'post:9', title: 'Forældrekursus', audience: 'municipal', groups: ['Alle forældre'] },
 };
@@ -108,9 +110,24 @@ describe('validatePage', () => {
       '<script src="https://x/y.js"></script>',
       '<link rel="stylesheet" href="https://x/y.css">',
       '<style>@import url(https://x/y.css)</style>',
+      '<iframe src="https://x/y"></iframe>',
     ]) {
       const rules = validatePage(fallbackPage(BRIEF) + bad, BRIEF).map((v) => v.rule);
       expect(rules).toContain('self-contained');
+    }
+  });
+
+  // The page now carries verbatim Aula prose behind its "læs mere" toggles, and
+  // this check cannot tell a tag it rendered from one a parent typed. Tags are
+  // safe to match because `escapeHtml` neuters them; the CSS patterns this rule
+  // used to carry were not, and would have failed the whole layout over a
+  // stylesheet URL someone pasted into a message.
+  test('quoted prose that merely looks like CSS is not an external resource', () => {
+    for (const prose of [
+      '<p>Se @import url(https://x/y.css) i vejledningen</p>',
+      '<p>Skriv &lt;img src="foo"&gt; for at indsætte et billede</p>',
+    ]) {
+      expect(validatePage(fallbackPage(BRIEF) + prose, BRIEF)).toEqual([]);
     }
   });
 

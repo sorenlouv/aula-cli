@@ -20,8 +20,9 @@
  * - `class` — a group that is a child's *own* class or stue ("Myretuen", "2E").
  * - `institution` — their actual school or daycare, or a year band inside it
  *   ("Eksempelskolen …", "Indskoling …", "Børnehuset Eksemplet").
- * - `municipal` — across institutions: "Alle forældre alle skoler". Never about
- *   one of our children, and suppressed.
+ * - `municipal` — across institutions: "Alle forældre alle skoler". Almost
+ *   never about one of our children, and sorted low; hidden only when the
+ *   family's list says so (see `Relevance`).
  *
  * `institution` is deliberately *not* lumped in with `municipal`. School photo
  * day is addressed to the whole school and matters; a municipal course offer is
@@ -31,6 +32,32 @@
 export type Audience = 'child' | 'class' | 'institution' | 'municipal';
 
 export type SourceKind = 'post' | 'thread' | 'plan' | 'event' | 'album';
+
+/** One turn in a message thread, as it is shown when the reader expands it. */
+export type ConversationMessage = {
+  from: string | null;
+  at: string | null;
+  text: string;
+};
+
+/**
+ * A thread's messages, kept structured beside the flattened `text`.
+ *
+ * The extractors read `text` — one blob, cheapest thing to scan for
+ * obligations — but a reader who opens a five-message exchange wants to see
+ * who said what, in order. Both come from the same fetch, so keeping the
+ * structure costs nothing and reconstructing it later would cost a round trip.
+ *
+ * `total` is Aula's own count and can exceed `messages.length`: `getThread`
+ * pages, and the brief fetches one page. When it does, `truncated` is set and
+ * the page says so rather than presenting a partial exchange as the whole
+ * conversation.
+ */
+export type Conversation = {
+  messages: ConversationMessage[];
+  total: number;
+  truncated: boolean;
+};
 
 /** One piece of Aula content, normalised so the extractors see one shape. */
 export type SourceItem = {
@@ -49,6 +76,8 @@ export type SourceItem = {
   /** Aula's own `isImportant`. Almost always false, but load-bearing when set. */
   important: boolean;
   url: string | null;
+  /** Threads only. What "læs hele samtalen" opens. */
+  conversation?: Conversation;
 };
 
 export type PresenceRow = {
@@ -103,6 +132,41 @@ export type BriefInput = {
   preferences: string[];
 };
 
+/**
+ * The model's verdict on one source, read in the light of the family's list.
+ *
+ * This is how `~/.aula/preferences.md` reaches the ranking. The list is prose
+ * — *"beskeder fra John (Peters far) er altid vigtige"*, *"jeg er ligeglad
+ * med billeder"* — and prose is the model's to read, not a rule's: an earlier
+ * version had `rank.ts` regex-matching sender names and negation words out of
+ * the lines, and it floored a teacher called Peter on a wish about Peter's
+ * father. So the model reads the list once per source and answers with one of
+ * four words, and `rank.ts` acts on the word.
+ *
+ * Four words rather than a number on purpose: a model sorts into labelled
+ * buckets far more consistently than it calibrates a 0–100 scale, and a score
+ * that wobbles from run to run would make a good model day and a bad one
+ * produce structurally different briefs. The fine ordering within a bucket is
+ * the arithmetic's job.
+ *
+ * - `hide` — the list says this kind of thing is never wanted. Off the page,
+ *   listed only in the muted foot — unless something worth extracting was found
+ *   in it *and* that asks us for something about our own child, in which case
+ *   it is demoted to "Godt at vide" instead. A wish to be spared municipal
+ *   broadcasts is fair; applying it to "alle skoler er lukket på mandag" is
+ *   not, and one verdict is one model's reading on one morning.
+ * - `low` — the list says it matters less. At most "Godt at vide", never a
+ *   card.
+ * - `normal` — the list is silent; content and breadth decide.
+ * - `high` — the list says this matters to them (a named sender, a topic they
+ *   asked for). Never below "Kommende", and on the page even when nothing
+ *   concrete could be extracted from it.
+ *
+ * Aula's own `important` flag beats `hide` and `low`: the school shouting is
+ * not something a preference can mute.
+ */
+export type Relevance = 'hide' | 'low' | 'normal' | 'high';
+
 export type SignalKind = 'action' | 'deadline' | 'event' | 'bring' | 'info' | 'social';
 
 /** How soon it matters. The ranker turns this into placement. */
@@ -146,6 +210,8 @@ export type RankedSignal = Signal & {
   /** Must appear in the rendered page; `validate.ts` enforces it. */
   mustShow: boolean;
   audience: Audience;
+  /** The model's verdict on the source, `normal` when it gave none. */
+  relevance: Relevance;
   /** Why it scored what it did — surfaced by `--explain`. */
   reasons: string[];
   source: SourceItem;
