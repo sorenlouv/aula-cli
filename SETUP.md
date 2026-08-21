@@ -218,9 +218,20 @@ or, just as validly:
 
 Claude records that with `aula remember`, and it lands as one line in
 `~/.aula/preferences.md`. Every overview from then on is written with your list
-in front of the model — and a message from someone you named by name can no
-longer end below the fold, because that half is enforced in `rank.ts` rather
-than left to the model's judgement.
+in front of the model, which reads every post and message against it and says
+how much each one matters to you — and the page is built from those verdicts:
+something you asked for is pulled up, something you said you never want is put
+away in the folded list at the foot.
+
+Two honest caveats. The overview is written by a model, so this is judgement
+rather than a rule: on a morning where the model cannot run at all, the page is
+built by the Danish date-and-obligation rules alone and your list is not applied
+— nothing is hidden that day, which is the right way round for a tool whose
+worst failure is a miss. And where a message you asked to be spared turns out to
+ask something of *you* about *your child*, it is moved down rather than put
+away: a message that every school in the municipality is shut on Monday still
+shuts yours. Where nothing of the sort could be read out of it, your *never* is
+taken at its word and it goes straight to the folded list at the foot.
 
 ```bash
 aula preferences        # the whole list, numbered — defaults included
@@ -234,8 +245,7 @@ without you seeing it.
 Every line is equal: the ones this tool started with can be reworded or deleted
 like any other, and the code follows the list rather than the other way round —
 delete the line about municipal messages and they start appearing. Wishes for
-*less* work the same way ("jeg er ligeglad med billeder"); those the model
-weighs on its own.
+*less* work the same way ("jeg er ligeglad med billeder").
 
 The file is one wish per line and nothing else — no header, no syntax to get
 right — so editing it in any editor works as well as the commands do. It stays on your

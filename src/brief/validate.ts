@@ -67,12 +67,12 @@ export function validatePage(html: string, brief: RankedBrief): Violation[] {
     }
   }
 
-  // 4. Noise stays down: nothing suppressed may appear as a card.
+  // 4. Noise stays down: nothing the family's list hid may appear as a card.
   for (const signal of brief.signals.filter((s) => s.tier === 'hidden')) {
     if (html.includes(`data-signal-id="${signal.id}"`)) {
       violations.push({
         rule: 'noise',
-        detail: `fællesbesked "${signal.title}" er vist som et punkt`,
+        detail: `skjult "${signal.title}" er vist som et punkt`,
       });
     }
   }

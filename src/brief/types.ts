@@ -20,8 +20,9 @@
  * - `class` — a group that is a child's *own* class or stue ("Myretuen", "2E").
  * - `institution` — their actual school or daycare, or a year band inside it
  *   ("Eksempelskolen …", "Indskoling …", "Børnehuset Eksemplet").
- * - `municipal` — across institutions: "Alle forældre alle skoler". Never about
- *   one of our children, and suppressed.
+ * - `municipal` — across institutions: "Alle forældre alle skoler". Almost
+ *   never about one of our children, and sorted low; hidden only when the
+ *   family's list says so (see `Relevance`).
  *
  * `institution` is deliberately *not* lumped in with `municipal`. School photo
  * day is addressed to the whole school and matters; a municipal course offer is
@@ -103,6 +104,41 @@ export type BriefInput = {
   preferences: string[];
 };
 
+/**
+ * The model's verdict on one source, read in the light of the family's list.
+ *
+ * This is how `~/.aula/preferences.md` reaches the ranking. The list is prose
+ * — *"beskeder fra John (Peters far) er altid vigtige"*, *"jeg er ligeglad
+ * med billeder"* — and prose is the model's to read, not a rule's: an earlier
+ * version had `rank.ts` regex-matching sender names and negation words out of
+ * the lines, and it floored a teacher called Peter on a wish about Peter's
+ * father. So the model reads the list once per source and answers with one of
+ * four words, and `rank.ts` acts on the word.
+ *
+ * Four words rather than a number on purpose: a model sorts into labelled
+ * buckets far more consistently than it calibrates a 0–100 scale, and a score
+ * that wobbles from run to run would make a good model day and a bad one
+ * produce structurally different briefs. The fine ordering within a bucket is
+ * the arithmetic's job.
+ *
+ * - `hide` — the list says this kind of thing is never wanted. Off the page,
+ *   listed only in the muted foot — unless something worth extracting was found
+ *   in it *and* that asks us for something about our own child, in which case
+ *   it is demoted to "Godt at vide" instead. A wish to be spared municipal
+ *   broadcasts is fair; applying it to "alle skoler er lukket på mandag" is
+ *   not, and one verdict is one model's reading on one morning.
+ * - `low` — the list says it matters less. At most "Godt at vide", never a
+ *   card.
+ * - `normal` — the list is silent; content and breadth decide.
+ * - `high` — the list says this matters to them (a named sender, a topic they
+ *   asked for). Never below "Kommende", and on the page even when nothing
+ *   concrete could be extracted from it.
+ *
+ * Aula's own `important` flag beats `hide` and `low`: the school shouting is
+ * not something a preference can mute.
+ */
+export type Relevance = 'hide' | 'low' | 'normal' | 'high';
+
 export type SignalKind = 'action' | 'deadline' | 'event' | 'bring' | 'info' | 'social';
 
 /** How soon it matters. The ranker turns this into placement. */
@@ -146,6 +182,8 @@ export type RankedSignal = Signal & {
   /** Must appear in the rendered page; `validate.ts` enforces it. */
   mustShow: boolean;
   audience: Audience;
+  /** The model's verdict on the source, `normal` when it gave none. */
+  relevance: Relevance;
   /** Why it scored what it did — surfaced by `--explain`. */
   reasons: string[];
   source: SourceItem;

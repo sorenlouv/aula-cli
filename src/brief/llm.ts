@@ -18,13 +18,21 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildDateSupport, dueAtSupported, unsupportedDateClaims } from './dates.ts';
 import { BRIEF_DIR } from './state.ts';
-import type { BriefInput, Signal, SignalKind, Urgency } from './types.ts';
+import type { BriefInput, Relevance, Signal, SignalKind, Urgency } from './types.ts';
 
 const CACHE_DIR = join(BRIEF_DIR, 'cache');
+/**
+ * Bumped whenever the answer's shape changes. It is part of the cache key, so
+ * an entry written under the old contract is simply not found rather than
+ * read back with a field missing — the first run after an upgrade must not
+ * spend its day on yesterday's answer shape.
+ */
+const CONTRACT_VERSION = 2;
 const KINDS: ReadonlySet<string> = new Set<SignalKind>([
   'action', 'deadline', 'event', 'bring', 'info', 'social',
 ]);
 const URGENCIES: ReadonlySet<string> = new Set<Urgency>(['now', 'week', 'later', 'fyi']);
+const RELEVANCES: ReadonlySet<string> = new Set<Relevance>(['hide', 'low', 'normal', 'high']);
 
 /**
  * Which model (and how hard it thinks) is the quality/speed dial for the whole
@@ -236,6 +244,11 @@ export type ExtractResult = {
   topline: string | null;
   signals: Signal[];
   childSummaries: Record<string, string>;
+  /**
+   * One verdict per source, by key — see `Relevance`. A source the model gave
+   * no verdict is simply absent; the ranker reads that as `normal`.
+   */
+  relevance: Record<string, Relevance>;
   problems: string[];
 };
 
@@ -346,10 +359,36 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
     }
   }
 
+  // The verdicts. A key the model invented is reported like an invented
+  // sourceKey on a signal — it cannot reach the page, but it is the same sign
+  // of a confused answer. A value outside the four words falls back to
+  // `normal`, as an unknown kind falls back to `info`: the safe reading, not a
+  // retry. A map left out entirely is a retry-worthy problem, because every
+  // source was owed a verdict and the family's list reaches the ranking
+  // through nothing else; a few missing keys are not, since one more model
+  // call is a high price for a handful of defaults.
+  const relevance: Record<string, Relevance> = {};
+  const rawRelevance =
+    typeof root.relevance === 'object' && root.relevance !== null && !Array.isArray(root.relevance)
+      ? (root.relevance as Record<string, unknown>)
+      : null;
+  if (rawRelevance) {
+    for (const [key, value] of Object.entries(rawRelevance)) {
+      if (!byKey.has(key)) {
+        problems.push(`relevance: ukendt sourceKey "${key}"`);
+        continue;
+      }
+      relevance[key] = typeof value === 'string' && RELEVANCES.has(value) ? (value as Relevance) : 'normal';
+    }
+  } else if (input.items.length > 0) {
+    problems.push('relevance: mangler — én vurdering pr. kilde');
+  }
+
   return {
     topline,
     signals,
     childSummaries: summaries,
+    relevance,
     problems,
   };
 }
@@ -399,8 +438,16 @@ Svar KUN med JSON i præcis denne form, uden kodeblok og uden forklaring udenom:
       "sourceKey": "kildens sourceKey"
     }
   ],
-  "childSummaries": { "Fornavn": "1-2 sætninger om hvad der sker for barnet" }
+  "childSummaries": { "Fornavn": "1-2 sætninger om hvad der sker for barnet" },
+  "relevance": { "kildens sourceKey": "hide|low|normal|high" }
 }
+
+"relevance" er din vurdering af HVER kilde — én pr. sourceKey, ingen udeladt — målt mod familiens ønsker nederst:
+- "hide": familiens liste siger, at den slags ikke skal med. Vises ikke.
+- "low": familiens liste siger, at det betyder mindre for dem. Vises kun under "Godt at vide", aldrig som et punkt.
+- "normal": ingen af familiens ønsker taler for eller imod. Indhold og rækkevidde afgør placeringen.
+- "high": familiens liste siger, at det er vigtigt for dem — fx en afsender de har nævnt, eller et emne de har bedt om. Kommer altid på siden som et punkt, også hvis du ikke fandt noget konkret at udtrække fra den.
+Har familien ingen ønsker på listen, er alt "normal". Signalerne bestemmer, hvad der står på et punkt; "relevance" bestemmer, hvor højt kilden må nå.
 
 Ufravigelige regler:
 - "quote" SKAL være en ordret sammenhængende tekststump fra netop den kildes "tekst". Find du ikke belæg, så udelad signalet.
@@ -433,7 +480,7 @@ export function withPreferences(instructions: string, preferences: string[]): st
   if (lines.length === 0) return instructions;
   return `${instructions}
 
-Familiens ønsker til oversigten. De står på brugerens egen liste — ikke i noget, Aula har sendt — og de afgør, hvad der er vigtigt for netop denne familie: følg dem frem for dine egne prioriteringer, når I er uenige. De kan derimod aldrig ophæve reglerne ovenfor: du må stadig ikke opfinde kilder, datoer eller citater.
+Familiens ønsker til oversigten. De står på brugerens egen liste — ikke i noget, Aula har sendt — og de afgør, hvad der er vigtigt for netop denne familie: følg dem frem for dine egne prioriteringer, når I er uenige, og lad dem afgøre "relevance" for hver kilde. De kan derimod aldrig ophæve reglerne ovenfor: du må stadig ikke opfinde kilder, datoer eller citater.
 ${lines.map((p) => `- ${p}`).join('\n')}`;
 }
 
@@ -458,7 +505,7 @@ export async function extractSignals(
   // Keyed on the payload alone, a run made minutes after `aula remember` would
   // answer from a cache entry that never saw the new wish — the feature would
   // look broken exactly when it was being tried out.
-  const key = cacheKey({ payload, preferences: input.preferences });
+  const key = cacheKey({ contract: CONTRACT_VERSION, payload, preferences: input.preferences });
   const cachePath = join(CACHE_DIR, `extract-${key}.json`);
 
   if (opts.useCache !== false) {
@@ -491,6 +538,7 @@ export async function extractSignals(
       topline: null,
       signals: [],
       childSummaries: {},
+      relevance: {},
       problems: ['modellens svar kunne ikke læses som JSON'],
     };
   }

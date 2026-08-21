@@ -29,6 +29,7 @@ const SIGNAL: RankedSignal = {
   tier: 'act',
   mustShow: true,
   audience: 'institution',
+  relevance: 'normal',
   reasons: [],
   source: SOURCE,
   mergedSourceKeys: [],
