@@ -8,7 +8,7 @@
  * live here, and `cli.ts` keeps the argument parsing and the renderers.
  */
 
-import type { AulaClient } from './client.ts';
+import { type AulaClient, CALENDAR_MAX_SPAN_DAYS } from './client.ts';
 import { mapLimit, presenceStatus, presenceStatusDanish, startOfDay } from './cli-helpers.ts';
 import {
   integrationContext,
@@ -188,7 +188,10 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
       ...(opts.child ? { child: opts.child } : {}),
     }),
     loadCalendar(client, family, {
-      days: Math.max(opts.days, 21),
+      // `days` is primarily the digest's history window. Calendar is forward-
+      // looking and Aula accepts at most 50 days per request, so a 90-day
+      // message digest must not become a 90-day calendar request.
+      days: Math.min(Math.max(opts.days, 21), CALENDAR_MAX_SPAN_DAYS),
       now,
       ...(opts.child ? { child: opts.child } : {}),
     }),

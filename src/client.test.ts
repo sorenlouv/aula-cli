@@ -597,6 +597,9 @@ test('parseSince understands relative and absolute forms', () => {
   // message or out of `--text` output resolves to the day it names.
   assert.equal(localIsoDate(parseSince('2026-08-01T14:30:00+02:00')), '2026-08-01');
   assert.equal(localIsoDate(parseSince('2026-08-01 14:30')), '2026-08-01');
+  assert.throws(() => parseSince('2026-08-01Tnot-a-timestamp'));
+  assert.throws(() => parseSince('2026-08-01T25:00:00+02:00'));
+  assert.throws(() => parseSince('2026-08-01T14:30:00+15:00'));
   assert.throws(() => parseSince('not-a-date'));
   assert.throws(() => parseSince('2026-02-31'));
   assert.throws(() => parseSince('2026-8-1'));

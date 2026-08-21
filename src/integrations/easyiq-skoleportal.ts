@@ -44,7 +44,9 @@ const UGEPLAN_URL = `${BASE}/Calendar/CalendarGetWeekplanEvents`;
 const LEKTIER_URL = `${BASE}/AulaHuskeliste/GetWeekplanEvents`;
 
 type AuthResponse = { loginId?: string | number | null; childName?: string | null };
-type ChildRow = { Id: number; Login: string; Name?: string | null };
+type ChildRow = { Id: number; Login: string | null; Name?: string | null };
+type UsableChildRow = ChildRow & { Login: string };
+type DecodedRoster = { rows: UsableChildRow[]; warnings: string[] };
 
 type SpEvent = {
   StartTime?: string | null;
@@ -65,7 +67,7 @@ function isAuthResponse(value: unknown): value is AuthResponse {
 function isChildRow(value: unknown): value is ChildRow {
   return isRecord(value) &&
     isNumber(value.Id) &&
-    isString(value.Login) &&
+    (value.Login === null || isString(value.Login)) &&
     isOptional(value.Name, isString);
 }
 
@@ -75,14 +77,31 @@ function isChildRow(value: unknown): value is ChildRow {
  * loop below already says so per child. Rejecting the array because one row is
  * unusable would take every sibling's homework down with it.
  */
-function decodeRoster(value: unknown): ChildRow[] {
-  if (value === null || value === undefined) return [];
+function decodeRoster(value: unknown): DecodedRoster {
+  if (value === null || value === undefined) return { rows: [], warnings: [] };
   if (!isRecord(value)) throw new Error(`Expected a SkolePortal child roster, got ${describeShape(value)}`);
-  if (value.Children === null || value.Children === undefined) return [];
+  if (value.Children === null || value.Children === undefined) return { rows: [], warnings: [] };
   if (!Array.isArray(value.Children)) {
     throw new Error(`Expected a SkolePortal child roster, got Children as ${describeShape(value.Children)}`);
   }
-  return value.Children.filter(isChildRow);
+
+  const rows: UsableChildRow[] = [];
+  const warnings: string[] = [];
+  for (const [index, candidate] of value.Children.entries()) {
+    if (!isChildRow(candidate)) {
+      warnings.push(
+        `SkolePortal child roster row ${index + 1} had an unexpected shape ` +
+          `(${describeShape(candidate)}) and was ignored.`,
+      );
+      continue;
+    }
+    // A null Login is a known per-child absence, not schema corruption. It
+    // cannot be indexed, and the child loop below emits the useful warning
+    // naming the family member who could not be matched.
+    if (!candidate.Login) continue;
+    rows.push({ ...candidate, Login: candidate.Login });
+  }
+  return { rows, warnings };
 }
 
 function isSpEvent(value: unknown): value is SpEvent {
@@ -295,7 +314,8 @@ export async function getLektier(
     }, decodeRoster);
   });
 
-  const rowByLogin = new Map((Array.isArray(roster) ? roster : []).map((row) => [row.Login, row]));
+  warnings.push(...roster.warnings);
+  const rowByLogin = new Map(roster.rows.map((row) => [row.Login, row]));
 
   for (const child of ctx.children) {
     if (!child.userId) {

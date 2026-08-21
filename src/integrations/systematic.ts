@@ -28,7 +28,7 @@ type Reminder = {
   subjectName?: string | null;
   /** Assignment reminders carry this instead of `reminderText`. */
   assignmentText?: string | null;
-  teamNames?: string[];
+  teamNames?: string[] | null;
 };
 
 type Person = {

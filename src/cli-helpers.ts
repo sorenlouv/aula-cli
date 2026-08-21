@@ -6,6 +6,7 @@ import type { Contact, PresenceTemplates } from './types.ts';
 import { isIsoWeek, parseIsoDateParts } from './validation.ts';
 
 const COPENHAGEN = 'Europe/Copenhagen';
+const AULA_TIMESTAMP = /^(\d{4}-\d{2}-\d{2})[T ](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:(?:0\d|1[0-3]):?[0-5]\d|14:?00))?$/;
 
 export function indent(text: string, spaces: number): string {
   const pad = ' '.repeat(spaces);
@@ -49,9 +50,16 @@ export function parseSince(input: string): Date {
     return new Date(Date.now() - amount * (perUnit[unit] ?? 1) * 86_400_000);
   }
   // Aula's own timestamps are full ISO datetimes, so one pasted straight from a
-  // message or from `--text` output resolves to the day it names.
+  // message or from `--text` output resolves to the day it names. Validate the
+  // complete timestamp before extracting that date; accepting an arbitrary
+  // suffix would turn a typo into a silently different query.
   const trimmed = input.trim();
-  const datePart = /^\d{4}-\d{2}-\d{2}[T ]/.test(trimmed) ? trimmed.slice(0, 10) : trimmed;
+  const timestamp = AULA_TIMESTAMP.exec(trimmed);
+  const looksLikeTimestamp = /^\d{4}-\d{2}-\d{2}[T ]/.test(trimmed);
+  if (looksLikeTimestamp && !timestamp) {
+    throw new UsageError(`Could not parse --since "${input}". Use e.g. 7d, 3w, or 2026-08-01.`);
+  }
+  const datePart = timestamp?.[1] ?? trimmed;
   const parsed = parseIsoDateParts(datePart);
   if (!parsed) throw new UsageError(`Could not parse --since "${input}". Use e.g. 7d, 3w, or 2026-08-01.`);
   return new Date(parsed.year, parsed.month - 1, parsed.day);
