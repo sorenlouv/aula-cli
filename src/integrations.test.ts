@@ -284,7 +284,16 @@ test('a null-valued optional field is tolerated by every vendor adapter', async 
   );
 
   await withVendor(
-    () => [{ userName: 'Alma', teamReminders: [{ dueDate: '2026-08-24', teamName: null, reminderText: 'Turtaske', subjectName: null }] }],
+    () => [{
+      userName: 'Alma',
+      teamReminders: [{
+        dueDate: '2026-08-24',
+        teamName: null,
+        teamNames: null,
+        reminderText: 'Turtaske',
+        subjectName: null,
+      }],
+    }],
     async (_calls, tokens) => {
       const plan = await systematic.getReminders(CTX, tokens, '0087');
       assert.equal(plan.items.length, 1);
@@ -332,6 +341,24 @@ test('an unusable roster row costs only that child their lektier', async () => {
     async (_calls, tokens) => {
       const plan = await skoleportal.getLektier(CTX, tokens, '0142');
       assert.equal(plan.items.length, 1, 'the child with a usable row still gets their homework');
+      assert.match(plan.warnings?.join('\n') ?? '', /Viggo.*not listed by SkolePortal/);
+    },
+  );
+});
+
+test('a malformed roster row is reported without taking down valid siblings', async () => {
+  await withVendor(
+    (url) => {
+      if (url.includes('/Aula/GetChildren')) {
+        return { Children: [{ Id: 1, Login: 'alma1234' }, { Id: '2', Login: 'vigg5678' }] };
+      }
+      if (url.includes('/Aula/AuthenticateAulaUser')) return {};
+      return [{ StartTimeISO: '2026-08-24T08:00:00', ChapterTitle: 'Matematik' }];
+    },
+    async (_calls, tokens) => {
+      const plan = await skoleportal.getLektier(CTX, tokens, '0142');
+      assert.equal(plan.items.length, 1);
+      assert.match(plan.warnings?.join('\n') ?? '', /roster row 2 had an unexpected shape/);
       assert.match(plan.warnings?.join('\n') ?? '', /Viggo.*not listed by SkolePortal/);
     },
   );

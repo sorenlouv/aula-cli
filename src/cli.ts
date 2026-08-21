@@ -183,12 +183,12 @@ async function main(): Promise<number> {
 
   const asText = values.text === true;
   const limit = optionalInteger(values.limit, '--limit', { min: 1 });
-  // The 50-day ceiling belongs to one endpoint, not to the flag: Aula answers
-  // a calendar span of 51 with a 403, while `digest`, `pickup-times`, `doctor`
-  // and `new` only use --days to compute a local since/to date and were happy
-  // with a quarter's worth before a single shared cap was applied to all of
-  // them. MAX_HISTORY_DAYS is just a sanity bound on the arithmetic.
-  const maxDays = command === 'calendar' ? CALENDAR_MAX_SPAN_DAYS : MAX_HISTORY_DAYS;
+  // The 50-day ceiling belongs to Aula's calendar endpoint, not to history
+  // reads in general. `doctor` forwards the requested range to that endpoint,
+  // while digest/new cap only their calendar slice and may still read a longer
+  // history for messages and posts.
+  const readsOnlyCalendarRange = command === 'calendar' || command === 'doctor';
+  const maxDays = readsOnlyCalendarRange ? CALENDAR_MAX_SPAN_DAYS : MAX_HISTORY_DAYS;
   const days = optionalInteger(values.days, '--days', { min: 1, max: maxDays }) ?? 14;
   const page = optionalInteger(values.page, '--page', { min: 0 });
   const groupId = optionalInteger(values.group, '--group', { min: 1 });

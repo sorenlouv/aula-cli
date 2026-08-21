@@ -23,7 +23,7 @@
     "status": "bun src/cli.ts status --text",
     "whoami": "bun src/cli.ts whoami",
     "doctor": "bun src/cli.ts doctor --text",
-    "test": "TZ=Europe/Copenhagen bun test --timeout 30000 src/",
+    "test": "bun test --timeout 30000 src/",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

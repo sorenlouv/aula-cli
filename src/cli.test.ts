@@ -19,6 +19,12 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { installFakeClaude } from './testing/fake-claude.ts';
 
+// Bun's test runner otherwise defaults to UTC while the child CLI process uses
+// the host zone. Keeping both sides in the application's real zone prevents
+// local-day assertions from disagreeing around Copenhagen midnight, even when
+// this file is run directly rather than through a package script.
+process.env.TZ = 'Europe/Copenhagen';
+
 const ROOT = new URL('..', import.meta.url).pathname;
 const PRELOAD = join(ROOT, 'src/testing/fake-aula.ts');
 const SEED = join(ROOT, 'src/testing/seed-tokens.ts');
@@ -123,17 +129,19 @@ test('unknown commands and malformed arguments are rejected before authenticatio
 
 /**
  * The 50-day ceiling is one endpoint's server limit, not a property of the
- * flag: Aula answers a calendar span of 51 with a 403, while the commands that
- * only use --days to compute a local since/to date were happy with a quarter's
- * worth before a single shared cap was applied to all of them.
+ * flag: Aula answers a calendar span of 51 with a 403. History-oriented
+ * commands may still accept a larger value as long as their calendar slice is
+ * independently constrained.
  */
-test('--days is bounded by the calendar endpoint only where the calendar is read', () => {
-  const rejected = runWithoutLogin('calendar', '--days', '90');
-  assert.equal(rejected.code, 1);
-  assert.match(rejected.stderr, /--days must be an integer of at least 1 and at most 50/);
-  assert.deepEqual(rejected.requests, []);
+test('--days is bounded by the calendar endpoint only where the full range is read', () => {
+  for (const command of ['calendar', 'doctor']) {
+    const rejected = runWithoutLogin(command, '--days', '90');
+    assert.equal(rejected.code, 1);
+    assert.match(rejected.stderr, /--days must be an integer of at least 1 and at most 50/);
+    assert.deepEqual(rejected.requests, []);
+  }
 
-  for (const command of ['digest', 'pickup-times', 'doctor']) {
+  for (const command of ['digest', 'pickup-times', 'new']) {
     const result = runWithoutLogin(command, '--days', '90');
     assert.doesNotMatch(result.stderr, /--days must be/, `${command} --days 90 should be accepted`);
   }
@@ -141,6 +149,13 @@ test('--days is bounded by the calendar endpoint only where the calendar is read
   // Still a bound, just a sane one rather than another endpoint's.
   assert.match(runWithoutLogin('digest', '--days', '4000').stderr, /at most 365/);
   assert.match(runWithoutLogin('digest', '--days', '0').stderr, /at least 1/);
+});
+
+test('a long digest keeps its history range without exceeding Aula calendar limits', () => {
+  const box = sandbox();
+  const result = box.run('digest', '--days', '90', '--no-cache');
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).window.days, 90);
 });
 
 test('a command prints only the options it accepts', () => {
