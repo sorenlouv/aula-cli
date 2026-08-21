@@ -11,7 +11,7 @@
 import { htmlToText } from '../html.ts';
 import {
   errorMessage,
-  expectType,
+  expectOptionalType,
   isArrayOf,
   isOptional,
   isRecord,
@@ -25,16 +25,16 @@ const EASYIQ_URL = 'https://api.easyiqcloud.dk/api/aula/weekplaninfo';
 
 type EasyIqEvent = {
   /** `YYYY/MM/DD HH:mm`, not ISO. */
-  start?: string;
+  start?: string | null;
   /** 5 marks a note rather than a timetabled event. */
-  itemType?: number | string;
-  title?: string;
+  itemType?: number | string | null;
+  title?: string | null;
   /** The teacher or team that owns the event. */
-  ownername?: string;
-  description?: string;
+  ownername?: string | null;
+  description?: string | null;
 };
 
-type EasyIqResponse = { Events?: EasyIqEvent[] };
+type EasyIqResponse = { Events?: EasyIqEvent[] | null };
 
 function isEasyIqEvent(value: unknown): value is EasyIqEvent {
   return isRecord(value) &&
@@ -87,7 +87,7 @@ export async function getWeekPlan(
             institutionFilter: ctx.institutionCodes,
             childFilter: [child.userId],
           },
-        }, (value) => expectType(value, isEasyIqResponse, 'an EasyIQ response'));
+        }, (value) => expectOptionalType(value, isEasyIqResponse, 'an EasyIQ response', {}));
       });
 
       for (const event of data?.Events ?? []) {

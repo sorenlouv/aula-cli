@@ -121,6 +121,37 @@ test('unknown commands and malformed arguments are rejected before authenticatio
   }
 });
 
+/**
+ * The 50-day ceiling is one endpoint's server limit, not a property of the
+ * flag: Aula answers a calendar span of 51 with a 403, while the commands that
+ * only use --days to compute a local since/to date were happy with a quarter's
+ * worth before a single shared cap was applied to all of them.
+ */
+test('--days is bounded by the calendar endpoint only where the calendar is read', () => {
+  const rejected = runWithoutLogin('calendar', '--days', '90');
+  assert.equal(rejected.code, 1);
+  assert.match(rejected.stderr, /--days must be an integer of at least 1 and at most 50/);
+  assert.deepEqual(rejected.requests, []);
+
+  for (const command of ['digest', 'pickup-times', 'doctor']) {
+    const result = runWithoutLogin(command, '--days', '90');
+    assert.doesNotMatch(result.stderr, /--days must be/, `${command} --days 90 should be accepted`);
+  }
+
+  // Still a bound, just a sane one rather than another endpoint's.
+  assert.match(runWithoutLogin('digest', '--days', '4000').stderr, /at most 365/);
+  assert.match(runWithoutLogin('digest', '--days', '0').stderr, /at least 1/);
+});
+
+test('a command prints only the options it accepts', () => {
+  const help = runWithoutLogin('doctor', '--help');
+  assert.equal(help.code, 0);
+  assert.match(help.stdout, /Usage: aula doctor/);
+  assert.match(help.stdout, /--text --days/);
+  assert.doesNotMatch(help.stdout, /--no-cache/);
+  assert.deepEqual(help.requests, []);
+});
+
 // ------------------------------------------------------------------- --child
 
 // The regression this file was written for. `digest` parsed `--child` and threw

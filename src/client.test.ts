@@ -12,6 +12,7 @@ import {
   formatAulaDate,
 } from './client.ts';
 import { htmlToText, preview } from './html.ts';
+import { localIsoDate } from './integrations/types.ts';
 import {
   normaliseCommonFile,
   normaliseSchedule,
@@ -435,6 +436,85 @@ test('a retired API version is probed around instead of failing', async () => {
   );
 });
 
+/**
+ * The probe's own warning tells the user to pin the version it found. A ceiling
+ * measured from the module constant instead of from the version in use would
+ * leave anyone who followed that advice unable to find the next live version.
+ */
+test('the retirement probe searches above whatever version is configured', async () => {
+  const tried: number[] = [];
+  await withFetch(
+    async (input) => {
+      const version = Number(/\/v(\d+)\//.exec(String(input))?.[1] ?? 0);
+      tried.push(version);
+      if (version === 38) return jsonResponse(OK_PROFILES);
+      return jsonResponse({ status: { code: 10 }, data: null });
+    },
+    async () => {
+      const client = new AulaClient({ cookie: COOKIE, apiVersion: 34 });
+      await client.getProfiles();
+      assert.equal(client.apiVersion, 38);
+      assert.ok(tried.includes(38), `never probed above the fallback constant: ${tried.join(', ')}`);
+    },
+  );
+});
+
+/**
+ * `data: null` under `status.code: 0` is Aula saying "nothing", not "broken".
+ * Every endpoint wrapper used to end in `?? []` or `?? {}` for exactly this.
+ */
+test('an empty result is an empty result, not an API error', async () => {
+  let call = 0;
+  await withFetch(
+    async () => {
+      call++;
+      return call === 1 ? jsonResponse(OK_PROFILES) : jsonResponse({ status: { code: 0 }, data: null });
+    },
+    async () => {
+      const client = new AulaClient({ cookie: COOKIE });
+      assert.deepEqual(await client.getNotifications(), []);
+      assert.deepEqual(await client.getDailyPresence([11]), []);
+      assert.deepEqual(await client.getGroupsByContext([11]), []);
+      assert.deepEqual(await client.getAlbums({ childInstitutionProfileIds: [11] }), []);
+      assert.deepEqual(
+        await client.getPresenceTemplates({
+          childInstitutionProfileIds: [11],
+          fromDate: '2026-08-01',
+          toDate: '2026-08-07',
+        }),
+        {},
+      );
+      assert.deepEqual(await client.getCommonFiles({ institutionCodes: ['A12345'] }), {
+        commonFiles: [],
+        totalAmount: 0,
+      });
+    },
+  );
+});
+
+test('a payload of the wrong shape still fails, and says what arrived', async () => {
+  let call = 0;
+  await withFetch(
+    async () => {
+      call++;
+      return call === 1 ? jsonResponse(OK_PROFILES) : jsonResponse({ status: { code: 0 }, data: 'nope' });
+    },
+    async () => {
+      const client = new AulaClient({ cookie: COOKIE });
+      await assert.rejects(
+        () => client.getNotifications(),
+        (err: unknown) => {
+          assert.ok(err instanceof AulaApiError);
+          assert.match(err.message, /does not understand/);
+          assert.match(err.message, /should answer with a list/);
+          assert.match(err.message, /Aula sent a string/);
+          return true;
+        },
+      );
+    },
+  );
+});
+
 test('array query parameters use the PHP-style repeated-key form Aula expects', async () => {
   let captured = '';
   let call = 0;
@@ -505,8 +585,18 @@ test('parseSince understands relative and absolute forms', () => {
   const sevenDays = parseSince('7d');
   const delta = Date.now() - sevenDays.getTime();
   assert.ok(Math.abs(delta - 7 * 86_400_000) < 5_000);
-  assert.equal(parseSince('2026-08-01').toISOString().slice(0, 10), '2026-08-01');
+  // Local midnight, not UTC midnight: --since names a calendar day in the
+  // family's own timezone. Asserting through toISOString() only looked right
+  // because `bun test` defaults TZ to UTC — it failed in Europe/Copenhagen,
+  // which is the timezone this tool actually runs in.
+  const absolute = parseSince('2026-08-01');
+  assert.equal(localIsoDate(absolute), '2026-08-01');
+  assert.equal(absolute.getHours(), 0);
   assert.ok(Math.abs(Date.now() - parseSince('14').getTime() - 14 * 86_400_000) < 5_000);
+  // Aula's own timestamps are full ISO datetimes, so one pasted out of a
+  // message or out of `--text` output resolves to the day it names.
+  assert.equal(localIsoDate(parseSince('2026-08-01T14:30:00+02:00')), '2026-08-01');
+  assert.equal(localIsoDate(parseSince('2026-08-01 14:30')), '2026-08-01');
   assert.throws(() => parseSince('not-a-date'));
   assert.throws(() => parseSince('2026-02-31'));
   assert.throws(() => parseSince('2026-8-1'));
@@ -736,8 +826,13 @@ test('resolveWeek accepts an explicit week, --next, or defaults to this week', (
   assert.match(resolveWeek(undefined, false), /^\d{4}-W\d{2}$/);
   assert.notEqual(resolveWeek(undefined, true), resolveWeek(undefined, false));
   assert.throws(() => resolveWeek('week 33', false));
-  assert.throws(() => resolveWeek('2026-W3', false));
-  assert.throws(() => resolveWeek('2025-W53', false));
+  assert.throws(() => resolveWeek('2025-W53', false), /must look like/, 'week 53 does not exist in 2025');
+  // A hand-typed one-digit week is padded rather than refused; everything
+  // downstream keys on the canonical form.
+  assert.equal(resolveWeek('2026-W3', false), '2026-W03');
+  assert.equal(resolveWeek('2026-w3', false), '2026-W03');
+  assert.throws(() => resolveWeek('2026-W0', false));
+  assert.throws(() => resolveWeek('2026-W54', false));
 });
 
 test('raw key=value pairs collapse repeats into an array', () => {

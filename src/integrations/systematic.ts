@@ -11,7 +11,7 @@
 
 import { type WidgetTokens, widgetFetch } from '../widgets.ts';
 import {
-  expectType,
+  expectOptionalType,
   isArrayOf,
   isOptional,
   isRecord,
@@ -22,20 +22,20 @@ import { type IntegrationContext, isoDate, type WeekPlan, type WeekPlanItem } fr
 const SYSTEMATIC_URL = 'https://systematic-momo.dk/api/aula/reminders/v1';
 
 type Reminder = {
-  dueDate?: string;
-  teamName?: string;
-  reminderText?: string;
-  subjectName?: string;
+  dueDate?: string | null;
+  teamName?: string | null;
+  reminderText?: string | null;
+  subjectName?: string | null;
   /** Assignment reminders carry this instead of `reminderText`. */
-  assignmentText?: string;
+  assignmentText?: string | null;
   teamNames?: string[];
 };
 
 type Person = {
-  userName?: string;
-  teamReminders?: Reminder[];
-  courseReminders?: Reminder[];
-  assignmentReminders?: Reminder[];
+  userName?: string | null;
+  teamReminders?: Reminder[] | null;
+  courseReminders?: Reminder[] | null;
+  assignmentReminders?: Reminder[] | null;
 };
 
 function isReminder(value: unknown): value is Reminder {
@@ -58,7 +58,12 @@ function isPerson(value: unknown): value is Person {
 }
 
 function decodePeople(value: unknown): Person[] {
-  return expectType(value, (people): people is Person[] => isArrayOf(people, isPerson), 'a reminder list');
+  return expectOptionalType(
+    value,
+    (people): people is Person[] => isArrayOf(people, isPerson),
+    'a reminder list',
+    [],
+  );
 }
 
 export async function getReminders(
@@ -93,23 +98,25 @@ export async function getReminders(
 
   const items: WeekPlanItem[] = [];
   for (const person of Array.isArray(people) ? people : []) {
-    const buckets: Array<[string, Reminder[] | undefined]> = [
+    const buckets: Array<[string, Reminder[] | null | undefined]> = [
       ['team', person.teamReminders],
       ['course', person.courseReminders],
       ['assignment', person.assignmentReminders],
     ];
     for (const [kind, reminders] of buckets) {
       for (const reminder of reminders ?? []) {
-        const team = reminder.teamName ?? reminder.teamNames?.join(', ');
+        const team = reminder.teamName || reminder.teamNames?.join(', ');
+        // `||`, not `??`: an assignment reminder carries its text in
+        // `assignmentText` and leaves `reminderText` empty rather than absent,
+        // so nullish-coalescing would pick the empty string and drop the text.
+        const text = reminder.reminderText || reminder.assignmentText;
         items.push({
           kind: `huskelisten:${kind}`,
           ...(person.userName ? { childName: person.userName } : {}),
           ...(reminder.dueDate ? { date: reminder.dueDate } : {}),
           ...(reminder.subjectName ? { subject: reminder.subjectName } : {}),
           ...(team ? { title: team } : {}),
-          ...(reminder.reminderText || reminder.assignmentText
-            ? { content: reminder.reminderText ?? reminder.assignmentText }
-            : {}),
+          ...(text ? { content: text } : {}),
         });
       }
     }

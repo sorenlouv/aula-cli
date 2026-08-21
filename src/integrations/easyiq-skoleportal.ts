@@ -17,8 +17,9 @@
 
 import { decodeEntities, htmlToText } from '../html.ts';
 import {
+  describeShape,
   errorMessage,
-  expectType,
+  expectOptionalType,
   isArrayOf,
   isNumber,
   isOptional,
@@ -42,17 +43,17 @@ const CHILDREN_URL = `${BASE}/Aula/GetChildren`;
 const UGEPLAN_URL = `${BASE}/Calendar/CalendarGetWeekplanEvents`;
 const LEKTIER_URL = `${BASE}/AulaHuskeliste/GetWeekplanEvents`;
 
-type AuthResponse = { loginId?: string | number; childName?: string };
-type ChildrenResponse = { Children?: Array<{ Id: number; Login: string; Name?: string }> };
+type AuthResponse = { loginId?: string | number | null; childName?: string | null };
+type ChildRow = { Id: number; Login: string; Name?: string | null };
 
 type SpEvent = {
-  StartTime?: string;
-  StartTimeISO?: string;
-  CoursesDisplay?: string;
-  ActivitiesDisplay?: string;
-  ChapterTitle?: string;
-  Title?: string;
-  Description?: string;
+  StartTime?: string | null;
+  StartTimeISO?: string | null;
+  CoursesDisplay?: string | null;
+  ActivitiesDisplay?: string | null;
+  ChapterTitle?: string | null;
+  Title?: string | null;
+  Description?: string | null;
 };
 
 function isAuthResponse(value: unknown): value is AuthResponse {
@@ -61,16 +62,27 @@ function isAuthResponse(value: unknown): value is AuthResponse {
     isOptional(value.childName, isString);
 }
 
-function isChildRow(value: unknown): value is NonNullable<ChildrenResponse['Children']>[number] {
+function isChildRow(value: unknown): value is ChildRow {
   return isRecord(value) &&
     isNumber(value.Id) &&
     isString(value.Login) &&
     isOptional(value.Name, isString);
 }
 
-function isChildrenResponse(value: unknown): value is ChildrenResponse {
-  return isRecord(value) && isOptional(value.Children, (children): children is NonNullable<ChildrenResponse['Children']> =>
-    isArrayOf(children, isChildRow));
+/**
+ * The roster is a lookup table, so it degrades per row rather than as a whole:
+ * a child SkolePortal has no UniLogin for cannot be matched anyway, and the
+ * loop below already says so per child. Rejecting the array because one row is
+ * unusable would take every sibling's homework down with it.
+ */
+function decodeRoster(value: unknown): ChildRow[] {
+  if (value === null || value === undefined) return [];
+  if (!isRecord(value)) throw new Error(`Expected a SkolePortal child roster, got ${describeShape(value)}`);
+  if (value.Children === null || value.Children === undefined) return [];
+  if (!Array.isArray(value.Children)) {
+    throw new Error(`Expected a SkolePortal child roster, got Children as ${describeShape(value.Children)}`);
+  }
+  return value.Children.filter(isChildRow);
 }
 
 function isSpEvent(value: unknown): value is SpEvent {
@@ -85,7 +97,12 @@ function isSpEvent(value: unknown): value is SpEvent {
 }
 
 function decodeEvents(value: unknown): SpEvent[] {
-  return expectType(value, (events): events is SpEvent[] => isArrayOf(events, isSpEvent), 'an event list');
+  return expectOptionalType(
+    value,
+    (events): events is SpEvent[] => isArrayOf(events, isSpEvent),
+    'an event list',
+    [],
+  );
 }
 
 /**
@@ -179,7 +196,7 @@ export async function getWeekPlan(
           method: 'POST',
           widgetId,
           headers: headers({ ...base, token }),
-        }, (value) => expectType(value, isAuthResponse, 'a SkolePortal authentication response'));
+        }, (value) => expectOptionalType(value, isAuthResponse, 'a SkolePortal authentication response', {}));
       });
       if (auth?.loginId === undefined || auth.loginId === null) {
         warnings.push(`${child.name}: SkolePortal authenticated but returned no loginId.`);
@@ -259,13 +276,15 @@ export async function getLektier(
     requestedWith: 'Fetch',
   };
 
+  // Called for the session it establishes, not for its body — nothing below
+  // reads the response, so decoding it here would only add a way to fail.
   await tokens.withToken(widgetId, async (token) => {
     return widgetFetch({
       url: AUTH_URL,
       method: 'POST',
       widgetId,
       headers: headers({ ...base, token }),
-    }, (value) => expectType(value, isAuthResponse, 'a SkolePortal authentication response'));
+    }, () => undefined);
   });
 
   const roster = await tokens.withToken(widgetId, async (token) => {
@@ -273,10 +292,10 @@ export async function getLektier(
       url: CHILDREN_URL,
       widgetId,
       headers: headers({ ...base, token }),
-    }, (value) => expectType(value, isChildrenResponse, 'a SkolePortal child roster'));
+    }, decodeRoster);
   });
 
-  const rowByLogin = new Map((roster?.Children ?? []).map((row) => [row.Login, row]));
+  const rowByLogin = new Map((Array.isArray(roster) ? roster : []).map((row) => [row.Login, row]));
 
   for (const child of ctx.children) {
     if (!child.userId) {

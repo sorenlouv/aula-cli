@@ -12,7 +12,7 @@
 
 import { htmlToText } from '../html.ts';
 import {
-  expectType,
+  expectOptionalType,
   isArrayOf,
   isOptional,
   isRecord,
@@ -24,27 +24,29 @@ import type { IntegrationContext, WeekPlan, WeekPlanItem } from './types.ts';
 const OPGAVER_URL = 'https://api.minuddannelse.net/aula/opgaveliste';
 const UGEBREV_URL = 'https://api.minuddannelse.net/aula/ugebrev';
 
+type MuNamed = { name?: string | null };
+type MuForloeb = { navn?: string | null };
+
 type MuOpgave = {
   /** The child the task belongs to — MinUddannelse calls this "kuvertnavn". */
-  kuvertnavn?: string;
-  title?: string;
+  kuvertnavn?: string | null;
+  title?: string | null;
   /** Danish weekday label. */
-  ugedag?: string;
-  opgaveType?: string;
-  hold?: Array<{ name?: string }>;
-  forloeb?: { navn?: string };
+  ugedag?: string | null;
+  opgaveType?: string | null;
+  hold?: MuNamed[] | null;
+  forloeb?: MuForloeb | null;
 };
 
-type MuUgebrev = {
-  personer?: Array<{
-    navn?: string;
-    institutioner?: Array<{ ugebreve?: Array<{ indhold?: string }> }>;
-  }>;
-};
+type MuLetter = { indhold?: string | null };
+type MuInstitution = { ugebreve?: MuLetter[] | null };
+type MuPerson = { navn?: string | null; institutioner?: MuInstitution[] | null };
 
-type MuOpgaverResponse = { opgaver?: MuOpgave[] };
+type MuUgebrev = { personer?: MuPerson[] | null };
 
-function isNamed(value: unknown): value is { name?: string } {
+type MuOpgaverResponse = { opgaver?: MuOpgave[] | null };
+
+function isNamed(value: unknown): value is MuNamed {
   return isRecord(value) && isOptional(value.name, isString);
 }
 
@@ -54,8 +56,8 @@ function isMuOpgave(value: unknown): value is MuOpgave {
     isOptional(value.title, isString) &&
     isOptional(value.ugedag, isString) &&
     isOptional(value.opgaveType, isString) &&
-    isOptional(value.hold, (groups): groups is Array<{ name?: string }> => isArrayOf(groups, isNamed)) &&
-    isOptional(value.forloeb, (course): course is { navn?: string } =>
+    isOptional(value.hold, (groups): groups is MuNamed[] => isArrayOf(groups, isNamed)) &&
+    isOptional(value.forloeb, (course): course is MuForloeb =>
       isRecord(course) && isOptional(course.navn, isString));
 }
 
@@ -65,20 +67,18 @@ function isMuOpgaverResponse(value: unknown): value is MuOpgaverResponse {
 }
 
 function isMuUgebrev(value: unknown): value is MuUgebrev {
-  const isLetter = (candidate: unknown): candidate is { indhold?: string } =>
+  const isLetter = (candidate: unknown): candidate is MuLetter =>
     isRecord(candidate) && isOptional(candidate.indhold, isString);
-  const isInstitution = (candidate: unknown): candidate is { ugebreve?: Array<{ indhold?: string }> } =>
+  const isInstitution = (candidate: unknown): candidate is MuInstitution =>
     isRecord(candidate) &&
-    isOptional(candidate.ugebreve, (letters): letters is Array<{ indhold?: string }> =>
-      isArrayOf(letters, isLetter));
-  const isPerson = (candidate: unknown): candidate is NonNullable<MuUgebrev['personer']>[number] =>
+    isOptional(candidate.ugebreve, (letters): letters is MuLetter[] => isArrayOf(letters, isLetter));
+  const isPerson = (candidate: unknown): candidate is MuPerson =>
     isRecord(candidate) &&
     isOptional(candidate.navn, isString) &&
-    isOptional(candidate.institutioner, (institutions): institutions is NonNullable<NonNullable<MuUgebrev['personer']>[number]['institutioner']> =>
+    isOptional(candidate.institutioner, (institutions): institutions is MuInstitution[] =>
       isArrayOf(institutions, isInstitution));
   return isRecord(value) &&
-    isOptional(value.personer, (people): people is NonNullable<MuUgebrev['personer']> =>
-      isArrayOf(people, isPerson));
+    isOptional(value.personer, (people): people is MuPerson[] => isArrayOf(people, isPerson));
 }
 
 async function fetchMu<T>(
@@ -114,7 +114,7 @@ export async function getOpgaver(
   widgetId: string,
 ): Promise<WeekPlan> {
   const data = await fetchMu(OPGAVER_URL, ctx, widgetId, tokens, (value) =>
-    expectType(value, isMuOpgaverResponse, 'a MinUddannelse assignment response'));
+    expectOptionalType(value, isMuOpgaverResponse, 'a MinUddannelse assignment response', {}));
   const items: WeekPlanItem[] = [];
   for (const opgave of data?.opgaver ?? []) {
     const subjects = (opgave.hold ?? []).map((h) => h.name).filter(Boolean);
@@ -142,7 +142,7 @@ export async function getUgebrev(
   widgetId: string,
 ): Promise<WeekPlan> {
   const data = await fetchMu(UGEBREV_URL, ctx, widgetId, tokens, (value) =>
-    expectType(value, isMuUgebrev, 'a MinUddannelse weekly letter response'));
+    expectOptionalType(value, isMuUgebrev, 'a MinUddannelse weekly letter response', {}));
   const items: WeekPlanItem[] = [];
   for (const person of data?.personer ?? []) {
     for (const institution of person.institutioner ?? []) {

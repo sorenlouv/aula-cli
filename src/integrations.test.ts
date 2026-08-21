@@ -246,6 +246,97 @@ test('MinUddannelse takes numeric child ids and the Aula guardian id', async () 
   );
 });
 
+/**
+ * JSON has no `undefined`. These vendors are .NET and PHP backends whose
+ * serialisers write an absent optional as `null`, and every consumer below
+ * already reads those fields through `??`, `?.` or truthiness — so a null must
+ * empty one field, never reject the payload it arrived in.
+ */
+test('a null-valued optional field empties that field rather than the whole plan', async () => {
+  await withVendor(
+    () => [
+      {
+        name: 'Alma Eksempelsen',
+        exceptionMessage: null,
+        weekPlan: [
+          { date: '2026-08-24', tasks: [{ type: 'task', pill: 'Dansk', title: 'Læs s. 12', content: null, editUrl: null }] },
+        ],
+      },
+    ],
+    async (_calls, tokens) => {
+      const plan = await meebook.getWeekPlan(CTX, tokens, '0029');
+      assert.equal(plan.items.length, 1);
+      assert.equal(plan.items[0]?.title, 'Læs s. 12');
+      assert.equal(plan.items[0]?.subject, 'Dansk');
+      assert.equal(plan.items[0]?.content, undefined);
+    },
+  );
+});
+
+test('a null-valued optional field is tolerated by every vendor adapter', async () => {
+  await withVendor(
+    () => ({ opgaver: [{ title: 'Læs side 12', ugedag: 'mandag', forloeb: null, hold: [{ name: null }] }] }),
+    async (_calls, tokens) => {
+      const plan = await minUddannelse.getOpgaver(CTX, tokens, '0030');
+      assert.equal(plan.items.length, 1);
+      assert.equal(plan.items[0]?.title, 'Læs side 12');
+    },
+  );
+
+  await withVendor(
+    () => [{ userName: 'Alma', teamReminders: [{ dueDate: '2026-08-24', teamName: null, reminderText: 'Turtaske', subjectName: null }] }],
+    async (_calls, tokens) => {
+      const plan = await systematic.getReminders(CTX, tokens, '0087');
+      assert.equal(plan.items.length, 1);
+      assert.equal(plan.items[0]?.content, 'Turtaske');
+    },
+  );
+});
+
+/** `?? []` on the response body was how every adapter used to spell this. */
+test('a null body is an empty week, not a vendor failure', async () => {
+  await withVendor(
+    () => null,
+    async (_calls, tokens) => {
+      assert.deepEqual((await meebook.getWeekPlan(CTX, tokens, '0029')).items, []);
+    },
+  );
+  await withVendor(
+    () => null,
+    async (_calls, tokens) => {
+      assert.deepEqual((await systematic.getReminders(CTX, tokens, '0087')).items, []);
+    },
+  );
+  await withVendor(
+    () => null,
+    async (_calls, tokens) => {
+      assert.deepEqual((await minUddannelse.getOpgaver(CTX, tokens, '0030')).items, []);
+    },
+  );
+});
+
+/**
+ * The roster is a lookup table: a row without a usable Login cannot be matched
+ * to a child anyway, and taking the whole response down with it would cost the
+ * siblings their homework too.
+ */
+test('an unusable roster row costs only that child their lektier', async () => {
+  await withVendor(
+    (url) => {
+      if (url.includes('/Aula/GetChildren')) {
+        return { Children: [{ Id: 1, Login: 'alma1234', Name: null }, { Id: 2, Login: null, Name: 'Viggo' }] };
+      }
+      if (url.includes('/Aula/AuthenticateAulaUser')) return {};
+      return [{ StartTimeISO: '2026-08-24T08:00:00', ChapterTitle: 'Matematik', Description: null }];
+    },
+    async (_calls, tokens) => {
+      const plan = await skoleportal.getLektier(CTX, tokens, '0142');
+      assert.equal(plan.items.length, 1, 'the child with a usable row still gets their homework');
+      assert.match(plan.warnings?.join('\n') ?? '', /Viggo.*not listed by SkolePortal/);
+    },
+  );
+});
+
 test('a malformed vendor success response fails instead of looking like an empty plan', async () => {
   await withVendor(
     () => ({ opgaver: [{ title: 42 }] }),

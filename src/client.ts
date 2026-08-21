@@ -20,7 +20,15 @@ import type {
 import { isRecord, parseInteger } from './validation.ts';
 
 const FALLBACK_API_VERSION = 24;
-const MAX_API_VERSION_TO_PROBE = FALLBACK_API_VERSION + 12;
+/**
+ * How far above the version in use the retirement probe searches. Measured from
+ * `#version` rather than from the constant: the probe's own warning tells the
+ * user to pin the version it found in `AULA_API_VERSION`, and a ceiling frozen
+ * at the constant would leave anyone who followed that advice unable to find
+ * the next live version.
+ */
+const API_VERSION_PROBE_SPAN = 12;
+const MAX_API_VERSION = 99;
 const BASE = 'https://www.aula.dk/api';
 const USER_AGENT = 'aula-cli/0.1 (+personal read-only client)';
 /** The health probe runs on a path that has already failed — it may not hang. */
@@ -221,8 +229,8 @@ export class AulaClient {
     this.#cookie = this.#auth.cookie;
     this.#csrf = this.#cookie ? readCookieValue(this.#cookie, 'Csrfp-Token') : undefined;
     const version = opts.apiVersion ?? defaultApiVersion();
-    if (!Number.isInteger(version) || version < 1 || version > 99) {
-      throw new Error(`apiVersion must be an integer from 1 to 99 (got "${version}").`);
+    if (!Number.isInteger(version) || version < 1 || version > MAX_API_VERSION) {
+      throw new Error(`apiVersion must be an integer from 1 to ${MAX_API_VERSION} (got "${version}").`);
     }
     this.#version = version;
     this.#cache = opts.cache ?? ResponseCache.disabled();
@@ -571,7 +579,8 @@ export class AulaClient {
       if (!(err instanceof AulaApiError) || err.code !== STATUS_RETIRED_VERSION) throw err;
     }
 
-    for (let candidate = MAX_API_VERSION_TO_PROBE; candidate >= 15; candidate--) {
+    const ceiling = Math.min(MAX_API_VERSION, this.#version + API_VERSION_PROBE_SPAN);
+    for (let candidate = ceiling; candidate >= 15; candidate--) {
       if (candidate === this.#version) continue;
       try {
         await this.#send('profiles.getProfilesByLogin', 'GET', {}, candidate);
@@ -589,7 +598,7 @@ export class AulaClient {
     throw new AulaApiError('profiles.getProfilesByLogin', STATUS_RETIRED_VERSION, {
       headline: 'Aula has retired every API version aula-cli knows about.',
       detail:
-        `Versions ${MAX_API_VERSION_TO_PROBE} down to 15 all answered "retired". ` +
+        `Versions ${ceiling} down to 15 all answered "retired". ` +
         `Aula has moved further than this client expects, so aula-cli needs updating.`,
       action: 'If you know the live version, point this run at it:',
       commands: ['AULA_API_VERSION=<version> bun run aula whoami'],
@@ -600,7 +609,7 @@ export class AulaClient {
 
   async getProfiles(): Promise<Profile[]> {
     const method = 'profiles.getProfilesByLogin';
-    const data = expectObject<{ profiles?: unknown }>(method, await this.#request(method));
+    const data = expectObject<{ profiles?: unknown }>(method, await this.#request(method), {});
     return expectArray<Profile>(method, data.profiles);
   }
 
@@ -755,7 +764,7 @@ export class AulaClient {
         toDate: opts.toDate,
       },
     });
-    return expectObject<PresenceTemplates>(method, data);
+    return expectObject<PresenceTemplates>(method, data, {});
   }
 
   /**
@@ -844,7 +853,7 @@ export class AulaClient {
         orderDirection: opts.orderDirection ?? 'desc',
       },
     });
-    return expectObject<CommonFileList>(method, data);
+    return expectObject<CommonFileList>(method, data, { commonFiles: [], totalAmount: 0 });
   }
 
   /**
@@ -891,12 +900,22 @@ function parseEnvelope(method: string, value: unknown): ParsedEnvelope {
  * something else, so the message says what arrived instead — "a string
  * (\"intern fejl\")" is a diagnosis, where "malformed payload" is a shrug.
  */
-function expectObject<T extends object>(method: string, value: unknown): T {
+function expectObject<T extends object>(method: string, value: unknown, whenEmpty?: T): T {
+  if ((value === null || value === undefined) && whenEmpty !== undefined) return whenEmpty;
   if (!isRecord(value)) throw payloadError(method, 'an object', value);
   return value as T;
 }
 
+/**
+ * A `data: null` under `status.code: 0` is Aula saying "nothing", not "broken",
+ * and the endpoint wrappers relied on that: they all ended in `?? []` or `?? {}`
+ * before those fallbacks were replaced with a hard shape check. Nullish stays an
+ * empty result here so an empty gallery cannot present as an API failure — and
+ * `whenEmpty` above is the same thing for the endpoints whose empty answer is a
+ * shape rather than a list.
+ */
 function expectArray<T>(method: string, value: unknown): T[] {
+  if (value === null || value === undefined) return [];
   if (!Array.isArray(value)) throw payloadError(method, 'a list', value);
   return value as T[];
 }
@@ -962,9 +981,9 @@ async function probeServiceReachable(version: number): Promise<boolean | undefin
 function defaultApiVersion(): number {
   const raw = process.env.AULA_API_VERSION;
   if (raw === undefined) return FALLBACK_API_VERSION;
-  const version = parseInteger(raw, { min: 1, max: 99 });
+  const version = parseInteger(raw, { min: 1, max: MAX_API_VERSION });
   if (version === undefined) {
-    throw new Error(`AULA_API_VERSION must be an integer from 1 to 99 (got "${raw}").`);
+    throw new Error(`AULA_API_VERSION must be an integer from 1 to ${MAX_API_VERSION} (got "${raw}").`);
   }
   return version;
 }

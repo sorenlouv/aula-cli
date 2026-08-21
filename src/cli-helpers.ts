@@ -48,7 +48,11 @@ export function parseSince(input: string): Date {
     const perUnit: Record<string, number> = { d: 1, w: 7, m: 30, y: 365 };
     return new Date(Date.now() - amount * (perUnit[unit] ?? 1) * 86_400_000);
   }
-  const parsed = parseIsoDateParts(input.trim());
+  // Aula's own timestamps are full ISO datetimes, so one pasted straight from a
+  // message or from `--text` output resolves to the day it names.
+  const trimmed = input.trim();
+  const datePart = /^\d{4}-\d{2}-\d{2}[T ]/.test(trimmed) ? trimmed.slice(0, 10) : trimmed;
+  const parsed = parseIsoDateParts(datePart);
   if (!parsed) throw new UsageError(`Could not parse --since "${input}". Use e.g. 7d, 3w, or 2026-08-01.`);
   return new Date(parsed.year, parsed.month - 1, parsed.day);
 }
@@ -178,10 +182,17 @@ export async function mapLimit<T, R>(
 /** `--week 2026-W33`, `--next`, or the current week. */
 export function resolveWeek(week: string | undefined, next: boolean): string {
   if (week) {
-    if (!isIsoWeek(week)) {
+    // `2026-W5` is what people type, and both parsers accepted it before the
+    // week check was tightened to two digits. Pad it rather than refuse it —
+    // everything downstream keys on the canonical zero-padded form.
+    const canonical = week.replace(
+      /^(\d{4})-[Ww](\d{1,2})$/,
+      (_match, year: string, number: string) => `${year}-W${number.padStart(2, '0')}`,
+    );
+    if (!isIsoWeek(canonical)) {
       throw new UsageError(`--week must look like 2026-W33, got "${week}".`);
     }
-    return week;
+    return canonical;
   }
   return next ? weekOffset(1) : isoWeekString();
 }

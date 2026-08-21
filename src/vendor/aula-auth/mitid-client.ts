@@ -747,7 +747,7 @@ function isAppPollResponse(value: unknown): value is AppPollResponse {
     isOptional(value.channelBindingValue, isString) &&
     isOptional(value.updateCount, (candidate): candidate is number =>
       isNumber(candidate) && Number.isSafeInteger(candidate) && candidate >= 0) &&
-    (value.confirmation === undefined || typeof value.confirmation === 'boolean') &&
+    isOptional(value.confirmation, (candidate): candidate is boolean => typeof candidate === 'boolean') &&
     isOptional(value.payload, isPayload);
 }
 

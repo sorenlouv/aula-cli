@@ -2,7 +2,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { downloadAttachment, listAttachments, type ResolvedAttachment } from './attachments.ts';
-import { isCliCommand, parseCommandLine } from './cli-options.ts';
+import { type CliCommand, isCliCommand, optionsFor, parseCommandLine, usageFor } from './cli-options.ts';
 import {
   type BirthdayContact,
   formatDate,
@@ -26,7 +26,7 @@ import {
   clearCache,
   flushCache,
 } from './cache.ts';
-import { AulaApiError, AulaAuthError, AulaClient } from './client.ts';
+import { AulaApiError, AulaAuthError, AulaClient, CALENDAR_MAX_SPAN_DAYS } from './client.ts';
 import {
   buildDigest,
   collectAlbums,
@@ -67,7 +67,10 @@ import { SUPPORTED_WIDGET_IDS, type WeekPlan } from './integrations/index.ts';
 import { isoDate, localIsoDate } from './integrations/types.ts';
 import type { CommonFile, Contact, ThreadDetail } from './types.ts';
 import { errorMessage, parseInteger, parseIsoDateParts } from './validation.ts';
-import type { Capability } from './widgets.ts';
+import { type Capability, WidgetError } from './widgets.ts';
+
+/** Upper bound on `--days` where no endpoint imposes its own — a year of history. */
+const MAX_HISTORY_DAYS = 365;
 
 const USAGE = `
 aula — your kids' school and daycare, read from Aula (aula.dk)
@@ -119,7 +122,7 @@ type them:
   birthdays                    Classmates' birthdays, soonest first
   notifications                Unread badges Aula is currently showing
   attachments <threadId>       List a thread's attachments
-  attachment <threadId> <n>    Download attachment n of a thread
+  attachment <threadId> [n]    Download attachment n of a thread (default 0)
   commonfiles / commonfile <x> "Fælles Filer" — the shared shelf / download one
   widgets                      Which vendor widgets these schools expose
   ugeplan / ugebrev            Weekly plan / weekly letter, whichever vendor
@@ -134,6 +137,10 @@ type them:
   --days <n> --full --unread --important --week <2026-W33> --next --page <n>
   --widget <id> --group <id> --role <child|guardian> --out <path>
   --from <date> --to <date> --no-cache --cache-ttl <seconds>
+
+  Each command takes only the options it acts on, and refuses the rest rather
+  than ignoring them; \`aula <command> --help\` is that list. \`doctor\` always
+  bypasses the cache, so it accepts neither --no-cache nor --cache-ttl.
 
 Login options:
   --username <name>            MitID username
@@ -155,11 +162,16 @@ async function main(): Promise<number> {
   const argv = process.argv.slice(2);
   const command = argv[0];
 
-  if (!command || command === 'help' || argv.includes('--help') || argv.includes('-h')) {
+  const wantsHelp = argv.includes('--help') || argv.includes('-h');
+  if (!command || command === 'help' || (wantsHelp && !isCliCommand(command))) {
     console.log(USAGE);
     return 0;
   }
   if (!isCliCommand(command)) throw new UsageError(`Unknown command "${command}". Run \`aula --help\`.`);
+  if (wantsHelp) {
+    console.log(commandHelp(command));
+    return 0;
+  }
 
   let parsed: ReturnType<typeof parseCommandLine>;
   try {
@@ -171,7 +183,13 @@ async function main(): Promise<number> {
 
   const asText = values.text === true;
   const limit = optionalInteger(values.limit, '--limit', { min: 1 });
-  const days = optionalInteger(values.days, '--days', { min: 1, max: 50 }) ?? 14;
+  // The 50-day ceiling belongs to one endpoint, not to the flag: Aula answers
+  // a calendar span of 51 with a 403, while `digest`, `pickup-times`, `doctor`
+  // and `new` only use --days to compute a local since/to date and were happy
+  // with a quarter's worth before a single shared cap was applied to all of
+  // them. MAX_HISTORY_DAYS is just a sanity bound on the arithmetic.
+  const maxDays = command === 'calendar' ? CALENDAR_MAX_SPAN_DAYS : MAX_HISTORY_DAYS;
+  const days = optionalInteger(values.days, '--days', { min: 1, max: maxDays }) ?? 14;
   const page = optionalInteger(values.page, '--page', { min: 0 });
   const groupId = optionalInteger(values.group, '--group', { min: 1 });
   const fromDate = optionalIsoDate(values.from, '--from');
@@ -180,8 +198,10 @@ async function main(): Promise<number> {
   const threadId = command === 'thread' || command === 'attachments' || command === 'attachment'
     ? requireId(positionals[0], `${command} <threadId>`)
     : undefined;
+  // The index is optional and defaults to the first attachment, which is the
+  // only one most threads have.
   const attachmentIndex = command === 'attachment'
-    ? requireInteger(positionals[1], 'attachment index', { min: 0 })
+    ? requireInteger(positionals[1] ?? '0', 'attachment index', { min: 0 })
     : undefined;
   if (fromDate && toDate && fromDate > toDate) {
     throw new UsageError(`--from (${fromDate}) must not be after --to (${toDate}).`);
@@ -192,7 +212,7 @@ async function main(): Promise<number> {
 
   if (command === 'cache') return runCache(positionals, asText, ttlMs);
   if (command === 'open') return runOpen(values.web === true);
-  if (command === 'publish') return runPublish(positionals[0], values.off === true);
+  if (command === 'publish') return runPublish(values.off === true);
   if (command === 'remember') return runRemember(positionals);
   if (command === 'preferences') return runPreferences(positionals);
   if (command === 'forget') return runForget(positionals[0]);
@@ -501,9 +521,7 @@ async function main(): Promise<number> {
 
     case 'raw': {
       const method = positionals[0];
-      if (!method) {
-        throw new UsageError('Usage: raw <method> [key=value ...]');
-      }
+      if (method === undefined) throw new Error('raw method was not validated');
       const result = await client.getRaw(method, parseKeyValues(positionals.slice(1)));
       return emit(result, asText, (r) => JSON.stringify(r, null, 2));
     }
@@ -563,6 +581,20 @@ async function main(): Promise<number> {
 }
 
 // ------------------------------------------------------------------ commands
+
+/**
+ * What one command accepts, straight from the same table that enforces it —
+ * so the help can never drift from what the parser will actually allow.
+ */
+function commandHelp(command: CliCommand): string {
+  const options = optionsFor(command);
+  return [
+    `Usage: aula ${usageFor(command)}`,
+    options.length > 0 ? `Options: ${options.join(' ')}` : 'Takes no options.',
+    '',
+    'Run `aula --help` for every command.',
+  ].join('\n');
+}
 
 function runCache(positionals: string[], asText: boolean, ttlMs: number): number {
   const sub = positionals[0] ?? 'status';
@@ -632,10 +664,7 @@ function runOpen(web: boolean): number {
  * the command ends with a link that works — not with a promise about
  * tomorrow's run.
  */
-async function runPublish(extra: string | undefined, off: boolean): Promise<number> {
-  if (extra !== undefined) {
-    throw new UsageError('publish takes no arguments — it creates the artifact itself; `publish --off` stops it.');
-  }
+async function runPublish(off: boolean): Promise<number> {
   const target = readTarget();
   if (off) {
     setTarget(null);
@@ -1250,6 +1279,12 @@ try {
     // saying anything about it, and it pushed the part worth reading — which
     // is now a plain-language headline — into the middle of the line.
     reportProblem(err.message);
+    process.exitCode = 3;
+  } else if (err instanceof WidgetError) {
+    // A third-party school system, not Aula and not us: the vendor is down or
+    // has changed its payload. Same class of "not a bug in this tool" as an
+    // Aula API error, so it gets the same treatment rather than a stack trace.
+    console.error(`Widget error (${err.widgetId}): ${err.message}`);
     process.exitCode = 3;
   } else {
     // An unexpected error is a bug in this client, so the stack is the useful
