@@ -409,12 +409,25 @@ export async function withFullMessages(client: AulaClient, threads: ThreadSummar
   return threads.map((thread, i) => {
     const base = normaliseThread(thread);
     const detail = details[i];
-    if (!detail) return { ...base, messages: [], messagesUnavailable: true };
+    // Both branches carry the same keys on purpose: a caller reading
+    // `totalMessageCount` should not have to narrow a union first, and
+    // `messagesUnavailable` is more useful as a boolean than as a field that
+    // is sometimes simply absent.
+    if (!detail) {
+      return {
+        ...base,
+        totalMessageCount: undefined as number | undefined,
+        moreMessagesExist: false,
+        messages: [] as ReturnType<typeof normaliseMessage>[],
+        messagesUnavailable: true,
+      };
+    }
     return {
       ...base,
       totalMessageCount: detail.totalMessageCount,
       moreMessagesExist: detail.moreMessagesExist ?? false,
       messages: (detail.messages ?? []).map(normaliseMessage),
+      messagesUnavailable: false,
     };
   });
 }

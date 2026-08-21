@@ -8,7 +8,9 @@
  *
  * Derived from the mockup that was reviewed and approved, including the print
  * rules, which matter more than they look: the PDF is the copy that gets
- * forwarded, and anything collapsed on screen has to be expanded there.
+ * forwarded, and anything collapsed on screen that is *brief content* has to be
+ * expanded there. The one exception is `.more`, which holds verbatim source
+ * material rather than brief content — see the print block at the bottom.
  */
 
 /**
@@ -89,6 +91,36 @@ blockquote{margin:0;padding:9px 14px;background:var(--quote);border-radius:8px;f
 .src{margin-top:9px;font-size:12px;color:var(--ink-3)}
 .src a{color:var(--ink-3);text-decoration:underline;text-underline-offset:2px}
 
+/* The summary of a conversation, above the exchange it summarises. Set apart
+   from .why: that says why this matters to us, this says what was said. */
+.gist{margin:10px 0 0;padding-left:11px;border-left:2px solid var(--line);
+  font-size:14px;color:var(--ink-2)}
+
+/* "Læs mere" — the original, one tap under the summary of it. Deliberately
+   quiet: on most days it is not needed, and a card that shouts about its own
+   footnote is a card that reads slower. */
+.more{margin-top:10px;background:transparent;border:0;border-radius:0;box-shadow:none}
+.more>summary{padding:4px 0;font-size:12.5px;font-weight:550;color:var(--ink-3);
+  justify-content:flex-start;gap:6px}
+.more>summary:hover{color:var(--ink-2)}
+.more>summary::after{content:"⌄";font-size:14px}
+.more[open]>summary::after{content:"⌃"}
+.more>summary:focus-visible{outline:2px solid var(--c2);outline-offset:3px;border-radius:4px}
+.more .body{margin-top:4px;padding:12px 15px;background:var(--quote);border-radius:10px;
+  font-size:14px;color:var(--ink-2)}
+.more .body>p{margin:0 0 9px}
+.more .body>p:last-child{margin-bottom:0}
+.msg{padding:11px 0;border-top:1px solid var(--line)}
+.msg:first-child{padding-top:0;border-top:0}
+.msg:last-child{padding-bottom:0}
+.msg-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;margin-bottom:5px}
+.msg-head b{font-size:13px;font-weight:650;color:var(--ink)}
+.msg-head span{font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.msg p{margin:0 0 8px}
+.msg p:last-child{margin-bottom:0}
+.msg-note{margin:11px 0 0;padding-top:9px;border-top:1px solid var(--line);
+  font-size:12.5px;color:var(--ink-3)}
+
 /* Ticking off — see done.ts. The circle is drawn rather than imaged, because
    the page may not reference an external resource and has to print. */
 .tick{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:50%;
@@ -127,11 +159,15 @@ summary{cursor:pointer;padding:15px 18px;font-size:14.5px;font-weight:600;list-s
   display:flex;justify-content:space-between;align-items:center}
 summary::-webkit-details-marker{display:none}
 summary::after{content:"⌄";color:var(--ink-3);font-size:17px;line-height:1}
-details[open] summary::after{content:"⌃"}
+/* Direct child, not descendant: a "læs mere" sits *inside* Godt at vide, and a
+   descendant selector points its chevron up while it is still shut — the outer
+   section's open state deciding the inner one's arrow. */
+details[open]>summary::after{content:"⌃"}
 .di{padding:12px 18px;border-top:1px solid var(--line-2)}
 .di:first-of-type{border-top:0}
 .di b{font-size:14px;font-weight:600;display:block}
 .di p{margin:3px 0 0;font-size:13.5px;color:var(--ink-2)}
+.di .more .body p{font-size:14px}
 details.muted{margin-top:30px;background:transparent;border-style:dashed;box-shadow:none;opacity:.62}
 details.muted summary{font-size:12.5px;font-weight:500;color:var(--ink-3);padding:11px 16px}
 .chips{display:flex;gap:9px;flex-wrap:wrap}
@@ -155,6 +191,14 @@ footer{margin-top:26px;text-align:center;color:var(--ink-3);font-size:12px}
      produced stays — the forwarded PDF should still say two were dealt with —
      but the cards themselves keep out of it however the section was left. */
   .tick{display:none}
+  /* Every other <details> is expanded for print, because a collapsed section
+     would print as a heading with nothing under it. Not this one: it holds
+     verbatim source material rather than brief content, and expanding all of
+     it would turn two forwardable pages into twenty. What the brief actually
+     says — title, why, quote, the conversation's summary — is outside the
+     toggle and prints; the original stays one link away in Aula. See the
+     beforeprint hook in publish.ts, which skips these to match. */
+  .more{display:none}
   .card{padding-right:20px}
   section.reveal .card.is-done{display:none}
   .klaret{border-style:solid;cursor:auto}

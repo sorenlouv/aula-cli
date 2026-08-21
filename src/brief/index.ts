@@ -73,6 +73,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   // ------------------------------------------------------------- extraction
   let topline: string | null = null;
   let summaries: Record<string, string> = {};
+  let conversations: Record<string, string> = {};
   let modelSignals: ReturnType<typeof signalsFromRules> = [];
   // The family's list, as the model read it per source. Empty on the
   // rules-only path, which then hides nothing — see `rank`.
@@ -84,6 +85,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
       const extracted = await extractSignals(input, { useCache: opts.useCache !== false });
       topline = extracted.topline;
       summaries = extracted.childSummaries;
+      conversations = extracted.conversationSummaries;
       modelSignals = extracted.signals;
       relevance = extracted.relevance;
       extractionRan = true;
@@ -107,7 +109,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
 
   if (opts.useModel !== false) {
     try {
-      const composed = await composePage(brief, { topline, summaries, isNew });
+      const composed = await composePage(brief, { topline, summaries, conversations, isNew });
       for (const problem of composed.problems) {
         notes.push(`Layoutplan: ${problem}`);
       }
@@ -129,6 +131,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
     body = fallbackPage(brief, {
       topline,
       summaries,
+      conversations,
       note: opts.useModel === false ? undefined : 'reservelayout',
     });
     // The fallback is held to the same standard as the model's output.

@@ -33,6 +33,32 @@ export type Audience = 'child' | 'class' | 'institution' | 'municipal';
 
 export type SourceKind = 'post' | 'thread' | 'plan' | 'event' | 'album';
 
+/** One turn in a message thread, as it is shown when the reader expands it. */
+export type ConversationMessage = {
+  from: string | null;
+  at: string | null;
+  text: string;
+};
+
+/**
+ * A thread's messages, kept structured beside the flattened `text`.
+ *
+ * The extractors read `text` — one blob, cheapest thing to scan for
+ * obligations — but a reader who opens a five-message exchange wants to see
+ * who said what, in order. Both come from the same fetch, so keeping the
+ * structure costs nothing and reconstructing it later would cost a round trip.
+ *
+ * `total` is Aula's own count and can exceed `messages.length`: `getThread`
+ * pages, and the brief fetches one page. When it does, `truncated` is set and
+ * the page says so rather than presenting a partial exchange as the whole
+ * conversation.
+ */
+export type Conversation = {
+  messages: ConversationMessage[];
+  total: number;
+  truncated: boolean;
+};
+
 /** One piece of Aula content, normalised so the extractors see one shape. */
 export type SourceItem = {
   /** Stable and human-readable: `post:13311009`. Used as the citation key. */
@@ -50,6 +76,8 @@ export type SourceItem = {
   /** Aula's own `isImportant`. Almost always false, but load-bearing when set. */
   important: boolean;
   url: string | null;
+  /** Threads only. What "læs hele samtalen" opens. */
+  conversation?: Conversation;
 };
 
 export type PresenceRow = {

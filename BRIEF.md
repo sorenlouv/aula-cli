@@ -108,7 +108,7 @@ same gate:
 | Noise stays down | nothing in the hidden tier is rendered as a card |
 | Portable | HTML parses; zero external resource references |
 | Legible | colours come from the token set; contrast ratios pass |
-| Print-safe | `<details>` are forced open in print, so nothing hides in the PDF |
+| Print-safe | every `<details>` holding brief content is forced open in print; only the *Læs mere* source dumps stay collapsed |
 
 A failed check drops the model's plan and renders the same components in the
 ranker's own order — the fallback layout — and the page says so.
@@ -152,6 +152,44 @@ Myretuen`, linked, at the bottom where it belongs.
 **7 · Datastatus** — what was fetched, **what failed**, when it was generated,
 step-up state, next scheduled run.
 
+### Reading the original
+
+An entry is a summary, and a summary is only worth trusting if the thing it
+summarises is one tap away. *Hvorfor står der det?* must never mean opening
+Aula. So every entry that has more to show carries **Læs mere** underneath it —
+collapsed, because on most days the summary is the whole point, and quiet,
+because a card that shouts about its own footnote reads slower.
+
+The toggle is skipped where it would be a small lie: a source whose entire text
+is the sentence already quoted above it gets nothing to press. A *læs mere* that
+reveals what the reader just read teaches them to stop pressing things.
+
+**A conversation is a different shape from a message.** A six-message exchange
+between a teacher, another parent and us cannot be understood from one quote, so
+the card carries a summary — *what it is about, who asked what, whether we still
+owe a reply* — and the exchange itself opens underneath it, every message with
+its sender and time, oldest first. Threads shorter than three messages get no
+summary at all: reading the message beats reading *about* the message.
+
+Two failures this is careful about:
+
+- **A partial thread never passes for a whole one.** `getThread` pages and the
+  brief fetches one page, so where messages are missing the toggle says *4 af 9
+  beskeder* and the panel says the rest are in Aula. This is the same rule as a
+  failed fetch never looking like a quiet week.
+- **The summary is the one thing on the page with no verbatim quote behind it,**
+  so it is pinned to a source that is genuinely an exchange, checked for
+  invented dates like every other generated sentence, and dropped — not
+  repaired — when it fails.
+
+The PDF is the exception, and deliberately so. Every *other* collapsed section
+is expanded for print, because a collapsed `<details>` prints as a heading with
+nothing under it. Not these: they hold verbatim source material rather than
+anything the brief says, and expanding them would turn two forwardable pages
+into twenty. What the brief actually asserts — title, why, quote, the
+conversation's summary — sits outside the toggle and prints; the original stays
+one link away in Aula.
+
 ### The rules that make it trustworthy
 
 These are the whole point, and each becomes a test:
@@ -161,10 +199,10 @@ These are the whole point, and each becomes a test:
 - **A missing section and a failed fetch look different.** Today's EasyIQ 500
   must read as *"ugeplan for Viggo og Ida kunne ikke hentes"*, never as a
   quiet empty week. Confusing the two is how a brief starts lying.
-- **Every model-derived claim carries its source** — id, link, and the exact
-  quote it was drawn from. A deadline is shown next to
-  «Ansøgningsfristen er tirsdag den 1. september 2026», so it can be believed
-  without opening Aula.
+- **Every model-derived claim carries its source** — id, link, the exact quote
+  it was drawn from, and the original itself under *Læs mere*. A deadline is
+  shown next to «Ansøgningsfristen er tirsdag den 1. september 2026», so it can
+  be believed without opening Aula.
 - **A confident empty state.** When nothing needs action, the page says so
   plainly rather than showing an empty box. That is what makes it safe to skim.
 - **`NY` markers since the last brief**, so checking twice a week means reading
@@ -285,6 +323,13 @@ obligation for *this* family, one-line summaries, and the topline.
 text — today's payload is ~20 KB, so one call is cheap) on stdin, the rules and
 the family's list in its instructions, and must return:
 
+Trimming is direction-aware: a thread is cut from the *front*, everything else
+from the back. Threads reach the prompt oldest-first, so keeping a long
+exchange's first 4000 characters would hand the model the opening pleasantries
+and hide the question asked this morning. Only the prompt is trimmed — quote
+validation still runs against everything fetched, and the page still shows every
+message the reader expands.
+
 ```jsonc
 {
   "topline": "…",
@@ -300,6 +345,7 @@ the family's list in its instructions, and must return:
     "why": "…"
   }],
   "childSummaries": { "Alma": "…" },
+  "conversationSummaries": { "thread:5001": "…" },  // threads of 3+ messages only
   "relevance": { "post:13311009": "hide|low|normal|high" }   // one per source
 }
 ```
@@ -313,6 +359,9 @@ Validation before anything is rendered:
 4. `relevance` keys must be sources that were supplied; a value outside the
    four words reads as `normal`; a map left out entirely is fed back for the
    retry, since the family's list reaches the ranking through nothing else.
+5. A `conversationSummaries` key must name a source that really is an exchange —
+   three messages or more — because that summary is the one sentence on the page
+   with no verbatim quote standing behind it.
 
 Failures are fed back for exactly one retry; a second failure falls through to
 rules-only output and the page is marked degraded in *Datastatus*. Extraction is

@@ -211,6 +211,72 @@ describe('validateExtraction', () => {
     expect(validateExtraction(INPUT, { signals: 'nope' }).signals).toEqual([]);
     expect(validateExtraction(INPUT, { signals: [null] }).signals).toEqual([]);
   });
+
+  describe('conversation summaries', () => {
+    const message = (from: string, at: string, text: string) => ({ from, at, text });
+    const thread = (count: number) =>
+      sourceItem({
+        key: 'thread:9',
+        kind: 'thread',
+        title: 'Møde om Viggo',
+        text: 'Møde om Viggo\n\nLone: Kan I mødes?\n\nJer: Ja.\n\nLone: Fint.',
+        conversation: {
+          messages: Array.from({ length: count }, (_, i) =>
+            message('Yrsa Storm', `2026-08-1${i}T09:00:00`, `Besked ${i}`),
+          ),
+          total: count,
+          truncated: false,
+        },
+      });
+
+    const withThread = (count: number) => briefInput({ ...INPUT, items: [SOURCE, thread(count)] });
+
+    test('keeps a summary for a thread that is genuinely an exchange', () => {
+      const result = validateExtraction(withThread(4), {
+        signals: [],
+        ...verdicts,
+        conversationSummaries: { 'thread:9': '  Yrsa foreslår et møde; I har sagt ja.  ' },
+      });
+      expect(result.conversationSummaries).toEqual({
+        'thread:9': 'Yrsa foreslår et møde; I har sagt ja.',
+      });
+      expect(result.problems).toEqual([]);
+    });
+
+    test('refuses to summarise something that is not a conversation', () => {
+      const result = validateExtraction(withThread(1), {
+        signals: [],
+        ...verdicts,
+        conversationSummaries: { 'thread:9': 'Yrsa skrev en besked.' },
+      });
+      expect(result.conversationSummaries).toEqual({});
+      expect(result.problems.join(' ')).toContain('er ikke en samtale');
+    });
+
+    test('refuses a summary for a source that was never supplied', () => {
+      const result = validateExtraction(withThread(4), {
+        signals: [],
+        ...verdicts,
+        conversationSummaries: { 'thread:404': 'Noget helt andet.' },
+      });
+      expect(result.conversationSummaries).toEqual({});
+      expect(result.problems.join(' ')).toContain('ukendt sourceKey');
+    });
+
+    test('drops a summary that asserts a date nothing supports', () => {
+      const result = validateExtraction(withThread(4), {
+        signals: [],
+        ...verdicts,
+        conversationSummaries: { 'thread:9': 'Mødet er aftalt til den 3. november.' },
+      });
+      expect(result.conversationSummaries).toEqual({});
+      expect(result.problems.join(' ')).toContain('dato uden kilde');
+    });
+
+    test('is empty, not absent, when the model said nothing about threads', () => {
+      expect(validateExtraction(INPUT, { signals: [], ...verdicts }).conversationSummaries).toEqual({});
+    });
+  });
 });
 
 // --------------------------------------------------------------- subprocess

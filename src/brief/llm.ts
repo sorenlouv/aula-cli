@@ -18,7 +18,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildDateSupport, dueAtSupported, unsupportedDateClaims } from './dates.ts';
 import { BRIEF_DIR } from './state.ts';
-import type { BriefInput, Relevance, Signal, SignalKind, Urgency } from './types.ts';
+import type { BriefInput, Relevance, Signal, SignalKind, SourceItem, Urgency } from './types.ts';
 
 const CACHE_DIR = join(BRIEF_DIR, 'cache');
 /**
@@ -249,8 +249,23 @@ export type ExtractResult = {
    * no verdict is simply absent; the ranker reads that as `normal`.
    */
   relevance: Record<string, Relevance>;
+  /**
+   * One or two sentences per thread that is an actual back-and-forth, keyed by
+   * `sourceKey`. The card shows this instead of asking the reader to work out a
+   * six-message exchange from a single quote; the exchange itself is one tap
+   * away underneath it.
+   */
+  conversationSummaries: Record<string, string>;
   problems: string[];
 };
+
+/**
+ * Below this, a thread is a message rather than a conversation, and reading it
+ * beats reading *about* it — the card's own quote plus "læs mere" already show
+ * the whole thing, so a summary on top would be a second description of one
+ * paragraph.
+ */
+export const CONVERSATION_MIN_MESSAGES = 3;
 
 /**
  * Checks a model response against the input it was given.
@@ -350,6 +365,34 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
     }
   }
 
+  // A conversation summary is the one thing on the page the reader cannot check
+  // against a verbatim quote, so it is pinned to a source that is genuinely an
+  // exchange. Summarising a single message would put a second description of
+  // one paragraph above the paragraph itself.
+  const conversationSummaries: Record<string, string> = {};
+  const rawConversations = (root.conversationSummaries ?? {}) as Record<string, unknown>;
+  for (const [key, value] of Object.entries(rawConversations)) {
+    if (typeof value !== 'string' || !value.trim()) continue;
+    const source = byKey.get(key);
+    if (!source) {
+      problems.push(`conversationSummaries: ukendt sourceKey "${key}"`);
+      continue;
+    }
+    const messages = source.conversation?.messages.length ?? 0;
+    if (messages < CONVERSATION_MIN_MESSAGES) {
+      problems.push(`conversationSummaries.${key}: ${messages} besked(er) er ikke en samtale`);
+      continue;
+    }
+    const invented = unsupportedDateClaims(value, dates, { dueAt: null, sourceKey: key });
+    if (invented.length > 0) {
+      problems.push(
+        `conversationSummaries.${key}: dato uden kilde: ${invented.map((d) => `"${d}"`).join(', ')}`,
+      );
+      continue;
+    }
+    conversationSummaries[key] = value.trim();
+  }
+
   let topline = typeof root.topline === 'string' && root.topline.trim() ? root.topline.trim() : null;
   if (topline) {
     const invented = unsupportedDateClaims(topline, dates);
@@ -389,8 +432,31 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
     signals,
     childSummaries: summaries,
     relevance,
+    conversationSummaries,
     problems,
   };
+}
+
+const PROMPT_TEXT_LIMIT = 4000;
+
+/**
+ * A source's text, trimmed to something a prompt can carry.
+ *
+ * A conversation is trimmed from the **front**, everything else from the back.
+ * Threads are ordered oldest-first (see `collect.ts`), so keeping the first
+ * 4000 characters of a long exchange hands the model the opening pleasantries
+ * and hides the question that was asked this morning. A post, by contrast, puts
+ * its point at the top.
+ *
+ * Only the prompt is trimmed. `source.text` stays whole, so quote validation
+ * still checks against everything that was fetched, and the page still shows
+ * every message the reader expands.
+ */
+function promptText(item: SourceItem): string {
+  if (item.text.length <= PROMPT_TEXT_LIMIT) return item.text;
+  return item.kind === 'thread'
+    ? `…${item.text.slice(-PROMPT_TEXT_LIMIT)}`
+    : `${item.text.slice(0, PROMPT_TEXT_LIMIT)}…`;
 }
 
 /** The payload the model sees. Trimmed, but never summarised before it gets there. */
@@ -413,7 +479,8 @@ function extractionPayload(input: BriefInput) {
       grupper: item.groups,
       handlerOm: item.childNames,
       raekkevidde: item.audience,
-      tekst: item.text.length > 4000 ? `${item.text.slice(0, 4000)}…` : item.text,
+      ...(item.conversation ? { antalBeskeder: item.conversation.messages.length } : {}),
+      tekst: promptText(item),
     })),
   };
 }
@@ -439,6 +506,7 @@ Svar KUN med JSON i præcis denne form, uden kodeblok og uden forklaring udenom:
     }
   ],
   "childSummaries": { "Fornavn": "1-2 sætninger om hvad der sker for barnet" },
+  "conversationSummaries": { "thread:123": "1-2 sætninger: hvad samtalen handler om, og hvor den står nu" },
   "relevance": { "kildens sourceKey": "hide|low|normal|high" }
 }
 
@@ -456,6 +524,7 @@ Ufravigelige regler:
 - Er samme sag sendt flere gange (fx samme møde i to tråde, eller samme tilbud fra to institutioner), så lav ÉT signal for den vigtigste kilde.
 - "concernsChild" er det vigtigste felt du udfylder. Sæt det til true, når beskeden kræver noget af forældrene VEDRØRENDE deres eget barn — tilmelding af barnet, noget barnet skal have med, en dag barnet skal møde anderledes, en aflysning der rammer barnets dag. Sæt det til false, når den ikke gør.
 - Hver kilde har en "raekkevidde": "child" og "class" er skrevet af nogen, der kender barnet; "institution" er sendt til hele skolen eller hele huset; "municipal" er sendt til alle forældre i kommunen. Hvor bredt noget er sendt ud, afgør ikke i sig selv, om det er relevant.
+- "conversationSummaries" laver du KUN for kilder med "antalBeskeder" på ${CONVERSATION_MIN_MESSAGES} eller derover — en enkelt besked læser man hellere selv. Skriv hvad samtalen handler om, hvem der har spurgt om hvad, og om der stadig mangler et svar fra os. Læseren kan folde hele samtalen ud under dit resumé, så skriv det som en indgang til den, ikke som en erstatning.
 - Skriv alt på dansk.`;
 
 /**
@@ -539,6 +608,7 @@ export async function extractSignals(
       signals: [],
       childSummaries: {},
       relevance: {},
+      conversationSummaries: {},
       problems: ['modellens svar kunne ikke læses som JSON'],
     };
   }
