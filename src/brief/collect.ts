@@ -140,6 +140,17 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
     });
   }
 
+  // A thread whose messages could not be fetched still has its subject, so it
+  // renders as a perfectly ordinary card with nothing in it — the one failure
+  // that is invisible on the finished page. `withFullMessages` swallows the
+  // error on purpose (one bad thread must not sink the digest), and this is
+  // where that swallowed failure is turned back into something the reader is
+  // told about.
+  const unreadable = digest.threads.filter((t) => t.messagesUnavailable).map((t) => t.subject);
+  if (unreadable.length > 0) {
+    health.push({ level: 'warn', message: describeUnreadableThreads(unreadable) });
+  }
+
   // ------------------------------------------------------------ weekly plans
   for (const plan of digest.weeklyPlans) {
     for (const [index, entry] of plan.items.entries()) {
@@ -255,6 +266,28 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
     })),
     newMediaCount,
   };
+}
+
+/**
+ * One line, however many threads failed.
+ *
+ * Naming the thread is the useful half — it is what tells the reader which
+ * conversation they still have to open Aula for. But this failure is usually
+ * systemic (a session that expired mid-run, Aula answering 403) and takes every
+ * thread with it at once, and forty warnings naming forty subjects is not a
+ * status panel anybody reads. So the count is always exact and the names run
+ * out before the line does.
+ */
+function describeUnreadableThreads(subjects: string[]): string {
+  const named = subjects.slice(0, 2).map((s) => `«${s}»`).join(' og ');
+  if (subjects.length === 1) {
+    return `Beskederne i tråden ${named} kunne ikke hentes — kun emnet er med her.`;
+  }
+  // "heriblandt" only where the names really are a sample. Naming both of two
+  // and calling it *among others* is exactly the small lie this panel exists
+  // to avoid.
+  const lead = subjects.length > 2 ? 'heriblandt' : 'nemlig';
+  return `Beskederne i ${subjects.length} tråde kunne ikke hentes — kun emnerne er med her, ${lead} ${named}.`;
 }
 
 /**
