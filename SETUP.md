@@ -237,7 +237,8 @@ delete the line about municipal messages and they start appearing. Wishes for
 *less* work the same way ("jeg er ligeglad med billeder"); those the model
 weighs on its own.
 
-The file is plain markdown and yours to edit in any editor. It stays on your
+The file is one wish per line and nothing else — no header, no syntax to get
+right — so editing it in any editor works as well as the commands do. It stays on your
 machine with the rest of `~/.aula`: it names other people's children, so it has
 no business in the repository.
 

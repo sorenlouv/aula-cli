@@ -794,7 +794,7 @@ function runPreferences(positionals: string[]): number {
       ...preferences.map((line, i) => `  ${i + 1}. ${line}`),
       '',
       '`aula remember "…"` adds one, `aula forget <n>` drops one — including the ones this tool',
-      'started with. The file is plain markdown; editing it by hand works just as well.',
+      'started with. The file is one preference per line — editing it by hand works just as well.',
     ].join('\n'),
   );
   return 0;
