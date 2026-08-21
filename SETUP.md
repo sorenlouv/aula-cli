@@ -139,13 +139,21 @@ bun src/cli.ts schedule
 
 `--at 07:00` picks another time; `aula schedule --remove` stops it. macOS gets
 a launchd agent, Windows a Scheduled Task; on Linux the command prints the
-cron line to add yourself.
+cron lines to add yourself.
+
+A laptop is usually asleep at 06:30, and one trigger is not enough: macOS
+Power Nap wakes it for three-minute maintenance windows, the job starts in one
+of them, and the Mac sleeps again with `claude` mid-request. So the agent holds
+the Mac awake for the few minutes the run takes (`caffeinate`, honoured on
+power) and fires again every 15 minutes for three hours. Every trigger passes
+`--catch-up`: do nothing once the day's overview is complete — the model ran
+and, where configured, the hosted copy was refreshed — and do the morning over
+otherwise. Open the lid at 07:40 and the brief is there by 07:45.
 
 On macOS the agent bakes in the directories holding `bun`, `claude` and
 `node`, because launchd starts with a bare PATH. **Re-run `aula schedule`
 after changing node version** — `claude` shells out to node for plugin hooks,
-and a node it cannot find kills it with exit 143 after the work is done, which
-costs the brief its model output.
+and launchd's PATH is only ever what was baked in.
 
 The same baking applies to the brief's model knobs: `AULA_BRIEF_MODEL`,
 `AULA_BRIEF_EFFORT` and `AULA_CACHE_TTL` set in the shell where you run
@@ -157,17 +165,22 @@ Design and reasoning: [BRIEF.md](BRIEF.md).
 ## 8. Optional: publish the brief to a URL
 
 By default the brief never leaves the machine. If you want to read it on a phone
-or send the link, publish it once from a Claude session in this repository —
-"publish ~/.aula/brief/artifact.html as an artifact" — then save the URL it
-returns:
+or send the link:
 
 ```bash
-echo 'https://claude.ai/code/artifact/<uuid>' > ~/.aula/brief/artifact-url
+bun src/cli.ts publish
 ```
 
-From then on every run redeploys the page to that same URL, so the link always
-shows today's brief. `--no-deploy` skips it once; deleting the file turns it off.
-`AULA_ARTIFACT_URL` overrides the file for a single run.
+That publishes the newest overview as an artifact — private to your claude.ai
+account — and saves its URL to `~/.aula/config.json`. From then on every run
+redeploys the page to that same URL, so the link always shows today's brief,
+and `aula open --web` opens it (and says so if it is stale). Running
+`aula publish` again redeploys right away; `aula publish --off` stops updating
+it and forgets the URL; `--no-deploy` skips it for one run.
+
+The preference is per installation and lives outside the repository, which is
+the point: nobody who clones this project inherits your URL, and nobody else
+can update your artifact — the publish runs under *your* `claude` login.
 
 Think about this one before turning it on. The page contains whatever the school
 and daycare wrote about your children — for some families that includes health
@@ -191,14 +204,19 @@ Ask Claude things like:
   is down or misconfigured; that is not an empty week. `doctor --text` shows
   which vendor and why.
 - **The brief runs but loses the model's wording** — check
-  `~/.aula/brief/launchd.log` for `exited 143` and a `command not found`. A
-  plugin hook could not find its interpreter on launchd's bare PATH; re-run
+  `~/.aula/brief/launchd.log`. `timed out` means the request never came back,
+  which on a laptop means it slept mid-run; the scheduler's retries do the
+  morning over, and the `Ufuldstændig kørsel` line marks which runs they will
+  redo. `Not logged in` means `claude` has no credentials outside your
+  terminal — run `claude` once interactively and log in. A `command not found`
+  is a plugin hook missing its interpreter on launchd's bare PATH; re-run
   `aula schedule` to bake the current directories back in.
 - **The hosted link is stale while the local page is current** — the same log
-  carries the reason on the `Artifact blev ikke opdateret:` line. `claude`
-  offers the Artifact tool only to sessions announcing themselves as the
-  desktop app, which `deploy.ts` handles; if a `claude` update changes that,
-  this is the line that will say so.
+  carries the reason on the `Artifact blev ikke opdateret:` line, and
+  `aula open --web` says when the copy was last refreshed. `aula publish`
+  redeploys the newest page right now. `claude` offers the Artifact tool only
+  to sessions announcing themselves as the desktop app, which `deploy.ts`
+  handles; if a `claude` update changes that, this is the line that will say so.
 
 ## Uninstall
 

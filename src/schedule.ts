@@ -4,15 +4,31 @@
  * Each platform gets its native "run this for the logged-in user" mechanism:
  * a launchd agent on macOS, a Task Scheduler task on Windows. Linux is cron,
  * systemd or neither depending on the distro, so rather than guessing wrong
- * quietly the command prints the one cron line that works everywhere.
+ * quietly the command prints the cron lines that work everywhere.
  *
  * launchd starts jobs with a bare environment, so every tool the run needs —
  * bun, and `claude` with the node its plugin hooks shell out to — has its
  * directory baked into the agent's PATH at install time. That is why "re-run
  * `aula schedule` after switching node versions" is real advice: a hook whose
- * node has moved kills `claude` with exit 143 *after* the work is done, and
- * the brief silently loses its model output. Windows tasks inherit the user's
- * PATH from the registry, so nothing needs baking there.
+ * node has moved can cost `claude` its exit status *after* the work is done.
+ * Windows tasks inherit the user's PATH from the registry, so nothing needs
+ * baking there.
+ *
+ * **A laptop is asleep at 06:30.** That is the normal case, and it is where a
+ * single trigger fails: macOS Power Nap wakes the machine for 180-second
+ * maintenance windows, launchd starts the job in one of them, and the Mac goes
+ * back to sleep with `claude -p` mid-request. Measured on two consecutive
+ * mornings — the transcripts show the prompt sent and nothing ever coming back.
+ * Two defences, both here:
+ *
+ * - The job runs under `caffeinate -i -s`, which holds the Mac awake for the
+ *   few minutes the run takes. Honoured on AC power; on battery macOS may still
+ *   sleep through it.
+ * - The agent fires again every 15 minutes for three hours, and every trigger
+ *   passes `--catch-up`: do nothing when today's overview is already complete,
+ *   otherwise do it over. A morning that went right costs the retries nothing
+ *   but a state-file read; a morning that went wrong gets fixed as soon as the
+ *   Mac is properly awake.
  */
 
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -25,6 +41,13 @@ const LABEL = 'com.aula-cli.brief';
 const TASK_NAME = 'aula-cli-brief';
 const REPO = join(import.meta.dir, '..');
 const ENTRY = join(REPO, 'src', 'cli.ts');
+const CAFFEINATE = '/usr/bin/caffeinate';
+
+/** The scheduled command. `--catch-up` is what makes the retries below free. */
+const RUN_ARGS = ['new', '--text', '--catch-up'];
+
+export const RETRY_EVERY_MINUTES = 15;
+export const RETRY_FOR_MINUTES = 180;
 
 export type At = { hour: number; minute: number };
 
@@ -40,6 +63,21 @@ export function parseAt(raw: string | undefined): At {
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
+export const clock = (at: At) => `${pad(at.hour)}:${pad(at.minute)}`;
+
+/**
+ * The main time plus the retries that follow it, stopping at midnight rather
+ * than wrapping into a different weekday. Exported for tests.
+ */
+export function scheduleTimes(at: At): At[] {
+  const times: At[] = [];
+  for (let offset = 0; offset <= RETRY_FOR_MINUTES; offset += RETRY_EVERY_MINUTES) {
+    const total = at.hour * 60 + at.minute + offset;
+    if (total >= 24 * 60) break;
+    times.push({ hour: Math.floor(total / 60), minute: total % 60 });
+  }
+  return times;
+}
 
 /**
  * The agent's PATH: the directories of the tools the run actually uses, then
@@ -83,10 +121,12 @@ export function buildPlist(opts: {
   logPath: string;
   env?: Record<string, string>;
 }): string {
-  const day = (weekday: number) =>
+  const entry = (weekday: number, at: At) =>
     `    <dict><key>Weekday</key><integer>${weekday}</integer>` +
-    `<key>Hour</key><integer>${opts.at.hour}</integer>` +
-    `<key>Minute</key><integer>${opts.at.minute}</integer></dict>`;
+    `<key>Hour</key><integer>${at.hour}</integer>` +
+    `<key>Minute</key><integer>${at.minute}</integer></dict>`;
+  const times = scheduleTimes(opts.at);
+  const program = [CAFFEINATE, '-i', '-s', opts.bun, ENTRY, ...RUN_ARGS];
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -94,10 +134,7 @@ export function buildPlist(opts: {
   <key>Label</key><string>${LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${opts.bun}</string>
-    <string>${ENTRY}</string>
-    <string>new</string>
-    <string>--text</string>
+${program.map((arg) => `    <string>${xmlEscape(arg)}</string>`).join('\n')}
   </array>
   <key>WorkingDirectory</key><string>${REPO}</string>
   <key>EnvironmentVariables</key>
@@ -110,7 +147,7 @@ ${Object.entries(opts.env ?? {})
   </dict>
   <key>StartCalendarInterval</key>
   <array>
-${[1, 2, 3, 4, 5].map(day).join('\n')}
+${[1, 2, 3, 4, 5].flatMap((weekday) => times.map((at) => entry(weekday, at))).join('\n')}
   </array>
   <key>StandardOutPath</key><string>${opts.logPath}</string>
   <key>StandardErrorPath</key><string>${opts.logPath}</string>
@@ -120,15 +157,37 @@ ${[1, 2, 3, 4, 5].map(day).join('\n')}
 `;
 }
 
-/** The Task Scheduler creation arguments, weekdays only. Exported for tests. */
+/**
+ * The Task Scheduler creation arguments, weekdays only, repeating through the
+ * same retry window (`/RI` every N minutes, `/DU` for how long). Exported for
+ * tests.
+ */
 export function schtasksCreateArgs(opts: { at: At; bun: string }): string[] {
+  const hours = Math.floor(RETRY_FOR_MINUTES / 60);
+  const minutes = RETRY_FOR_MINUTES % 60;
   return [
     '/Create', '/F',
     '/SC', 'WEEKLY',
     '/D', 'MON,TUE,WED,THU,FRI',
     '/TN', TASK_NAME,
-    '/TR', `"${opts.bun}" "${ENTRY}" new --text`,
-    '/ST', `${pad(opts.at.hour)}:${pad(opts.at.minute)}`,
+    '/TR', `"${opts.bun}" "${ENTRY}" ${RUN_ARGS.join(' ')}`,
+    '/ST', clock(opts.at),
+    '/RI', String(RETRY_EVERY_MINUTES),
+    '/DU', `${pad(hours)}:${pad(minutes)}`,
+  ];
+}
+
+/**
+ * The cron equivalent: the run, then retries on the quarter hours through the
+ * following three hours. Exported for tests.
+ */
+export function cronLines(at: At): string[] {
+  const command = `cd ${REPO} && bun src/cli.ts ${RUN_ARGS.join(' ')}`;
+  const from = at.hour + 1;
+  const to = Math.min(23, at.hour + RETRY_FOR_MINUTES / 60);
+  return [
+    `${at.minute} ${at.hour} * * 1-5 ${command}`,
+    ...(from <= to ? [`*/${RETRY_EVERY_MINUTES} ${from}-${to} * * 1-5 ${command}`] : []),
   ];
 }
 
@@ -146,10 +205,11 @@ export function runSchedule(opts: { remove: boolean; at?: string }): number {
       return opts.remove ? removeWindows() : installWindows(at);
     default: {
       if (opts.remove) {
-        console.error('No scheduler integration for this platform — remove the line with: crontab -e');
+        console.error('No scheduler integration for this platform — remove the lines with: crontab -e');
       } else {
-        console.error('No scheduler integration for this platform. The cron equivalent:');
-        console.error(`  ${at.minute} ${at.hour} * * 1-5 cd ${REPO} && bun src/cli.ts new --text`);
+        console.error('No scheduler integration for this platform. The cron equivalent (the run, then');
+        console.error('the retries that do nothing once the day is complete):');
+        for (const line of cronLines(at)) console.error(`  ${line}`);
       }
       return 0;
     }
@@ -158,6 +218,11 @@ export function runSchedule(opts: { remove: boolean; at?: string }): number {
 
 function plistPath(): string {
   return join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`);
+}
+
+function retryNote(at: At): string {
+  const last = scheduleTimes(at).at(-1) ?? at;
+  return `retrying every ${RETRY_EVERY_MINUTES} min until ${clock(last)} while the day's overview is incomplete`;
 }
 
 function installDarwin(at: At): number {
@@ -196,7 +261,8 @@ function installDarwin(at: At): number {
     console.error(`launchctl bootstrap failed: ${loaded.err}`);
     return 1;
   }
-  console.log(`Installed — every weekday at ${pad(at.hour)}:${pad(at.minute)}.`);
+  console.log(`Installed — every weekday at ${clock(at)}, ${retryNote(at)}.`);
+  console.log('  The run holds the Mac awake (caffeinate); a Mac asleep on battery is what the retries are for.');
   if (Object.keys(env).length > 0) {
     console.log(`  baked:   ${Object.entries(env).map(([k, v]) => `${k}=${v}`).join(' ')}`);
   }
@@ -229,7 +295,9 @@ function installWindows(at: At): number {
     console.error(`schtasks failed: ${created.err}`);
     return 1;
   }
-  console.log(`Installed — every weekday at ${pad(at.hour)}:${pad(at.minute)}, as Scheduled Task "${TASK_NAME}".`);
+  console.log(
+    `Installed — every weekday at ${clock(at)}, ${retryNote(at)}, as Scheduled Task "${TASK_NAME}".`,
+  );
   console.log(`  output: ${BRIEF_DIR}`);
   console.log('  remove: aula schedule --remove');
   console.log('The task runs while you are logged in; bun and claude resolve from your user PATH.');

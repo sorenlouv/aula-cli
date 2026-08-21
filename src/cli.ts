@@ -45,10 +45,10 @@ import {
   readPlans,
   withFullMessages,
 } from './digest.ts';
-import { runBrief } from './brief/index.ts';
-import { readTarget } from './brief/deploy.ts';
+import { BRIEF_TITLE, runBrief } from './brief/index.ts';
+import { deployArtifact, readTarget, setTarget } from './brief/deploy.ts';
 import { explain } from './brief/rank.ts';
-import { BRIEF_DIR } from './brief/state.ts';
+import { BRIEF_DIR, loadState, recordDeploy, saveState, todayIsComplete } from './brief/state.ts';
 import { runDoctor } from './doctor.ts';
 import { AulaSessionError, UsageError } from './errors.ts';
 import { AulaAuthFlowError } from './vendor/aula-auth/index.ts';
@@ -70,7 +70,12 @@ Everyday:
                                where configured, the hosted copy — then open it
   open                         Open the newest overview without regenerating
   open --web                   Open the hosted copy instead (readable anywhere)
-  schedule [--at HH:MM]        Generate the overview automatically every weekday
+  publish                      Keep a hosted copy, readable on a phone: publishes
+                               the newest page as a private artifact and redeploys
+                               to it on every run from then on
+  publish --off                Stop updating the hosted copy and forget its URL
+  schedule [--at HH:MM]        Generate the overview automatically every weekday,
+                               retrying through the morning if the Mac was asleep
   schedule --remove            Stop generating it automatically
   login                        Log in with MitID (tokens refresh themselves)
   logout                       Forget the stored login
@@ -81,6 +86,8 @@ Options for new:
   --no-open                    Do not open the page (a pipe or scheduler never opens)
   --no-llm                     Danish rules only — skip the model calls
   --no-deploy                  Do not update the hosted copy this run
+  --catch-up                   Do nothing if today's overview is already complete
+                               (every scheduled trigger passes this)
   --explain                    Print the score breakdown behind the ranking
   --pdf, --png                 Also write a PDF / PNG
   --out <dir>                  Write somewhere other than ~/.aula/brief
@@ -163,11 +170,13 @@ async function main(): Promise<number> {
         from: { type: 'string' },
         to: { type: 'string' },
         out: { type: 'string' },
-        // new / open / schedule
+        // new / open / publish / schedule
         'no-llm': { type: 'boolean', default: false },
         'no-deploy': { type: 'boolean', default: false },
         'no-open': { type: 'boolean', default: false },
+        'catch-up': { type: 'boolean', default: false },
         web: { type: 'boolean', default: false },
+        off: { type: 'boolean', default: false },
         remove: { type: 'boolean', default: false },
         at: { type: 'string' },
         explain: { type: 'boolean', default: false },
@@ -217,6 +226,19 @@ async function main(): Promise<number> {
 
   if (command === 'cache') return runCache(positionals, asText, ttlMs);
   if (command === 'open') return runOpen(values.web === true);
+  if (command === 'publish') return runPublish(positionals[0], values.off === true);
+  // The scheduler's retries: a morning that already went right costs nothing,
+  // not even a login check — this is answered from the state file alone.
+  if (command === 'new' && values['catch-up'] === true) {
+    const state = loadState();
+    if (todayIsComplete(state)) {
+      return emit({ skipped: true, lastRun: state.lastRun ?? null }, asText, (r) => {
+        const at = r.lastRun ? new Date(r.lastRun.at) : null;
+        const when = at ? at.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' }) : '';
+        return `Dagens oversigt er allerede komplet${when ? ` (kl. ${when})` : ''} — intet at gøre.`;
+      });
+    }
+  }
   if (command === 'schedule') {
     return runSchedule({ remove: values.remove === true, ...(values.at ? { at: values.at } : {}) });
   }
@@ -551,6 +573,7 @@ async function main(): Promise<number> {
           png: run.published.pngPath,
           layout: run.origin,
           deployed: run.deployment.status === 'ok' ? run.deployment.url : null,
+          complete: run.complete,
           topline: run.topline,
           signals: run.brief.signals.filter((s) => s.tier !== 'hidden').length,
           hidden: run.brief.signals.filter((s) => s.tier === 'hidden').length,
@@ -626,10 +649,15 @@ function runOpen(web: boolean): number {
     const url = readTarget();
     if (!url) {
       console.error(
-        'No hosted copy is configured — see SETUP.md ("publish the brief to a URL"). ' +
-          '`aula open` shows the local page.',
+        'No hosted copy is configured — `aula publish` sets one up. `aula open` shows the local page.',
       );
       return 1;
+    }
+    // Same courtesy as the local page below: say when the link is stale rather
+    // than let a day-old brief read as today's.
+    const deploy = loadState().lastDeploy;
+    if (deploy && deploy.url === url && deploy.day !== localIsoDate(new Date())) {
+      console.error(`The hosted copy was last updated ${deploy.day} — \`aula new\` refreshes it.`);
     }
     openInBrowser(url);
     console.log(url);
@@ -648,6 +676,52 @@ function runOpen(web: boolean): number {
   }
   openInBrowser(path);
   console.log(path);
+  return 0;
+}
+
+/**
+ * `publish` / `publish --off` — the hosted copy, configured.
+ *
+ * The preference lives in `~/.aula/config.json`, per installation: nothing a
+ * clone of this repository inherits, and nothing another user of the tool can
+ * see or redeploy. `publish` creates the artifact when none is configured and
+ * redeploys to it when one is; either way today's page goes up immediately, so
+ * the command ends with a link that works — not with a promise about
+ * tomorrow's run.
+ */
+async function runPublish(extra: string | undefined, off: boolean): Promise<number> {
+  if (extra !== undefined) {
+    throw new UsageError('publish takes no arguments — it creates the artifact itself; `publish --off` stops it.');
+  }
+  const target = readTarget();
+  if (off) {
+    setTarget(null);
+    console.log(target ? `The hosted copy is off — ${target} will not be updated again.` : 'No hosted copy was configured.');
+    return 0;
+  }
+  const artifactPath = join(BRIEF_DIR, 'artifact.html');
+  if (!existsSync(artifactPath)) {
+    console.error('No overview to publish yet — run `aula new` first, then `aula publish`.');
+    return 1;
+  }
+
+  console.error(
+    target
+      ? `Redeploying the newest overview to ${target}…`
+      : 'Publishing the newest overview as a new artifact (private to your claude.ai account)…',
+  );
+  const result = await deployArtifact(artifactPath, { title: BRIEF_TITLE, create: !target });
+  if (result.status !== 'ok') {
+    console.error(`Publishing failed: ${result.reason}`);
+    return 1;
+  }
+  // Saved only after a deploy that worked — the URL is only known from the reply.
+  if (!target) setTarget(result.url);
+  const state = loadState();
+  recordDeploy(state, result.url);
+  saveState(state);
+  console.error('Every `aula new` (and the schedule) keeps it current; `aula publish --off` stops it.');
+  console.log(result.url);
   return 0;
 }
 
@@ -1005,6 +1079,7 @@ function renderBrief(result: {
   png: string | null;
   layout: string;
   deployed: string | null;
+  complete: boolean;
   topline: string | null;
   signals: number;
   hidden: number;
@@ -1020,6 +1095,7 @@ function renderBrief(result: {
   if (result.png) lines.push(`PNG:  ${result.png}`);
   if (result.deployed) lines.push(`Delt: ${result.deployed}`);
   if (result.notes.length) lines.push('', ...result.notes.map((n) => `! ${n}`));
+  if (!result.complete) lines.push('! Ufuldstændig kørsel — planlæggerens næste forsøg gør det om.');
   return lines.join('\n');
 }
 

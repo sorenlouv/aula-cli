@@ -13,10 +13,11 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { installFakeClaude } from './testing/fake-claude.ts';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const PRELOAD = join(ROOT, 'src/testing/fake-aula.ts');
@@ -250,7 +251,7 @@ test('schedule refuses a malformed --at before touching the system', () => {
 test('open --web without a configured hosted copy says how to get one', () => {
   const result = sandbox().run('open', '--web');
   assert.notEqual(result.code, 0);
-  assert.match(result.stderr, /SETUP\.md/);
+  assert.match(result.stderr, /aula publish/);
 });
 
 // The reported bug this guards against: SkolePortal answered HTTP 500 for the
@@ -468,4 +469,103 @@ test('doctor --text is readable and marks each check', () => {
   assert.match(result.stdout, /aula doctor — API v\d+/);
   assert.match(result.stdout, /\[PASS\] messaging\.getThreads/);
   assert.match(result.stdout, /passed, \d+ warned/);
+});
+
+// ------------------------------------------------------------- hosted copy
+
+const ARTIFACT = 'https://claude.ai/code/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
+
+/** A sandbox whose `claude` is the fake, answering as told. */
+function sandboxWithClaude(mode: string, result?: string) {
+  const box = sandbox();
+  const fake = installFakeClaude(join(box.dir, 'fakebin'));
+  box.env.PATH = fake.path;
+  box.env.FAKE_CLAUDE_MODE = mode;
+  if (result !== undefined) box.env.FAKE_CLAUDE_RESULT_JSON = JSON.stringify(result);
+  return box;
+}
+
+test('publish creates the artifact, saves its url to config.json, and records the deploy', () => {
+  const box = sandboxWithClaude('ok', `Deployed: ${ARTIFACT}`);
+  mkdirSync(join(box.dir, 'brief'), { recursive: true });
+  writeFileSync(join(box.dir, 'brief', 'artifact.html'), '<title>x</title>');
+
+  const created = box.run('publish');
+  assert.equal(created.code, 0, created.stderr);
+  assert.equal(created.stdout.trim(), ARTIFACT);
+  assert.match(created.stderr, /new artifact/);
+  assert.equal(JSON.parse(readFileSync(join(box.dir, 'config.json'), 'utf8')).artifactUrl, ARTIFACT);
+  const state = JSON.parse(readFileSync(join(box.dir, 'brief', 'state.json'), 'utf8'));
+  assert.equal(state.lastDeploy.url, ARTIFACT);
+
+  // Configured now, so a second publish redeploys rather than creates.
+  const again = box.run('publish');
+  assert.equal(again.code, 0, again.stderr);
+  assert.match(again.stderr, /Redeploying/);
+
+  const off = box.run('publish', '--off');
+  assert.equal(off.code, 0);
+  assert.match(off.stdout, /off/);
+  assert.equal(JSON.parse(readFileSync(join(box.dir, 'config.json'), 'utf8')).artifactUrl, undefined);
+});
+
+test('publish takes no arguments — there is one way to get a url, and it is publish itself', () => {
+  const box = sandboxWithClaude('ok', ARTIFACT);
+  const result = box.run('publish', ARTIFACT);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /takes no arguments/);
+  assert.equal(existsSync(join(box.dir, 'config.json')), false);
+});
+
+test('publish with no overview yet says what to do first', () => {
+  const box = sandboxWithClaude('ok', ARTIFACT);
+  const result = box.run('publish');
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /aula new/);
+});
+
+test('a failed publish leaves no url behind', () => {
+  const box = sandboxWithClaude('denied');
+  mkdirSync(join(box.dir, 'brief'), { recursive: true });
+  writeFileSync(join(box.dir, 'brief', 'artifact.html'), '<title>x</title>');
+  const result = box.run('publish');
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Artifact/);
+  assert.equal(existsSync(join(box.dir, 'config.json')), false);
+});
+
+test('new --catch-up does nothing — not even a request — once the day is complete', () => {
+  const box = sandbox();
+  mkdirSync(join(box.dir, 'brief'), { recursive: true });
+  const today = new Date();
+  const day = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  writeFileSync(
+    join(box.dir, 'brief', 'state.json'),
+    JSON.stringify({ seen: {}, lastRun: { day, at: today.toISOString(), complete: true } }),
+  );
+  const result = box.run('new', '--catch-up', '--text');
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /allerede komplet/);
+  assert.deepEqual(result.requests, []);
+});
+
+test('new --catch-up runs when the last run was incomplete', () => {
+  const box = sandbox();
+  mkdirSync(join(box.dir, 'brief'), { recursive: true });
+  const today = new Date();
+  const day = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  writeFileSync(
+    join(box.dir, 'brief', 'state.json'),
+    JSON.stringify({ seen: {}, lastRun: { day, at: today.toISOString(), complete: false } }),
+  );
+  // Rules only and no deploy, so the run needs neither claude nor a target —
+  // and on those terms it is complete.
+  const result = box.run('new', '--catch-up', '--no-llm', '--no-deploy', '--no-open');
+  assert.equal(result.code, 0, result.stderr);
+  assert.ok(result.requests.length > 0, 'the incomplete day should be generated again');
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.complete, true);
+  const state = JSON.parse(readFileSync(join(box.dir, 'brief', 'state.json'), 'utf8'));
+  assert.equal(state.lastRun.complete, true);
+  assert.equal(state.lastRun.day, day);
 });
