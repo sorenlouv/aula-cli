@@ -247,6 +247,26 @@ function mergeKey(signal: Signal): string {
   return `title|${title}`;
 }
 
+/**
+ * Whether one of these two may stand for the other on the page.
+ *
+ * `mergeKey` says which signals are *candidates* to merge — the same subject on
+ * the same date. This says which of those candidates one entry can honestly
+ * represent, and the answer is no across Aula's own `vigtig` flag. The loser of
+ * a merge survives only as a key in the winner's `mergedSourceKeys`, which
+ * counts as covered everywhere downstream: it reaches no card, no "Godt at
+ * vide", no muted foot, and not even `unusedSources`. The floor below only ever
+ * inspects the winner, so a flagged item that lost is past rescuing. Same
+ * subject, same date, but only one of them is the school shouting, so: two
+ * entries.
+ *
+ * Asked of the source, not of the tier — the tiers below this point are still
+ * being rewritten, and a predicate that read them would depend on when it ran.
+ */
+function interchangeable(a: RankedSignal, b: RankedSignal): boolean {
+  return a.source.important === b.source.important;
+}
+
 export function rank(input: BriefInput, signals: Signal[]): RankedBrief {
   const itemByKey = new Map(input.items.map((item) => [item.key, item]));
   const degraded: string[] = [];
@@ -300,20 +320,27 @@ export function rank(input: BriefInput, signals: Signal[]): RankedBrief {
   }
 
   // Then across sources: the same subject on the same date is one thing said
-  // twice, however many institutions sent it.
-  const byKey = new Map<string, RankedSignal>();
+  // twice, however many institutions sent it. Highest scorer first, so it is
+  // the one the others are folded into — but only where they may stand for one
+  // another, so a key can hold a flagged entry and an unflagged one.
+  const byKey = new Map<string, RankedSignal[]>();
   for (const signal of [...bySource.values()].sort((a, b) => b.score - a.score)) {
     const key = mergeKey(signal);
-    const existing = byKey.get(key);
-    if (!existing) {
-      byKey.set(key, signal);
+    const candidates = byKey.get(key);
+    if (!candidates) {
+      byKey.set(key, [signal]);
       continue;
     }
-    if (!existing.mergedSourceKeys.includes(signal.sourceKey) && signal.sourceKey !== existing.sourceKey) {
-      existing.mergedSourceKeys.push(signal.sourceKey);
+    const standsFor = candidates.find((existing) => interchangeable(existing, signal));
+    if (!standsFor) {
+      candidates.push(signal);
+      continue;
+    }
+    if (!standsFor.mergedSourceKeys.includes(signal.sourceKey) && signal.sourceKey !== standsFor.sourceKey) {
+      standsFor.mergedSourceKeys.push(signal.sourceKey);
     }
   }
-  const merged = [...byKey.values()];
+  const merged = [...byKey.values()].flat();
 
   // ------------------------------------------------------------------- cap
   // Overflow drops a tier rather than disappearing.
