@@ -16,6 +16,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { errorMessage } from '../validation.ts';
 import { DONE_SCRIPT } from './done.ts';
 import { BRIEF_CSS } from './styles.ts';
 import { BRIEF_DIR } from './state.ts';
@@ -140,7 +141,7 @@ export async function publish(
         `file://${htmlPath}`,
       ]);
     } catch (err) {
-      warnings.push(`PDF blev ikke dannet: ${(err as Error).message}`);
+      warnings.push(`PDF blev ikke dannet: ${errorMessage(err)}`);
       pdfPath = null;
     }
   }
@@ -155,7 +156,7 @@ export async function publish(
         `file://${htmlPath}`,
       ]);
     } catch (err) {
-      warnings.push(`PNG blev ikke dannet: ${(err as Error).message}`);
+      warnings.push(`PNG blev ikke dannet: ${errorMessage(err)}`);
       pngPath = null;
     }
   }

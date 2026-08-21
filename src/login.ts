@@ -22,6 +22,7 @@ import { clearCache } from './cache.ts';
 import { UsageError } from './errors.ts';
 import { fail, fmt, info, ok, prompt, promptSecret, selectFromList, warn } from './io.ts';
 import { createQrRenderer } from './qr.ts';
+import { errorMessage } from './validation.ts';
 import {
   AulaHttpClient,
   AulaLoginClient,
@@ -137,7 +138,7 @@ export async function runLogin(args: LoginArgs): Promise<number> {
     try {
       await saveCookieJar(http.jar);
     } catch (err) {
-      warn(`Could not persist cookies: ${(err as Error).message}`);
+      warn(`Could not persist cookies: ${errorMessage(err)}`);
       warn('Calendar reads may fail; everything else will work.');
     }
 
@@ -145,14 +146,14 @@ export async function runLogin(args: LoginArgs): Promise<number> {
     info(`Access token valid for ${Math.round(secondsLeft / 60)} min; it refreshes itself after that.`);
     return 0;
   } catch (err) {
-    const error = err as Error;
-    fail(`Login failed: ${error.message}`);
+    const message = errorMessage(err);
+    fail(`Login failed: ${message}`);
 
     // By far the most common failure, and the least self-explanatory. MitID
     // exposes no way to tear a session down, so this can only be waited out —
     // and the usual cause is an earlier attempt that was abandoned rather than
     // finished, whose app prompt is still sitting there unanswered.
-    if (error instanceof MitidParallelSessionError || /parallel/i.test(error.message)) {
+    if (err instanceof MitidParallelSessionError || /parallel/i.test(message)) {
       info('');
       info(`${fmt.bold('This is MitID\'s "parallel sessions" detector (CAP008).')}`);
       info('  In order:');

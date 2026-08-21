@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Buffer } from 'node:buffer';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from './crypto.ts';
@@ -101,5 +101,13 @@ describe('EncryptedFileTokenStore', () => {
       key: Buffer.alloc(16),
     });
     expect(store.save(SAMPLE)).rejects.toThrow(TokenStoreError);
+  });
+
+  test('malformed but valid JSON is reported as a token-store error', async () => {
+    const path = join(dir, 'tokens.json');
+    await writeFile(path, 'null');
+    const store = new EncryptedFileTokenStore({ filePath: path, key: randomBytes(32) });
+    expect(store.load()).rejects.toThrow(TokenStoreError);
+    expect(store.load()).rejects.toThrow('envelope must be an object');
   });
 });

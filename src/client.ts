@@ -3,7 +3,6 @@ import { type Auth, loginInstructions, resolveAuth } from './auth.ts';
 import { type CacheSettings, ResponseCache, openCache } from './cache.ts';
 import type {
   Album,
-  AulaEnvelope,
   CalendarEvent,
   CommonFileList,
   Contact,
@@ -17,8 +16,10 @@ import type {
   ThreadDetail,
   ThreadList,
 } from './types.ts';
+import { isRecord, parseInteger } from './validation.ts';
 
-const DEFAULT_API_VERSION = Number(process.env.AULA_API_VERSION ?? 24);
+const FALLBACK_API_VERSION = 24;
+const MAX_API_VERSION_TO_PROBE = FALLBACK_API_VERSION + 12;
 const BASE = 'https://www.aula.dk/api';
 
 /**
@@ -188,13 +189,19 @@ export class AulaClient {
    * an earlier test left lying around.
    */
   constructor(opts: { cookie?: string; auth?: Auth; apiVersion?: number; cache?: ResponseCache } = {}) {
-    if (!opts.auth && opts.cookie === undefined) {
+    const auth: Auth | undefined = opts.auth ??
+      (opts.cookie !== undefined ? { kind: 'cookie', cookie: opts.cookie } : undefined);
+    if (!auth) {
       throw new Error('AulaClient needs credentials — use AulaClient.create().');
     }
-    this.#auth = opts.auth ?? { kind: 'cookie', cookie: opts.cookie as string };
+    this.#auth = auth;
     this.#cookie = this.#auth.cookie;
     this.#csrf = this.#cookie ? readCookieValue(this.#cookie, 'Csrfp-Token') : undefined;
-    this.#version = opts.apiVersion ?? DEFAULT_API_VERSION;
+    const version = opts.apiVersion ?? defaultApiVersion();
+    if (!Number.isInteger(version) || version < 1 || version > 99) {
+      throw new Error(`apiVersion must be an integer from 1 to 99 (got "${version}").`);
+    }
+    this.#version = version;
     this.#cache = opts.cache ?? ResponseCache.disabled();
   }
 
@@ -236,14 +243,14 @@ export class AulaClient {
 
   // ---------------------------------------------------------------- transport
 
-  async #request<T>(
+  async #request(
     method: string,
     opts: {
       query?: Record<string, QueryValue | undefined>;
       body?: unknown;
       allowAnyGetter?: boolean;
     } = {},
-  ): Promise<T> {
+  ): Promise<unknown> {
     const httpMethod = opts.body !== undefined ? 'POST' : 'GET';
     assertReadOnly(method, httpMethod, { allowAnyGetter: opts.allowAnyGetter ?? false });
 
@@ -253,7 +260,7 @@ export class AulaClient {
     const cacheable = !NEVER_CACHED.has(method);
     const cacheKey = { query: opts.query ?? null, body: opts.body ?? null };
     if (cacheable) {
-      const hit = this.#cache.get<T>(method, cacheKey);
+      const hit = this.#cache.get<unknown>(method, cacheKey);
       if (hit !== undefined) return hit;
     }
 
@@ -262,7 +269,7 @@ export class AulaClient {
     // for it rather than racing past it.
     await this.#ensureApiVersion();
     await this.#ensureSession(method);
-    const data = await this.#send<T>(method, httpMethod, opts, this.#version);
+    const data = await this.#send(method, httpMethod, opts, this.#version);
     // Only successful responses reach this line — `#send` throws otherwise — so
     // a transient 403 is never pinned for the length of the TTL.
     if (cacheable) this.#cache.set(method, cacheKey, data);
@@ -328,12 +335,12 @@ export class AulaClient {
     return [...merged].map(([k, v]) => `${k}=${v}`).join('; ');
   }
 
-  async #send<T>(
+  async #send(
     method: string,
     httpMethod: 'GET' | 'POST',
     opts: { query?: Record<string, QueryValue | undefined>; body?: unknown },
     version: number,
-  ): Promise<T> {
+  ): Promise<unknown> {
     const url = new URL(`${BASE}/v${version}/`);
     url.searchParams.set('method', method);
     for (const [key, value] of Object.entries(opts.query ?? {})) {
@@ -382,9 +389,9 @@ export class AulaClient {
     }
 
     const raw = await res.text();
-    let envelope: AulaEnvelope<T>;
+    let parsed: unknown;
     try {
-      envelope = JSON.parse(raw) as AulaEnvelope<T>;
+      parsed = JSON.parse(raw);
     } catch {
       if (/<html/i.test(raw)) {
         throw new AulaAuthError(
@@ -394,12 +401,13 @@ export class AulaClient {
       }
       throw new AulaApiError(method, res.status, `Non-JSON response: ${raw.slice(0, 300)}`);
     }
+    const envelope = parseEnvelope(method, parsed);
 
     // Aula answers HTTP 403 for both "your session is dead" and "you may not
     // read that", and only the envelope code tells them apart. Trusting the
     // HTTP status alone makes every id mistake look like a login problem.
     const code = envelope.status?.code ?? -1;
-    if (code === 0) return envelope.data as T;
+    if (code === 0) return envelope.data;
 
     if (code === STATUS_NOT_AUTHENTICATED || code === 401) {
       throw new AulaAuthError(
@@ -460,13 +468,13 @@ export class AulaClient {
       if (!(err instanceof AulaApiError) || err.code !== STATUS_RETIRED_VERSION) throw err;
     }
 
-    for (let candidate = DEFAULT_API_VERSION + 12; candidate >= 15; candidate--) {
+    for (let candidate = MAX_API_VERSION_TO_PROBE; candidate >= 15; candidate--) {
       if (candidate === this.#version) continue;
       try {
         await this.#send('profiles.getProfilesByLogin', 'GET', {}, candidate);
         process.emitWarning(
           `Aula API v${this.#version} is retired; using v${candidate}. ` +
-            `Set AULA_API_VERSION=${candidate} (or update DEFAULT_API_VERSION) to skip this probe.`,
+            `Set AULA_API_VERSION=${candidate} to skip this probe.`,
         );
         this.#version = candidate;
         return;
@@ -485,26 +493,30 @@ export class AulaClient {
   // ---------------------------------------------------------------- endpoints
 
   async getProfiles(): Promise<Profile[]> {
-    const data = await this.#request<{ profiles: Profile[] }>('profiles.getProfilesByLogin');
-    return data.profiles ?? [];
+    const method = 'profiles.getProfilesByLogin';
+    const data = expectObject<{ profiles?: unknown }>(method, await this.#request(method));
+    return expectArray<Profile>(method, data.profiles);
   }
 
   async getProfileContext(portalRole = 'guardian'): Promise<ProfileContext> {
-    return this.#request<ProfileContext>('profiles.getProfileContext', {
+    const method = 'profiles.getProfileContext';
+    return expectObject<ProfileContext>(method, await this.#request(method, {
       query: { portalrole: portalRole },
-    });
+    }));
   }
 
   async getThreads(page = 0): Promise<ThreadList> {
-    return this.#request<ThreadList>('messaging.getThreads', {
+    const method = 'messaging.getThreads';
+    return expectObject<ThreadList>(method, await this.#request(method, {
       query: { sortOn: 'date', orderDirection: 'desc', page },
-    });
+    }));
   }
 
   async getThread(threadId: number, page = 0): Promise<ThreadDetail> {
-    return this.#request<ThreadDetail>('messaging.getMessagesForThread', {
+    const method = 'messaging.getMessagesForThread';
+    return expectObject<ThreadDetail>(method, await this.#request(method, {
       query: { threadId, page },
-    });
+    }));
   }
 
   /**
@@ -520,7 +532,8 @@ export class AulaClient {
     isUnread?: boolean;
     isBookmarked?: boolean;
   }): Promise<PostList> {
-    return this.#request<PostList>('posts.getAllPosts', {
+    const method = 'posts.getAllPosts';
+    return expectObject<PostList>(method, await this.#request(method, {
       query: {
         parent: 'profile',
         index: opts.index ?? 0,
@@ -531,7 +544,7 @@ export class AulaClient {
         isBookmarked: opts.isBookmarked ?? false,
         institutionProfileIds: opts.institutionProfileIds,
       },
-    });
+    }));
   }
 
   /**
@@ -555,7 +568,8 @@ export class AulaClient {
     limit?: number;
   }): Promise<Album[]> {
     if (opts.childInstitutionProfileIds.length === 0) return [];
-    const data = await this.#request<Album[]>('gallery.getAlbums', {
+    const method = 'gallery.getAlbums';
+    const data = await this.#request(method, {
       query: {
         index: opts.index ?? 0,
         limit: opts.limit ?? 50,
@@ -565,7 +579,7 @@ export class AulaClient {
         filterInstProfileIds: opts.childInstitutionProfileIds,
       },
     });
-    return data ?? [];
+    return expectArray<Album>(method, data);
   }
 
   /**
@@ -590,7 +604,8 @@ export class AulaClient {
           `(asked for ${Math.round(spanDays)}). Narrow --days, or make several calls.`,
       );
     }
-    const data = await this.#request<CalendarEvent[]>('calendar.getEventsByProfileIdsAndResourceIds', {
+    const method = 'calendar.getEventsByProfileIdsAndResourceIds';
+    const data = await this.#request(method, {
       body: {
         instProfileIds: opts.childInstitutionProfileIds,
         resourceIds: [],
@@ -598,15 +613,16 @@ export class AulaClient {
         end: formatAulaDate(opts.end),
       },
     });
-    return data ?? [];
+    return expectArray<CalendarEvent>(method, data);
   }
 
   async getDailyPresence(childInstitutionProfileIds: number[]): Promise<PresenceEntry[]> {
     if (childInstitutionProfileIds.length === 0) return [];
-    const data = await this.#request<PresenceEntry[]>('presence.getDailyOverview', {
+    const method = 'presence.getDailyOverview';
+    const data = await this.#request(method, {
       query: { childIds: childInstitutionProfileIds },
     });
-    return data ?? [];
+    return expectArray<PresenceEntry>(method, data);
   }
 
   /**
@@ -625,14 +641,15 @@ export class AulaClient {
     toDate: string;
   }): Promise<PresenceTemplates> {
     if (opts.childInstitutionProfileIds.length === 0) return {};
-    const data = await this.#request<PresenceTemplates>('presence.getPresenceTemplates', {
+    const method = 'presence.getPresenceTemplates';
+    const data = await this.#request(method, {
       query: {
         filterInstitutionProfileIds: opts.childInstitutionProfileIds,
         fromDate: opts.fromDate,
         toDate: opts.toDate,
       },
     });
-    return data ?? {};
+    return expectObject<PresenceTemplates>(method, data);
   }
 
   /**
@@ -641,10 +658,11 @@ export class AulaClient {
    */
   async getGroupsByContext(childInstitutionProfileIds: number[]): Promise<GroupContext[]> {
     if (childInstitutionProfileIds.length === 0) return [];
-    const data = await this.#request<GroupContext[]>('groups.getGroupsByContext', {
+    const method = 'groups.getGroupsByContext';
+    const data = await this.#request(method, {
       query: { childInstitutionProfileIds },
     });
-    return data ?? [];
+    return expectArray<GroupContext>(method, data);
   }
 
   /**
@@ -660,7 +678,8 @@ export class AulaClient {
     filter?: string;
     page?: number;
   }): Promise<Contact[]> {
-    const data = await this.#request<Contact[]>('profiles.getContactlist', {
+    const method = 'profiles.getContactlist';
+    const data = await this.#request(method, {
       query: {
         groupId: opts.groupId,
         filter: opts.filter ?? 'child',
@@ -669,7 +688,7 @@ export class AulaClient {
         page: opts.page ?? 1,
       },
     });
-    return data ?? [];
+    return expectArray<Contact>(method, data);
   }
 
   /**
@@ -678,16 +697,19 @@ export class AulaClient {
    * the vendor's own API accepts it. See src/widgets.ts.
    */
   async getWidgetToken(widgetId: string): Promise<string> {
-    const data = await this.#request<string>('aulaToken.getAulaToken', {
+    const method = 'aulaToken.getAulaToken';
+    const data = await this.#request(method, {
       query: { widgetId },
     });
-    if (!data) throw new AulaApiError('aulaToken.getAulaToken', -1, `No token issued for widget ${widgetId}.`);
+    if (typeof data !== 'string' || !data) {
+      throw new AulaApiError(method, -1, `No token issued for widget ${widgetId}.`);
+    }
     return data;
   }
 
   async getNotifications(): Promise<Notification[]> {
-    const data = await this.#request<Notification[]>('notifications.getNotificationsForActiveProfile');
-    return data ?? [];
+    const method = 'notifications.getNotificationsForActiveProfile';
+    return expectArray<Notification>(method, await this.#request(method));
   }
 
   /**
@@ -706,7 +728,8 @@ export class AulaClient {
     orderField?: 'title';
     orderDirection?: 'asc' | 'desc';
   }): Promise<CommonFileList> {
-    const data = await this.#request<CommonFileList>('commonFiles.getCommonFiles', {
+    const method = 'commonFiles.getCommonFiles';
+    const data = await this.#request(method, {
       query: {
         index: opts.index ?? 0,
         limit: opts.limit ?? COMMON_FILES_PAGE_SIZE,
@@ -715,7 +738,7 @@ export class AulaClient {
         orderDirection: opts.orderDirection ?? 'desc',
       },
     });
-    return data ?? { commonFiles: [], totalAmount: 0 };
+    return expectObject<CommonFileList>(method, data);
   }
 
   /**
@@ -723,12 +746,53 @@ export class AulaClient {
    * refuses anything that is not named like a getter, and still GET-only —
    * see {@link assertReadOnly}.
    */
-  async getRaw<T = unknown>(
+  async getRaw(
     method: string,
     query: Record<string, QueryValue | undefined> = {},
-  ): Promise<T> {
-    return this.#request<T>(method, { query, allowAnyGetter: true });
+  ): Promise<unknown> {
+    return this.#request(method, { query, allowAnyGetter: true });
   }
+}
+
+type ParsedEnvelope = {
+  status: { code: number; message?: string };
+  data: unknown;
+};
+
+function parseEnvelope(method: string, value: unknown): ParsedEnvelope {
+  if (!isRecord(value) || !isRecord(value.status) || typeof value.status.code !== 'number') {
+    throw new AulaApiError(method, -1, `Malformed JSON envelope from ${method}.`);
+  }
+  const message = typeof value.status.message === 'string' ? value.status.message : undefined;
+  return {
+    status: { code: value.status.code, ...(message ? { message } : {}) },
+    data: value.data,
+  };
+}
+
+/**
+ * The wire payload is outside TypeScript's trust boundary. These two helpers
+ * keep the unavoidable assertions in one place and at least prove the top-level
+ * collection shape before endpoint code can use it.
+ */
+function expectObject<T extends object>(method: string, value: unknown): T {
+  if (!isRecord(value)) throw new AulaApiError(method, -1, `Malformed object payload from ${method}.`);
+  return value as T;
+}
+
+function expectArray<T>(method: string, value: unknown): T[] {
+  if (!Array.isArray(value)) throw new AulaApiError(method, -1, `Malformed list payload from ${method}.`);
+  return value as T[];
+}
+
+function defaultApiVersion(): number {
+  const raw = process.env.AULA_API_VERSION;
+  if (raw === undefined) return FALLBACK_API_VERSION;
+  const version = parseInteger(raw, { min: 1, max: 99 });
+  if (version === undefined) {
+    throw new Error(`AULA_API_VERSION must be an integer from 1 to 99 (got "${raw}").`);
+  }
+  return version;
 }
 
 /**

@@ -27,6 +27,7 @@ import {
 } from './state.ts';
 import type { RankedBrief, Relevance } from './types.ts';
 import { validatePage } from './validate.ts';
+import { errorMessage } from '../validation.ts';
 
 export type BriefOptions = {
   days?: number;
@@ -93,7 +94,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
         notes.push(`Udtræk afvist: ${problem}`);
       }
     } catch (err) {
-      notes.push(`Modellen kunne ikke køre (${(err as Error).message}) — kun reglerne blev brugt.`);
+      notes.push(`Modellen kunne ikke køre (${errorMessage(err)}) — kun reglerne blev brugt.`);
     }
   }
 
@@ -123,7 +124,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
         );
       }
     } catch (err) {
-      notes.push(`Layout fejlede: ${(err as Error).message}`);
+      notes.push(`Layout fejlede: ${errorMessage(err)}`);
     }
   }
 
@@ -132,7 +133,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
       topline,
       summaries,
       conversations,
-      note: opts.useModel === false ? undefined : 'reservelayout',
+      ...(opts.useModel === false ? {} : { note: 'reservelayout' }),
     });
     // The fallback is held to the same standard as the model's output.
     for (const v of validatePage(body, brief)) {

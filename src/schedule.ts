@@ -227,6 +227,8 @@ function retryNote(at: At): string {
 
 function installDarwin(at: At): number {
   const bun = Bun.which('bun');
+  const claude = Bun.which('claude');
+  const node = Bun.which('node');
   const uid = process.getuid?.();
   if (!bun || uid === undefined) {
     console.error(bun ? 'Could not determine the user id.' : 'Could not find bun on PATH.');
@@ -235,7 +237,10 @@ function installDarwin(at: At): number {
   const plist = plistPath();
   const logPath = join(BRIEF_DIR, 'launchd.log');
   const env = Object.fromEntries(
-    BAKED_ENV.flatMap((name) => (process.env[name] ? [[name, process.env[name] as string]] : [])),
+    BAKED_ENV.flatMap((name) => {
+      const value = process.env[name];
+      return value ? [[name, value]] : [];
+    }),
   );
   mkdirSync(dirname(plist), { recursive: true });
   mkdirSync(BRIEF_DIR, { recursive: true });
@@ -247,8 +252,8 @@ function installDarwin(at: At): number {
       logPath,
       path: agentPath({
         bun,
-        ...(Bun.which('claude') ? { claude: Bun.which('claude') as string } : {}),
-        ...(Bun.which('node') ? { node: Bun.which('node') as string } : {}),
+        ...(claude ? { claude } : {}),
+        ...(node ? { node } : {}),
       }),
       env,
     }),

@@ -11,6 +11,7 @@
  */
 
 import { localIsoDate } from '../integrations/types.ts';
+import { isValidCalendarDate } from '../validation.ts';
 import type { SignalKind, Urgency } from './types.ts';
 
 /**
@@ -113,10 +114,6 @@ function inferYear(day: number, month: number, today: Date): number {
   return daysAgo > 21 ? today.getFullYear() + 1 : today.getFullYear();
 }
 
-function isValidDay(day: number, month: number): boolean {
-  return day >= 1 && day <= 31 && month >= 1 && month <= 12;
-}
-
 /** The next date on or after `today` falling on the given weekday. */
 function nextWeekday(weekday: number, today: Date): Date {
   const result = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -144,8 +141,9 @@ export function extractDates(sentence: string, today: Date): string[] {
   for (const match of sentence.matchAll(named)) {
     const day = Number(match[1]);
     const month = MONTHS[(match[2] ?? "").toLowerCase()];
-    if (!month || !isValidDay(day, month)) continue;
+    if (!month) continue;
     const year = match[3] ? Number(match[3]) : inferYear(day, month, today);
+    if (!isValidCalendarDate(year, month, day)) continue;
     push(new Date(year, month - 1, day));
   }
 
@@ -154,7 +152,6 @@ export function extractDates(sentence: string, today: Date): string[] {
   for (const match of sentence.matchAll(slash)) {
     const day = Number(match[1]);
     const month = Number(match[2]);
-    if (!isValidDay(day, month)) continue;
     let year: number;
     if (match[3]) {
       const raw = Number(match[3]);
@@ -162,6 +159,7 @@ export function extractDates(sentence: string, today: Date): string[] {
     } else {
       year = inferYear(day, month, today);
     }
+    if (!isValidCalendarDate(year, month, day)) continue;
     push(new Date(year, month - 1, day));
   }
 
@@ -172,9 +170,10 @@ export function extractDates(sentence: string, today: Date): string[] {
   for (const match of sentence.matchAll(dotted)) {
     const day = Number(match[1]);
     const month = Number(match[2]);
-    if (!isValidDay(day, month) || month > 12) continue;
     if (/^0\d$/.test(match[2] ?? "")) continue; // 17.00, 17.05 — a clock time
-    push(new Date(inferYear(day, month, today), month - 1, day));
+    const year = inferYear(day, month, today);
+    if (!isValidCalendarDate(year, month, day)) continue;
+    push(new Date(year, month - 1, day));
   }
 
   // "i dag", "i morgen", "på mandag"

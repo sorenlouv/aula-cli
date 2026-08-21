@@ -16,6 +16,16 @@
  */
 
 import { decodeEntities, htmlToText } from '../html.ts';
+import {
+  errorMessage,
+  expectType,
+  isArrayOf,
+  isNumber,
+  isOptional,
+  isRecord,
+  isString,
+  isStringOrNumber,
+} from '../validation.ts';
 import { type WidgetTokens, widgetFetch } from '../widgets.ts';
 import {
   BROWSER_USER_AGENT,
@@ -32,19 +42,51 @@ const CHILDREN_URL = `${BASE}/Aula/GetChildren`;
 const UGEPLAN_URL = `${BASE}/Calendar/CalendarGetWeekplanEvents`;
 const LEKTIER_URL = `${BASE}/AulaHuskeliste/GetWeekplanEvents`;
 
-type AuthResponse = { loginId?: string | number; childName?: string; schoolName?: string };
+type AuthResponse = { loginId?: string | number; childName?: string };
 type ChildrenResponse = { Children?: Array<{ Id: number; Login: string; Name?: string }> };
 
 type SpEvent = {
   StartTime?: string;
   StartTimeISO?: string;
-  EndTime?: string;
   CoursesDisplay?: string;
   ActivitiesDisplay?: string;
   ChapterTitle?: string;
   Title?: string;
   Description?: string;
 };
+
+function isAuthResponse(value: unknown): value is AuthResponse {
+  return isRecord(value) &&
+    isOptional(value.loginId, isStringOrNumber) &&
+    isOptional(value.childName, isString);
+}
+
+function isChildRow(value: unknown): value is NonNullable<ChildrenResponse['Children']>[number] {
+  return isRecord(value) &&
+    isNumber(value.Id) &&
+    isString(value.Login) &&
+    isOptional(value.Name, isString);
+}
+
+function isChildrenResponse(value: unknown): value is ChildrenResponse {
+  return isRecord(value) && isOptional(value.Children, (children): children is NonNullable<ChildrenResponse['Children']> =>
+    isArrayOf(children, isChildRow));
+}
+
+function isSpEvent(value: unknown): value is SpEvent {
+  return isRecord(value) &&
+    isOptional(value.StartTime, isString) &&
+    isOptional(value.StartTimeISO, isString) &&
+    isOptional(value.CoursesDisplay, isString) &&
+    isOptional(value.ActivitiesDisplay, isString) &&
+    isOptional(value.ChapterTitle, isString) &&
+    isOptional(value.Title, isString) &&
+    isOptional(value.Description, isString);
+}
+
+function decodeEvents(value: unknown): SpEvent[] {
+  return expectType(value, (events): events is SpEvent[] => isArrayOf(events, isSpEvent), 'an event list');
+}
 
 /**
  * `date` is `YYYY-MM-DDT00:00:00.000Z`. A plain `YYYY-MM-DD` is accepted and
@@ -132,12 +174,12 @@ export async function getWeekPlan(
     };
     try {
       const auth = await tokens.withToken(widgetId, async (token) => {
-        return widgetFetch<AuthResponse>({
+        return widgetFetch({
           url: AUTH_URL,
           method: 'POST',
           widgetId,
           headers: headers({ ...base, token }),
-        });
+        }, (value) => expectType(value, isAuthResponse, 'a SkolePortal authentication response'));
       });
       if (auth?.loginId === undefined || auth.loginId === null) {
         warnings.push(`${child.name}: SkolePortal authenticated but returned no loginId.`);
@@ -146,11 +188,11 @@ export async function getWeekPlan(
 
       const events = await tokens.withToken(widgetId, async (token) => {
         const url = `${UGEPLAN_URL}?loginId=${encodeURIComponent(String(auth.loginId))}&date=${encodeURIComponent(date)}`;
-        return widgetFetch<SpEvent[]>({
+        return widgetFetch({
           url,
           widgetId,
           headers: headers({ ...base, token }),
-        });
+        }, decodeEvents);
       });
 
       const childName = decodeEntities(auth.childName ?? '').trim() || child.name;
@@ -158,7 +200,7 @@ export async function getWeekPlan(
         items.push(toItem(event, childName, 'event'));
       }
     } catch (err) {
-      warnings.push(`${child.name}: ${(err as Error).message}`);
+      warnings.push(`${child.name}: ${errorMessage(err)}`);
     }
   }
 
@@ -218,20 +260,20 @@ export async function getLektier(
   };
 
   await tokens.withToken(widgetId, async (token) => {
-    return widgetFetch<AuthResponse>({
+    return widgetFetch({
       url: AUTH_URL,
       method: 'POST',
       widgetId,
       headers: headers({ ...base, token }),
-    });
+    }, (value) => expectType(value, isAuthResponse, 'a SkolePortal authentication response'));
   });
 
   const roster = await tokens.withToken(widgetId, async (token) => {
-    return widgetFetch<ChildrenResponse>({
+    return widgetFetch({
       url: CHILDREN_URL,
       widgetId,
       headers: headers({ ...base, token }),
-    });
+    }, (value) => expectType(value, isChildrenResponse, 'a SkolePortal child roster'));
   });
 
   const rowByLogin = new Map((roster?.Children ?? []).map((row) => [row.Login, row]));
@@ -251,18 +293,18 @@ export async function getLektier(
         const url =
           `${LEKTIER_URL}?loginId=${encodeURIComponent(String(row.Id))}` +
           `&date=${encodeURIComponent(date)}&activityFilter=null`;
-        return widgetFetch<SpEvent[]>({
+        return widgetFetch({
           url,
           widgetId,
           headers: headers({ ...base, token, child: child.userId }),
-        });
+        }, decodeEvents);
       });
       const childName = decodeEntities(row.Name ?? '').trim() || child.name;
       for (const event of Array.isArray(events) ? events : []) {
         items.push(toItem(event, childName, 'lektier'));
       }
     } catch (err) {
-      warnings.push(`${child.name}: ${(err as Error).message}`);
+      warnings.push(`${child.name}: ${errorMessage(err)}`);
     }
   }
 

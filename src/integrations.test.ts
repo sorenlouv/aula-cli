@@ -18,7 +18,7 @@ import * as meebook from './integrations/meebook.ts';
 import * as minUddannelse from './integrations/min-uddannelse.ts';
 import * as systematic from './integrations/systematic.ts';
 import type { IntegrationContext } from './integrations/types.ts';
-import { type DetectedWidget, WidgetTokens } from './widgets.ts';
+import { type DetectedWidget, WidgetError, WidgetTokens } from './widgets.ts';
 
 type Call = { url: string; method: string; headers: Record<string, string>; body?: unknown };
 
@@ -146,7 +146,7 @@ test('a missing MitID username is warned about rather than failing silently', as
   // Through the dispatcher, because that is where the warning now lives — on
   // the registry's needsMitidUsername flag, where an adapter cannot skip it.
   await withVendor(
-    () => [],
+    (url) => url.includes('/Aula/GetChildren') ? { Children: [] } : url.includes('/Aula/Authenticate') ? {} : [],
     async (_calls, tokens) => {
       const plan = await readWidget('0004', { ...CTX, sessionIdIsFallback: true }, tokens);
       assert.match(plan.warnings?.join('\n') ?? '', /MitID username/);
@@ -242,6 +242,22 @@ test('MinUddannelse takes numeric child ids and the Aula guardian id', async () 
         title: 'Aflever novelle',
         content: 'Noveller',
       });
+    },
+  );
+});
+
+test('a malformed vendor success response fails instead of looking like an empty plan', async () => {
+  await withVendor(
+    () => ({ opgaver: [{ title: 42 }] }),
+    async (_calls, tokens) => {
+      await assert.rejects(
+        () => minUddannelse.getOpgaver(CTX, tokens, '0030'),
+        (error: unknown) => {
+          assert.ok(error instanceof WidgetError);
+          assert.match(error.message, /unexpected JSON shape/i);
+          return true;
+        },
+      );
     },
   );
 });

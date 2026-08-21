@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseArgs } from 'node:util';
 import { downloadAttachment, listAttachments, type ResolvedAttachment } from './attachments.ts';
+import { isCliCommand, parseCommandLine } from './cli-options.ts';
 import {
   type BirthdayContact,
   formatDate,
@@ -65,6 +65,7 @@ import { runSchedule } from './schedule.ts';
 import { SUPPORTED_WIDGET_IDS, type WeekPlan } from './integrations/index.ts';
 import { isoDate, localIsoDate } from './integrations/types.ts';
 import type { CommonFile, Contact, ThreadDetail } from './types.ts';
+import { errorMessage, parseInteger, parseIsoDateParts } from './validation.ts';
 import type { Capability } from './widgets.ts';
 
 const USAGE = `
@@ -157,85 +158,36 @@ async function main(): Promise<number> {
     console.log(USAGE);
     return 0;
   }
+  if (!isCliCommand(command)) throw new UsageError(`Unknown command "${command}". Run \`aula --help\`.`);
 
-  // The thunk keeps parseArgs' inference over the options literal; a wrapper
-  // taking the config as a parameter would widen `values` to string | boolean.
-  const parse = () =>
-    parseArgs({
-      args: argv.slice(1),
-      allowPositionals: true,
-      strict: true,
-      options: {
-        text: { type: 'boolean', default: false },
-        full: { type: 'boolean', default: false },
-        unread: { type: 'boolean', default: false },
-        important: { type: 'boolean', default: false },
-        next: { type: 'boolean', default: false },
-        limit: { type: 'string' },
-        since: { type: 'string' },
-        child: { type: 'string' },
-        days: { type: 'string' },
-        page: { type: 'string' },
-        week: { type: 'string' },
-        widget: { type: 'string' },
-        group: { type: 'string' },
-        role: { type: 'string' },
-        from: { type: 'string' },
-        to: { type: 'string' },
-        out: { type: 'string' },
-        // new / open / publish / schedule
-        'no-llm': { type: 'boolean', default: false },
-        'no-deploy': { type: 'boolean', default: false },
-        'no-open': { type: 'boolean', default: false },
-        'catch-up': { type: 'boolean', default: false },
-        web: { type: 'boolean', default: false },
-        off: { type: 'boolean', default: false },
-        remove: { type: 'boolean', default: false },
-        at: { type: 'string' },
-        explain: { type: 'boolean', default: false },
-        pdf: { type: 'boolean', default: false },
-        png: { type: 'boolean', default: false },
-        // caching
-        'no-cache': { type: 'boolean', default: false },
-        'cache-ttl': { type: 'string' },
-        // login
-        username: { type: 'string' },
-        method: { type: 'string' },
-        debug: { type: 'boolean', default: false },
-      },
-    });
-
-  let parsed: ReturnType<typeof parse>;
+  let parsed: ReturnType<typeof parseCommandLine>;
   try {
-    parsed = parse();
+    parsed = parseCommandLine(command, argv.slice(1));
   } catch (err) {
-    throw new UsageError(`${(err as Error).message}\nRun \`aula --help\` for the commands and options.`);
+    throw new UsageError(`${errorMessage(err)}\nRun \`aula --help\` for the commands and options.`);
   }
   const { values, positionals } = parsed;
 
   const asText = values.text === true;
-  const limit = values.limit ? Number(values.limit) : undefined;
-  const days = values.days ? Number(values.days) : 14;
+  const limit = optionalInteger(values.limit, '--limit', { min: 1 });
+  const days = optionalInteger(values.days, '--days', { min: 1, max: 50 }) ?? 14;
+  const page = optionalInteger(values.page, '--page', { min: 0 });
+  const groupId = optionalInteger(values.group, '--group', { min: 1 });
+  const fromDate = optionalIsoDate(values.from, '--from');
+  const toDate = optionalIsoDate(values.to, '--to');
+  const contactRole = parseContactRole(values.role);
+  const threadId = command === 'thread' || command === 'attachments' || command === 'attachment'
+    ? requireId(positionals[0], `${command} <threadId>`)
+    : undefined;
+  const attachmentIndex = command === 'attachment'
+    ? requireInteger(positionals[1], 'attachment index', { min: 0 })
+    : undefined;
+  if (fromDate && toDate && fromDate > toDate) {
+    throw new UsageError(`--from (${fromDate}) must not be after --to (${toDate}).`);
+  }
   const since = values.since ? parseSince(values.since) : undefined;
   const week = resolveWeek(values.week, values.next === true);
   const ttlMs = parseCacheTtl(values['cache-ttl']);
-
-  // A flag that is silently ignored produces a confident wrong answer, which is
-  // the failure mode this project is least able to detect. `digest --child`
-  // used to do exactly that.
-  if (values.child !== undefined && !CHILD_AWARE.has(command)) {
-    throw new UsageError(
-      `"${command}" cannot narrow to one child, so --child would have been ignored.\n` +
-        `Commands that honour it: ${[...CHILD_AWARE].sort().join(', ')}.`,
-    );
-  }
-  // Same principle for --page: `messages --page 2` would quietly return page 0.
-  if (values.page !== undefined && !PAGE_AWARE.has(command)) {
-    throw new UsageError(
-      `"${command}" is not paginated, so --page would have been ignored.\n` +
-        `Commands that honour it: ${[...PAGE_AWARE].sort().join(', ')}.`,
-    );
-  }
 
   if (command === 'cache') return runCache(positionals, asText, ttlMs);
   if (command === 'open') return runOpen(values.web === true);
@@ -289,10 +241,10 @@ async function main(): Promise<number> {
       const family = await resolveFamily(client);
       const threads = await collectThreads(client, {
         limit: limit ?? 20,
-        since,
         unreadOnly: values.unread === true,
-        child: values.child,
         family,
+        ...(since ? { since } : {}),
+        ...(values.child ? { child: values.child } : {}),
       });
       const result = values.full
         ? await withFullMessages(client, threads)
@@ -301,12 +253,8 @@ async function main(): Promise<number> {
     }
 
     case 'thread': {
-      const id = Number(positionals[0]);
-      if (!Number.isFinite(id)) {
-        console.error('Usage: thread <threadId>');
-        return 1;
-      }
-      const detail = await client.getThread(id, values.page ? Number(values.page) : 0);
+      if (threadId === undefined) throw new Error('thread id was not validated');
+      const detail = await client.getThread(threadId, page ?? 0);
       const result = {
         id: detail.id,
         subject: detail.subject ?? '(no subject)',
@@ -324,9 +272,9 @@ async function main(): Promise<number> {
       const family = await resolveFamily(client);
       const posts = await collectPosts(client, family, {
         limit: limit ?? 20,
-        since,
         important: values.important === true,
-        child: values.child,
+        ...(since ? { since } : {}),
+        ...(values.child ? { child: values.child } : {}),
       });
       return emit(posts, asText, renderPosts);
     }
@@ -335,15 +283,18 @@ async function main(): Promise<number> {
       const family = await resolveFamily(client);
       const albums = await collectAlbums(client, family, {
         limit: limit ?? 20,
-        since,
-        child: values.child,
+        ...(since ? { since } : {}),
+        ...(values.child ? { child: values.child } : {}),
       });
       return emit(albums, asText, renderAlbums);
     }
 
     case 'calendar': {
       const family = await resolveFamily(client);
-      const events = await loadCalendar(client, family, { days, child: values.child });
+      const events = await loadCalendar(client, family, {
+        days,
+        ...(values.child ? { child: values.child } : {}),
+      });
       return emit(events, asText, renderCalendar);
     }
 
@@ -373,8 +324,8 @@ async function main(): Promise<number> {
     case 'pickup-times': {
       const family = await resolveFamily(client);
       const children = selectChildren(family, values.child);
-      const from = values.from ?? isoDate(startOfDay(new Date()));
-      const to = values.to ?? isoDate(new Date(Date.now() + days * 86_400_000));
+      const from = fromDate ?? isoDate(startOfDay(new Date()));
+      const to = toDate ?? isoDate(new Date(Date.now() + days * 86_400_000));
       const templates = await client.getPresenceTemplates({
         childInstitutionProfileIds: children.map((c) => c.id),
         fromDate: from,
@@ -402,9 +353,9 @@ async function main(): Promise<number> {
     case 'contacts': {
       const family = await resolveFamily(client);
       const contacts = await loadContacts(client, family, {
-        child: values.child,
-        groupId: values.group ? Number(values.group) : undefined,
-        role: values.role ?? 'child',
+        role: contactRole,
+        ...(values.child ? { child: values.child } : {}),
+        ...(groupId !== undefined ? { groupId } : {}),
       });
       return emit(contacts, asText, renderContacts);
     }
@@ -412,9 +363,9 @@ async function main(): Promise<number> {
     case 'birthdays': {
       const family = await resolveFamily(client);
       const contacts = await loadContacts(client, family, {
-        child: values.child,
-        groupId: values.group ? Number(values.group) : undefined,
         role: 'child',
+        ...(values.child ? { child: values.child } : {}),
+        ...(groupId !== undefined ? { groupId } : {}),
       });
       const result = upcomingBirthdays(contacts, limit);
       return emit(result, asText, (rows) =>
@@ -431,8 +382,8 @@ async function main(): Promise<number> {
     }
 
     case 'attachments': {
-      const id = requireId(positionals[0], 'attachments <threadId>');
-      const detail = await client.getThread(id, values.page ? Number(values.page) : 0);
+      if (threadId === undefined) throw new Error('thread id was not validated');
+      const detail = await client.getThread(threadId, page ?? 0);
       const found = threadAttachments(detail);
       return emit(found, asText, (rows) =>
         rows.length === 0
@@ -444,23 +395,24 @@ async function main(): Promise<number> {
     }
 
     case 'attachment': {
-      const id = requireId(positionals[0], 'attachment <threadId> <index>');
-      const index = Number(positionals[1] ?? 0);
-      const detail = await client.getThread(id);
+      if (threadId === undefined || attachmentIndex === undefined) {
+        throw new Error('attachment positionals were not validated');
+      }
+      const detail = await client.getThread(threadId);
       const found = threadAttachments(detail);
-      const wanted = found[index];
+      const wanted = found[attachmentIndex];
       if (!wanted) {
         throw new UsageError(
-          `Thread ${id} has ${found.length} attachment(s); there is no index ${index}.` +
+          `Thread ${threadId} has ${found.length} attachment(s); there is no index ${attachmentIndex}.` +
             (found.length ? `\n${found.map((a) => `  [${a.index}] ${a.name}`).join('\n')}` : ''),
         );
       }
       if (wanted.kind === 'link') {
-        throw new UsageError(`Attachment ${index} is a link, not a file: ${wanted.url}`);
+        throw new UsageError(`Attachment ${attachmentIndex} is a link, not a file: ${wanted.url}`);
       }
       const saved = await downloadAttachment({
         attachment: wanted,
-        prefix: `${id}-${index}`,
+        prefix: `${threadId}-${attachmentIndex}`,
         ...(values.out ? { out: values.out } : {}),
       });
       return emit(saved, asText, (r) => `Saved ${r.filename} (${r.bytes} bytes) to ${r.path}`);
@@ -523,16 +475,14 @@ async function main(): Promise<number> {
     case 'lektier':
     case 'huskelisten': {
       const family = await resolveFamily(client);
-      // The case labels are exactly the Capability union, but `command` came
-      // from argv and TypeScript cannot see that.
-      const capability = command satisfies Capability as Capability;
+      const capability: Capability = command;
       const plans = await readPlans(client, family, {
         capability,
         isoWeek: week,
-        child: values.child,
-        widget: values.widget,
-        ...(values.from ? { fromDate: values.from } : {}),
-        ...(values.to ? { toDate: values.to } : {}),
+        ...(values.child ? { child: values.child } : {}),
+        ...(values.widget ? { widget: values.widget } : {}),
+        ...(fromDate ? { fromDate } : {}),
+        ...(toDate ? { toDate } : {}),
       });
       return emit(plans, asText, renderPlans);
     }
@@ -541,9 +491,9 @@ async function main(): Promise<number> {
       const family = await resolveFamily(client);
       const plans = await readManyPlans(client, family, ['opgaver', 'lektier', 'huskelisten'], {
         isoWeek: week,
-        child: values.child,
-        ...(values.from ? { fromDate: values.from } : {}),
-        ...(values.to ? { toDate: values.to } : {}),
+        ...(values.child ? { child: values.child } : {}),
+        ...(fromDate ? { fromDate } : {}),
+        ...(toDate ? { toDate } : {}),
       });
       return emit(plans, asText, renderPlans);
     }
@@ -558,7 +508,12 @@ async function main(): Promise<number> {
     }
 
     case 'digest': {
-      const digest = await buildDigest(client, { days, limit, isoWeek: week, child: values.child });
+      const digest = await buildDigest(client, {
+        days,
+        isoWeek: week,
+        ...(limit !== undefined ? { limit } : {}),
+        ...(values.child ? { child: values.child } : {}),
+      });
       return emit(digest, asText, renderDigest);
     }
 
@@ -607,35 +562,6 @@ async function main(): Promise<number> {
 }
 
 // ------------------------------------------------------------------ commands
-
-/**
- * Commands that genuinely narrow on `--child`. Everything else refuses the flag
- * rather than ignoring it — see the check in `main`. `commonfiles` is the
- * awkward one: Fælles Filer filters on institution codes, so it can be narrowed
- * to a *school* but not to a child, and pretending otherwise would be the same
- * lie in a different place.
- */
-const CHILD_AWARE = new Set([
-  'messages',
-  'posts',
-  'galleries',
-  'calendar',
-  'presence',
-  'pickup-times',
-  'groups',
-  'contacts',
-  'birthdays',
-  'digest',
-  'ugeplan',
-  'ugebrev',
-  'opgaver',
-  'lektier',
-  'huskelisten',
-  'homework',
-]);
-
-/** The only commands that read `--page` — see the refusal in `main`. */
-const PAGE_AWARE = new Set(['thread', 'attachments']);
 
 function runCache(positionals: string[], asText: boolean, ttlMs: number): number {
   const sub = positionals[0] ?? 'status';
@@ -929,9 +855,42 @@ function threadAttachments(detail: ThreadDetail): ThreadAttachment[] {
 // ------------------------------------------------------------------- parsing
 
 function requireId(raw: string | undefined, usage: string): number {
-  const id = Number(raw);
-  if (!Number.isFinite(id)) throw new UsageError(`Usage: ${usage}`);
+  const id = parseInteger(raw, { min: 1 });
+  if (id === undefined) throw new UsageError(`Usage: ${usage} — the id must be a positive integer.`);
   return id;
+}
+
+function optionalInteger(
+  raw: string | undefined,
+  name: string,
+  range: { min: number; max?: number },
+): number | undefined {
+  if (raw === undefined) return undefined;
+  return requireInteger(raw, name, range);
+}
+
+function requireInteger(
+  raw: string | undefined,
+  name: string,
+  range: { min: number; max?: number },
+): number {
+  const value = parseInteger(raw, range);
+  if (value === undefined) {
+    const upper = range.max === undefined ? '' : ` and at most ${range.max}`;
+    throw new UsageError(`${name} must be an integer of at least ${range.min}${upper} (got "${raw ?? ''}").`);
+  }
+  return value;
+}
+
+function optionalIsoDate(raw: string | undefined, name: string): string | undefined {
+  if (raw === undefined) return undefined;
+  if (!parseIsoDateParts(raw)) throw new UsageError(`${name} must be a real date in YYYY-MM-DD form (got "${raw}").`);
+  return raw;
+}
+
+function parseContactRole(raw: string | undefined): 'child' | 'guardian' {
+  if (raw === undefined || raw === 'child' || raw === 'guardian') return raw ?? 'child';
+  throw new UsageError(`--role must be "child" or "guardian" (got "${raw}").`);
 }
 
 // ---------------------------------------------------------------- rendering
@@ -1273,7 +1232,7 @@ try {
     console.error(`Aula API error: ${err.message}`);
     process.exitCode = 3;
   } else {
-    console.error((err as Error)?.stack ?? String(err));
+    console.error(err instanceof Error ? (err.stack ?? err.message) : String(err));
     process.exitCode = 1;
   }
 } finally {

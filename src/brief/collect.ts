@@ -77,8 +77,8 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
   const family = await resolveFamily(client);
 
   const [digest, childGroups, albums, notifications] = await Promise.all([
-    buildDigest(client, { days: opts.days, isoWeek: opts.isoWeek, family }),
-    loadGroups(client, family.children).catch(() => [] as ChildGroups[]),
+    buildDigest(client, { days: opts.days, isoWeek: opts.isoWeek, family, now }),
+    loadGroups(client, family.children).catch((): ChildGroups[] => []),
     collectAlbums(client, family, {
       limit: 12,
       since: new Date(now.getTime() - opts.days * 86_400_000),

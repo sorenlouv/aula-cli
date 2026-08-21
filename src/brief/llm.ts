@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import { buildDateSupport, dueAtSupported, unsupportedDateClaims } from './dates.ts';
 import { BRIEF_DIR } from './state.ts';
 import type { BriefInput, Relevance, Signal, SignalKind, SourceItem, Urgency } from './types.ts';
+import { isRecord, parseIsoDateParts } from '../validation.ts';
 
 const CACHE_DIR = join(BRIEF_DIR, 'cache');
 /**
@@ -33,6 +34,18 @@ const KINDS: ReadonlySet<string> = new Set<SignalKind>([
 ]);
 const URGENCIES: ReadonlySet<string> = new Set<Urgency>(['now', 'week', 'later', 'fyi']);
 const RELEVANCES: ReadonlySet<string> = new Set<Relevance>(['hide', 'low', 'normal', 'high']);
+
+function isSignalKind(value: unknown): value is SignalKind {
+  return typeof value === 'string' && KINDS.has(value);
+}
+
+function isUrgency(value: unknown): value is Urgency {
+  return typeof value === 'string' && URGENCIES.has(value);
+}
+
+function isRelevance(value: unknown): value is Relevance {
+  return typeof value === 'string' && RELEVANCES.has(value);
+}
 
 /**
  * Which model (and how hard it thinks) is the quality/speed dial for the whole
@@ -148,19 +161,19 @@ export type ClaudeReply = {
  */
 export function parseClaudeJson(stdout: string): ClaudeReply | null {
   try {
-    const parsed = JSON.parse(stdout.trim().split('\n').at(-1) ?? '') as {
-      type?: unknown;
-      result?: unknown;
-      is_error?: unknown;
-      permission_denials?: { tool_name?: unknown }[];
-    };
+    const parsed: unknown = JSON.parse(stdout.trim().split('\n').at(-1) ?? '');
+    if (!isRecord(parsed)) return null;
     if (parsed.type !== 'result') return null;
+    const denials = Array.isArray(parsed.permission_denials)
+      ? parsed.permission_denials
+          .filter(isRecord)
+          .map((denial) => denial.tool_name)
+          .filter((name): name is string => typeof name === 'string')
+      : [];
     return {
       text: typeof parsed.result === 'string' ? parsed.result : '',
       isError: parsed.is_error === true,
-      denials: (parsed.permission_denials ?? [])
-        .map((d) => d?.tool_name)
-        .filter((name): name is string => typeof name === 'string'),
+      denials,
     };
   } catch {
     return null;
@@ -281,11 +294,11 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
   const firstNames = new Set(input.family.children.map((c) => c.firstName));
   const dates = buildDateSupport(input);
 
-  const root = (parsed ?? {}) as Record<string, unknown>;
+  const root = isRecord(parsed) ? parsed : {};
   const rawSignals = Array.isArray(root.signals) ? root.signals : [];
 
   for (const [index, entry] of rawSignals.entries()) {
-    const row = (entry ?? {}) as Record<string, unknown>;
+    const row = isRecord(entry) ? entry : {};
     const sourceKey = typeof row.sourceKey === 'string' ? row.sourceKey : '';
     const source = byKey.get(sourceKey);
     if (!source) {
@@ -307,13 +320,12 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
       continue;
     }
 
-    const kind = typeof row.kind === 'string' && KINDS.has(row.kind) ? (row.kind as SignalKind) : 'info';
-    const urgency =
-      typeof row.urgency === 'string' && URGENCIES.has(row.urgency) ? (row.urgency as Urgency) : 'later';
+    const kind = isSignalKind(row.kind) ? row.kind : 'info';
+    const urgency = isUrgency(row.urgency) ? row.urgency : 'later';
 
     let dueAt: string | null = null;
     if (typeof row.dueAt === 'string' && row.dueAt) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(row.dueAt) || !Number.isFinite(Date.parse(row.dueAt))) {
+      if (!parseIsoDateParts(row.dueAt)) {
         problems.push(`signals[${index}] ("${title}"): dueAt "${row.dueAt}" er ikke en dato`);
         continue;
       }
@@ -353,7 +365,7 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
   }
 
   const summaries: Record<string, string> = {};
-  const rawSummaries = (root.childSummaries ?? {}) as Record<string, unknown>;
+  const rawSummaries = isRecord(root.childSummaries) ? root.childSummaries : {};
   for (const [name, value] of Object.entries(rawSummaries)) {
     if (firstNames.has(name) && typeof value === 'string' && value.trim()) {
       const invented = unsupportedDateClaims(value, dates);
@@ -370,7 +382,7 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
   // exchange. Summarising a single message would put a second description of
   // one paragraph above the paragraph itself.
   const conversationSummaries: Record<string, string> = {};
-  const rawConversations = (root.conversationSummaries ?? {}) as Record<string, unknown>;
+  const rawConversations = isRecord(root.conversationSummaries) ? root.conversationSummaries : {};
   for (const [key, value] of Object.entries(rawConversations)) {
     if (typeof value !== 'string' || !value.trim()) continue;
     const source = byKey.get(key);
@@ -411,17 +423,14 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
   // through nothing else; a few missing keys are not, since one more model
   // call is a high price for a handful of defaults.
   const relevance: Record<string, Relevance> = {};
-  const rawRelevance =
-    typeof root.relevance === 'object' && root.relevance !== null && !Array.isArray(root.relevance)
-      ? (root.relevance as Record<string, unknown>)
-      : null;
+  const rawRelevance = isRecord(root.relevance) ? root.relevance : null;
   if (rawRelevance) {
     for (const [key, value] of Object.entries(rawRelevance)) {
       if (!byKey.has(key)) {
         problems.push(`relevance: ukendt sourceKey "${key}"`);
         continue;
       }
-      relevance[key] = typeof value === 'string' && RELEVANCES.has(value) ? (value as Relevance) : 'normal';
+      relevance[key] = isRelevance(value) ? value : 'normal';
     }
   } else if (input.items.length > 0) {
     problems.push('relevance: mangler — én vurdering pr. kilde');

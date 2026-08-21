@@ -185,6 +185,12 @@ describe('validateExtraction', () => {
     expect(result.problems[0] ?? "").toContain('ikke en dato');
   });
 
+  test('drops an impossible ISO date instead of letting JavaScript roll it over', () => {
+    const result = validateExtraction(INPUT, { signals: [{ ...good, dueAt: '2026-02-31' }] });
+    expect(result.signals).toHaveLength(0);
+    expect(result.problems[0] ?? '').toContain('ikke en dato');
+  });
+
   test('ignores a child name that is not one of ours', () => {
     const result = validateExtraction(INPUT, { signals: [{ ...good, child: 'Emil' }] });
     expect(result.signals[0]?.child).toBeNull();

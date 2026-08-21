@@ -9,6 +9,15 @@
  */
 
 import { htmlToText } from '../html.ts';
+import {
+  errorMessage,
+  expectType,
+  isArrayOf,
+  isOptional,
+  isRecord,
+  isString,
+  isStringOrNumber,
+} from '../validation.ts';
 import { type WidgetTokens, widgetFetch } from '../widgets.ts';
 import type { IntegrationContext, WeekPlan, WeekPlanItem } from './types.ts';
 
@@ -17,7 +26,6 @@ const EASYIQ_URL = 'https://api.easyiqcloud.dk/api/aula/weekplaninfo';
 type EasyIqEvent = {
   /** `YYYY/MM/DD HH:mm`, not ISO. */
   start?: string;
-  end?: string;
   /** 5 marks a note rather than a timetabled event. */
   itemType?: number | string;
   title?: string;
@@ -25,6 +33,22 @@ type EasyIqEvent = {
   ownername?: string;
   description?: string;
 };
+
+type EasyIqResponse = { Events?: EasyIqEvent[] };
+
+function isEasyIqEvent(value: unknown): value is EasyIqEvent {
+  return isRecord(value) &&
+    isOptional(value.start, isString) &&
+    isOptional(value.itemType, isStringOrNumber) &&
+    isOptional(value.title, isString) &&
+    isOptional(value.ownername, isString) &&
+    isOptional(value.description, isString);
+}
+
+function isEasyIqResponse(value: unknown): value is EasyIqResponse {
+  return isRecord(value) && isOptional(value.Events, (events): events is EasyIqEvent[] =>
+    isArrayOf(events, isEasyIqEvent));
+}
 
 export async function getWeekPlan(
   ctx: IntegrationContext,
@@ -44,7 +68,7 @@ export async function getWeekPlan(
     }
     try {
       const data = await tokens.withToken(widgetId, async (token) => {
-        return widgetFetch<{ Events?: EasyIqEvent[] }>({
+        return widgetFetch({
           url: EASYIQ_URL,
           method: 'POST',
           widgetId,
@@ -63,7 +87,7 @@ export async function getWeekPlan(
             institutionFilter: ctx.institutionCodes,
             childFilter: [child.userId],
           },
-        });
+        }, (value) => expectType(value, isEasyIqResponse, 'an EasyIQ response'));
       });
 
       for (const event of data?.Events ?? []) {
@@ -77,7 +101,7 @@ export async function getWeekPlan(
         });
       }
     } catch (err) {
-      warnings.push(`${child.name}: ${(err as Error).message}`);
+      warnings.push(`${child.name}: ${errorMessage(err)}`);
     }
   }
 

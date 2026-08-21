@@ -18,6 +18,14 @@
  */
 
 import { Buffer } from 'node:buffer';
+import {
+  errorMessage,
+  isArrayOf,
+  isNumber,
+  isOptional,
+  isRecord,
+  isString,
+} from '../../validation.ts';
 import { pbkdf2Sha256, sha256 } from './crypto.ts';
 import { AulaAuthFlowError } from './errors.ts';
 import type { AulaHttpClient } from './http.ts';
@@ -72,11 +80,6 @@ export interface MitidAuxData {
   authenticationSessionId: string;
 }
 
-interface RawAux {
-  coreClient?: { checksum?: string };
-  parameters?: { authenticationSessionId?: string };
-}
-
 /**
  * Parse the body of the `/login/mitid/initialize` response.
  *
@@ -91,30 +94,35 @@ interface RawAux {
  *      MitID core client (checksum + authenticationSessionId).
  */
 export function parseAuxResponse(rawBody: string | { Aux?: string }): MitidAuxData {
-  let outer: { Aux?: string };
+  let outer: unknown;
   if (typeof rawBody === 'string') {
-    let parsed = JSON.parse(rawBody) as unknown;
+    let parsed = parseJsonValue(rawBody, 'initialize response');
     // Layer 1: nemlog-in.mitid.dk returns the JSON object as a JSON string,
     // so the first parse hands back a string. Re-parse to get the object.
     if (typeof parsed === 'string') {
-      parsed = JSON.parse(parsed) as unknown;
+      parsed = parseJsonValue(parsed, 'double-encoded initialize response');
     }
-    outer = parsed as { Aux?: string };
+    outer = parsed;
   } else {
     outer = rawBody;
   }
-  const auxB64 = outer?.Aux;
-  if (!auxB64) throw new MitidError('initialize response is missing `Aux` field');
+  if (!isRecord(outer) || typeof outer.Aux !== 'string' || !outer.Aux) {
+    throw new MitidError('initialize response is missing `Aux` field');
+  }
 
-  let inner: RawAux;
+  let inner: unknown;
   try {
-    inner = JSON.parse(Buffer.from(auxB64, 'base64').toString('utf8')) as RawAux;
+    inner = JSON.parse(Buffer.from(outer.Aux, 'base64').toString('utf8'));
   } catch (e) {
     throw new MitidError('initialize response Aux is not valid base64-encoded JSON', { cause: e });
   }
 
-  const checksumB64 = inner?.coreClient?.checksum;
-  const sessionId = inner?.parameters?.authenticationSessionId;
+  const coreClient = isRecord(inner) && isRecord(inner.coreClient) ? inner.coreClient : null;
+  const parameters = isRecord(inner) && isRecord(inner.parameters) ? inner.parameters : null;
+  const checksumB64 = coreClient && typeof coreClient.checksum === 'string' ? coreClient.checksum : undefined;
+  const sessionId = parameters && typeof parameters.authenticationSessionId === 'string'
+    ? parameters.authenticationSessionId
+    : undefined;
   if (!checksumB64 || !sessionId) {
     throw new MitidError(
       'initialize response Aux is missing coreClient.checksum or authenticationSessionId',
@@ -191,7 +199,7 @@ export class MitidClient {
     if (res.status !== 200) {
       throw new MitidError(`Failed to fetch authentication session (status ${res.status})`);
     }
-    const session = JSON.parse(res.body) as AuthenticationSessionResponse;
+    const session = parseAuthenticationSessionResponse(res.body);
     this.brokerSecurityContext = session.brokerSecurityContext;
     this.serviceProviderName = session.serviceProviderName;
     this.referenceTextHeader = session.referenceTextHeader;
@@ -251,11 +259,15 @@ export class MitidClient {
     if (res.status !== 200) {
       throw new MitidError(`startAppAuth failed (status ${res.status})`);
     }
-    const json = JSON.parse(res.body) as AppInitAuthResponse;
+    const json = parseAppInitAuthResponse(res.body);
     if (json.errorCode === 'auth.codeapp.authentication.parallel_sessions_detected') {
       throw new MitidParallelSessionError(
         'MitID detected a parallel app session. Wait a few minutes and try again.',
       );
+    }
+    if (json.errorCode) throw new MitidError(`MitID APP startup failed: ${json.errorCode}`);
+    if (!json.pollUrl || !json.ticket) {
+      throw new MitidError('startAppAuth response missing pollUrl or ticket');
     }
     this.pollUrl = json.pollUrl;
     this.ticket = json.ticket;
@@ -271,7 +283,7 @@ export class MitidClient {
     if (res.status !== 200) {
       return { kind: 'error', message: `Poll request failed (status ${res.status})` };
     }
-    const interpreted = interpretPollResponse(JSON.parse(res.body) as AppPollResponse);
+    const interpreted = interpretPollResponse(parseAppPollResponse(res.body));
     if (interpreted.kind === 'completed') {
       this.authResponse = interpreted.response;
       this.authResponseSignature = interpreted.responseSignature;
@@ -319,7 +331,7 @@ export class MitidClient {
     if (initRes.status !== 200) {
       throw new MitidError(`appInit failed (status ${initRes.status})`);
     }
-    const init = JSON.parse(initRes.body) as SrpInitResponse;
+    const init = parseSrpInitResponse(initRes.body);
 
     // SRP password input = SHA256(decoded(authResponse) || flowKey.utf8).hex
     const passwordHex = sha256(
@@ -345,8 +357,7 @@ export class MitidClient {
         `appProve failed (status ${proveRes.status}): ${proveRes.body.slice(0, 300)}`,
       );
     }
-    const proveJson = JSON.parse(proveRes.body) as { m2?: { value?: string } };
-    const m2 = proveJson.m2?.value;
+    const m2 = parseM2Response(proveRes.body);
     if (!m2 || !srp.stage5(m2)) {
       throw new MitidError('appProve: server M2 verification failed');
     }
@@ -439,7 +450,7 @@ export class MitidClient {
     if (initRes.status !== 200) {
       throw new MitidError(`codeTokenInit failed (status ${initRes.status})`);
     }
-    const init = JSON.parse(initRes.body) as SrpInitResponse;
+    const init = parseSrpInitResponse(initRes.body);
 
     // The SRP password for CODE_TOKEN is the flow key bytes hex-encoded.
     const passwordHex = Buffer.from(this.currentAuthenticatorSessionFlowKey, 'utf8').toString(
@@ -500,7 +511,7 @@ export class MitidClient {
     if (initRes.status !== 200) {
       throw new MitidError(`passwordInit failed (status ${initRes.status})`);
     }
-    const init = JSON.parse(initRes.body) as SrpInitResponse;
+    const init = parseSrpInitResponse(initRes.body);
     if (!init.pbkdf2Salt) {
       throw new MitidError('passwordInit response missing pbkdf2Salt');
     }
@@ -555,7 +566,7 @@ export class MitidClient {
     if (res.status !== 200) {
       throw new MitidError(`finalize failed (status ${res.status})`);
     }
-    const json = JSON.parse(res.body) as FinalizationResponse;
+    const json = parseFinalizationResponse(res.body);
     if (!json.authorizationCode) {
       throw new MitidError('finalize response missing authorizationCode');
     }
@@ -593,13 +604,18 @@ export class MitidClient {
     if (res.status !== 200) {
       throw new MitidError(`POST /next failed (status ${res.status}): ${res.body.slice(0, 300)}`);
     }
-    return JSON.parse(res.body) as NextAuthenticatorResponse;
+    return parseNextAuthenticatorResponse(res.body);
   }
 
   private applyNextAuthenticator(next: NextAuthenticator): void {
     // The server may use a different label than our human type — notably it
     // returns `TOKEN` for the hardware kodeviser, which we call `CODE_TOKEN`.
-    const human = normalizeAuthenticatorType(next.authenticatorType);
+    let human: MitidAuthenticatorType;
+    try {
+      human = normalizeAuthenticatorType(next.authenticatorType);
+    } catch (cause) {
+      throw new MitidError(errorMessage(cause), { cause });
+    }
     this.currentAuthenticatorType = human;
     this.currentAuthenticatorSessionFlowKey = next.authenticatorSessionFlowKey;
     this.currentAuthenticatorEafeHash = next.eafeHash;
@@ -611,7 +627,7 @@ export class MitidClient {
     if (!err) return;
     const text =
       err.userMessage?.text?.text ?? err.message ?? err.errorCode ?? 'unknown MitID error';
-    const supportId = (err.userMessage as { supportErrorId?: string } | undefined)?.supportErrorId;
+    const supportId = err.userMessage?.supportErrorId;
 
     // CAP008 — MitID's parallel-sessions detector ("user ID in two places at
     // the same time"). Comes through as control.authenticator_cannot_be_started
@@ -674,9 +690,147 @@ export class MitidClient {
   }
 }
 
+function parseJsonValue(text: string, description: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (cause) {
+    throw new MitidError(`${description} is not valid JSON`, { cause });
+  }
+}
+
+function parseResponse<T>(
+  body: string,
+  predicate: (value: unknown) => value is T,
+  description: string,
+): T {
+  const value = parseJsonValue(body, description);
+  if (!predicate(value)) throw new MitidError(`${description} has an unexpected JSON shape`);
+  return value;
+}
+
+function isAuthenticationSessionResponse(value: unknown): value is AuthenticationSessionResponse {
+  return isRecord(value) &&
+    isString(value.brokerSecurityContext) &&
+    isString(value.serviceProviderName) &&
+    isString(value.referenceTextHeader) &&
+    isString(value.referenceTextBody);
+}
+
+export function parseAuthenticationSessionResponse(body: string): AuthenticationSessionResponse {
+  return parseResponse(body, isAuthenticationSessionResponse, 'authentication-session response');
+}
+
+function isAppInitAuthResponse(value: unknown): value is AppInitAuthResponse {
+  return isRecord(value) &&
+    isOptional(value.pollUrl, isString) &&
+    isOptional(value.ticket, isString) &&
+    isOptional(value.errorCode, isString);
+}
+
+export function parseAppInitAuthResponse(body: string): AppInitAuthResponse {
+  return parseResponse(body, isAppInitAuthResponse, 'APP init-auth response');
+}
+
+function isAppPollResponse(value: unknown): value is AppPollResponse {
+  const isPayload = (candidate: unknown): candidate is NonNullable<AppPollResponse['payload']> =>
+    isRecord(candidate) && isString(candidate.response) && isString(candidate.responseSignature);
+  return isRecord(value) &&
+    isString(value.status) &&
+    isOptional(value.channelBindingValue, isString) &&
+    isOptional(value.updateCount, (candidate): candidate is number =>
+      isNumber(candidate) && Number.isSafeInteger(candidate) && candidate >= 0) &&
+    (value.confirmation === undefined || typeof value.confirmation === 'boolean') &&
+    isOptional(value.payload, isPayload);
+}
+
+export function parseAppPollResponse(body: string): AppPollResponse {
+  return parseResponse(body, isAppPollResponse, 'APP poll response');
+}
+
+type StringValue = { value: string };
+
+function isStringValue(value: unknown): value is StringValue {
+  return isRecord(value) && isString(value.value);
+}
+
+function isSrpInitResponse(value: unknown): value is SrpInitResponse {
+  return isRecord(value) &&
+    isOptional(value.pbkdf2Salt, isStringValue) &&
+    isStringValue(value.srpSalt) &&
+    isStringValue(value.randomB);
+}
+
+export function parseSrpInitResponse(body: string): SrpInitResponse {
+  return parseResponse(body, isSrpInitResponse, 'SRP init response');
+}
+
+type M2Response = { m2?: StringValue };
+
+function isM2Response(value: unknown): value is M2Response {
+  return isRecord(value) && isOptional(value.m2, isStringValue);
+}
+
+export function parseM2Response(body: string): string | undefined {
+  return parseResponse(body, isM2Response, 'SRP prove response').m2?.value;
+}
+
+function isNextAuthenticator(value: unknown): value is NextAuthenticator {
+  return isRecord(value) &&
+    isString(value.authenticatorType) &&
+    isString(value.authenticatorSessionFlowKey) &&
+    isString(value.eafeHash) &&
+    isString(value.authenticatorSessionId);
+}
+
+type AuthenticatorCombination = NonNullable<NextAuthenticatorResponse['combinations']>[number];
+type NextError = NonNullable<NextAuthenticatorResponse['errors']>[number];
+
+function isAuthenticatorCombination(value: unknown): value is AuthenticatorCombination {
+  const isItem = (candidate: unknown): candidate is { name: string } =>
+    isRecord(candidate) && isString(candidate.name);
+  return isRecord(value) &&
+    isString(value.id) &&
+    isArrayOf(value.combinationItems, isItem);
+}
+
+function isNextError(value: unknown): value is NextError {
+  const isText = (candidate: unknown): candidate is { text?: string } =>
+    isRecord(candidate) && isOptional(candidate.text, isString);
+  const isUserMessage = (candidate: unknown): candidate is NonNullable<NextError['userMessage']> =>
+    isRecord(candidate) &&
+    isOptional(candidate.text, isText) &&
+    isOptional(candidate.supportErrorId, isString);
+  return isRecord(value) &&
+    isOptional(value.errorCode, isString) &&
+    isOptional(value.message, isString) &&
+    isOptional(value.userMessage, isUserMessage);
+}
+
+function isNextAuthenticatorResponse(value: unknown): value is NextAuthenticatorResponse {
+  return isRecord(value) &&
+    isOptional(value.nextAuthenticator, isNextAuthenticator) &&
+    isOptional(value.combinations, (candidate): candidate is AuthenticatorCombination[] =>
+      isArrayOf(candidate, isAuthenticatorCombination)) &&
+    isOptional(value.errors, (candidate): candidate is NextError[] =>
+      isArrayOf(candidate, isNextError)) &&
+    isOptional(value.nextSessionId, isString);
+}
+
+export function parseNextAuthenticatorResponse(body: string): NextAuthenticatorResponse {
+  return parseResponse(body, isNextAuthenticatorResponse, 'MitID /next response');
+}
+
+export function parseFinalizationResponse(body: string): FinalizationResponse {
+  const predicate = (value: unknown): value is FinalizationResponse =>
+    isRecord(value) && isOptional(value.authorizationCode, isString);
+  return parseResponse(body, predicate, 'finalization response');
+}
+
 function safeJson(text: string): { errorCode?: string } | null {
   try {
-    return JSON.parse(text) as { errorCode?: string };
+    const value: unknown = JSON.parse(text);
+    if (!isRecord(value)) return null;
+    return typeof value.errorCode === 'string' ? { errorCode: value.errorCode } : {};
   } catch {
     return null;
   }

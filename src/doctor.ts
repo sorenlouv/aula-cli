@@ -27,6 +27,7 @@ import { buildFamily, integrationContext, type Family } from './family.ts';
 import { readWidget, SUPPORTED_WIDGET_IDS } from './integrations/index.ts';
 import { isoDate, isoWeekString } from './integrations/types.ts';
 import { fmt } from './io.ts';
+import { errorMessage } from './validation.ts';
 import { WIDGETS, WidgetTokens } from './widgets.ts';
 
 type CheckStatus = 'ok' | 'warn' | 'skip' | 'fail';
@@ -334,7 +335,7 @@ function runner(checks: Check[]): Runner {
         status: 'fail',
         ms: Date.now() - start,
         detail: 'failed',
-        note: (err as Error).message.split('\n')[0] ?? String(err),
+        note: errorMessage(err).split('\n')[0] ?? errorMessage(err),
       });
       return undefined;
     }

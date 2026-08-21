@@ -12,6 +12,7 @@
  */
 
 import { escapeHtml } from '../html.ts';
+import { isRecord } from '../validation.ts';
 import { buildDateSupport, DA_MONTHS, DA_WEEKDAYS, unsupportedDateClaims } from './dates.ts';
 import { doneKeys } from './done.ts';
 import { parseJsonLoosely, runClaude, withPreferences } from './llm.ts';
@@ -232,7 +233,8 @@ export function parsePlan(raw: unknown, brief: RankedBrief): { plan: ComposePlan
     }
     const out: PlanEntry[] = [];
     for (const item of value) {
-      const id = (item as { signalId?: unknown } | null)?.signalId;
+      const row = isRecord(item) ? item : {};
+      const id = row.signalId;
       if (typeof id !== 'string' || !byId.has(id)) {
         problems.push(`${field}: ukendt signalId ${JSON.stringify(id ?? item)}`);
         continue;
@@ -244,14 +246,14 @@ export function parsePlan(raw: unknown, brief: RankedBrief): { plan: ComposePlan
       }
       if (placed.has(id)) continue;
       placed.add(id);
-      const titel = grounded(text((item as { titel?: unknown }).titel), `${field} (${id}) titel`, signal);
-      const hvorfor = grounded(text((item as { hvorfor?: unknown }).hvorfor), `${field} (${id}) hvorfor`, signal);
+      const titel = grounded(text(row.titel), `${field} (${id}) titel`, signal);
+      const hvorfor = grounded(text(row.hvorfor), `${field} (${id}) hvorfor`, signal);
       out.push({ signalId: id, ...(titel ? { titel } : {}), ...(hvorfor ? { hvorfor } : {}) });
     }
     return out;
   };
 
-  const obj = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+  const obj = isRecord(raw) ? raw : {};
   const topline = grounded(text(obj.topline), 'topline');
   const tomHandling = grounded(text(obj.tomHandling), 'tomHandling');
   return {
@@ -292,11 +294,15 @@ export function renderPlan(
   } = {},
 ): string {
   const byId = new Map(brief.signals.map((s) => [s.id, s]));
-  const spec = (entry: PlanEntry): CardSpec => ({
-    signal: byId.get(entry.signalId) as RankedSignal,
-    ...(entry.titel ? { titel: entry.titel } : {}),
-    ...(entry.hvorfor ? { hvorfor: entry.hvorfor } : {}),
-  });
+  const spec = (entry: PlanEntry): CardSpec => {
+    const signal = byId.get(entry.signalId);
+    if (!signal) throw new Error(`Plan references unknown signal ${entry.signalId}`);
+    return {
+      signal,
+      ...(entry.titel ? { titel: entry.titel } : {}),
+      ...(entry.hvorfor ? { hvorfor: entry.hvorfor } : {}),
+    };
+  };
   const planned = new Set([...plan.handling, ...plan.kommende].map((e) => e.signalId));
   // An omission in the plan is a deprioritisation, never a deletion: whatever
   // the ranker put in a visible tier still renders, after the planned cards.

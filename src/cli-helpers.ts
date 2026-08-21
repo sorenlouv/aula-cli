@@ -3,6 +3,7 @@ import { UsageError } from './errors.ts';
 import type { CommonFile } from './types.ts';
 import { isoWeekString, weekOffset } from './integrations/types.ts';
 import type { Contact, PresenceTemplates } from './types.ts';
+import { isIsoWeek, parseIsoDateParts } from './validation.ts';
 
 const COPENHAGEN = 'Europe/Copenhagen';
 
@@ -47,11 +48,9 @@ export function parseSince(input: string): Date {
     const perUnit: Record<string, number> = { d: 1, w: 7, m: 30, y: 365 };
     return new Date(Date.now() - amount * (perUnit[unit] ?? 1) * 86_400_000);
   }
-  const parsed = new Date(input);
-  if (Number.isNaN(parsed.getTime())) {
-    throw new UsageError(`Could not parse --since "${input}". Use e.g. 7d, 3w, or 2026-08-01.`);
-  }
-  return parsed;
+  const parsed = parseIsoDateParts(input.trim());
+  if (!parsed) throw new UsageError(`Could not parse --since "${input}". Use e.g. 7d, 3w, or 2026-08-01.`);
+  return new Date(parsed.year, parsed.month - 1, parsed.day);
 }
 
 /**
@@ -160,12 +159,14 @@ export async function mapLimit<T, R>(
   limit: number,
   fn: (item: T) => Promise<R>,
 ): Promise<R[]> {
+  if (!Number.isSafeInteger(limit) || limit < 1) {
+    throw new RangeError(`Concurrency limit must be a positive integer (got ${limit}).`);
+  }
   const results = new Array<R>(items.length);
-  let cursor = 0;
+  const entries = items.entries();
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (cursor < items.length) {
-      const index = cursor++;
-      results[index] = await fn(items[index] as T);
+    for (const [index, item] of entries) {
+      results[index] = await fn(item);
     }
   });
   await Promise.all(workers);
@@ -177,7 +178,7 @@ export async function mapLimit<T, R>(
 /** `--week 2026-W33`, `--next`, or the current week. */
 export function resolveWeek(week: string | undefined, next: boolean): string {
   if (week) {
-    if (!/^\d{4}-W\d{1,2}$/.test(week)) {
+    if (!isIsoWeek(week)) {
       throw new UsageError(`--week must look like 2026-W33, got "${week}".`);
     }
     return week;
@@ -308,4 +309,3 @@ export function parseKeyValues(pairs: string[]): Record<string, string | string[
   }
   return query;
 }
-

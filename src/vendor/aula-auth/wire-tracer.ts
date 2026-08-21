@@ -14,6 +14,7 @@
 import { Buffer } from 'node:buffer';
 import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { isRecord } from '../../validation.ts';
 
 export interface WireEntry {
   /** ISO 8601 timestamp. */
@@ -169,7 +170,7 @@ export function sanitizeRequestBody(
   }
   // String — try JSON first, then assume opaque.
   try {
-    const parsed = JSON.parse(body) as unknown;
+    const parsed: unknown = JSON.parse(body);
     return JSON.stringify(redactJson(parsed));
   } catch {
     return truncateString(body, DEFAULT_BODY_CAP);
@@ -188,7 +189,7 @@ export function sanitizeResponseBody(
   let cleaned = body;
   if (looksLikeJson(body)) {
     try {
-      const parsed = JSON.parse(body) as unknown;
+      const parsed: unknown = JSON.parse(body);
       cleaned = JSON.stringify(redactJson(parsed));
     } catch {
       // fall through to raw
@@ -201,12 +202,13 @@ function redactJson(value: unknown): unknown {
   if (value === null || typeof value !== 'object') return value;
   if (Array.isArray(value)) return value.map(redactJson);
   const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+  if (!isRecord(value)) return value;
+  for (const [k, v] of Object.entries(value)) {
     if (SECRET_BODY_FIELDS_SET.has(k.toLowerCase())) {
       out[k] =
         typeof v === 'string'
           ? `<redacted ${v.length}>`
-          : v && typeof v === 'object' && 'value' in (v as object)
+          : isRecord(v) && 'value' in v
             ? `<redacted object with .value>`
             : `<redacted>`;
     } else {

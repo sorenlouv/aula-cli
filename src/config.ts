@@ -16,6 +16,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { AULA_DIR } from './auth.ts';
+import { isRecord } from './validation.ts';
 
 export const CONFIG_PATH = join(AULA_DIR, 'config.json');
 
@@ -27,8 +28,8 @@ export type AulaConfig = {
 /** Missing or unreadable both mean "nothing configured"; never an error. */
 export function readConfig(path = CONFIG_PATH): AulaConfig {
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { artifactUrl?: unknown };
-    const url = typeof parsed?.artifactUrl === 'string' ? parsed.artifactUrl.trim() : '';
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    const url = isRecord(parsed) && typeof parsed.artifactUrl === 'string' ? parsed.artifactUrl.trim() : '';
     return url ? { artifactUrl: url } : {};
   } catch {
     return {};

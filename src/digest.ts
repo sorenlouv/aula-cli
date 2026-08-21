@@ -34,6 +34,7 @@ import type {
   PresenceEntry,
   ThreadSummary,
 } from './types.ts';
+import { errorMessage } from './validation.ts';
 import { type Capability, WidgetTokens } from './widgets.ts';
 
 // -------------------------------------------------------------- weekly plans
@@ -90,7 +91,7 @@ export async function readManyPlans(
         // that the skill and the brief both consume looked exactly like a
         // family with no weekly plan. It has to survive into the payload, so
         // the failure is reported rather than rendered as a quiet empty week.
-        const message = (err as Error).message;
+        const message = errorMessage(err);
         process.emitWarning(`${capability}: ${message}`);
         const failed: WeekPlan = {
           provider: 'unavailable',
@@ -157,6 +158,7 @@ export type DigestOptions = {
   limit?: number;
   isoWeek: string;
   child?: string;
+  now?: Date;
   /**
    * Supplied by the brief pipeline, which has already resolved the family for
    * its own group lookups and should not pay to resolve it twice.
@@ -166,10 +168,11 @@ export type DigestOptions = {
 
 export async function buildDigest(client: AulaClient, opts: DigestOptions) {
   const family = opts.family ?? (await resolveFamily(client));
+  const now = opts.now ?? new Date();
   // Resolved once and up front: `--child` has to reach all six reads below, and
   // the bug this replaced was one of them quietly not getting it.
   const children = selectChildren(family, opts.child);
-  const since = new Date(Date.now() - opts.days * 86_400_000);
+  const since = new Date(now.getTime() - opts.days * 86_400_000);
 
   const [threadSummaries, posts, events, notifications, presence, plans] = await Promise.all([
     collectThreads(client, {
@@ -177,10 +180,18 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
       since,
       unreadOnly: false,
       family,
-      child: opts.child,
+      ...(opts.child ? { child: opts.child } : {}),
     }),
-    collectPosts(client, family, { limit: opts.limit ?? 40, since, child: opts.child }),
-    loadCalendar(client, family, { days: Math.max(opts.days, 21), child: opts.child }),
+    collectPosts(client, family, {
+      limit: opts.limit ?? 40,
+      since,
+      ...(opts.child ? { child: opts.child } : {}),
+    }),
+    loadCalendar(client, family, {
+      days: Math.max(opts.days, 21),
+      now,
+      ...(opts.child ? { child: opts.child } : {}),
+    }),
     client.getNotifications().catch(() => []),
     client.getDailyPresence(children.map((c) => c.id)).catch(() => []),
     // The vendors are third parties and go down independently of Aula. A dead
@@ -188,7 +199,7 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
     // digest degrades to a warning rather than failing.
     readManyPlans(client, family, [...CAPABILITIES], {
       isoWeek: opts.isoWeek,
-      child: opts.child,
+      ...(opts.child ? { child: opts.child } : {}),
     }),
   ]);
 
@@ -197,7 +208,7 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
   // Structured signals so the summariser has something better than vibes to
   // rank on. The actual judgement of "is this important to me" stays with the
   // model — this only surfaces what Aula itself flags.
-  const now = Date.now();
+  const nowMs = now.getTime();
   const attention = {
     unreadThreads: threads.filter((t) => t.unread).map((t) => ({ id: t.id, subject: t.subject })),
     sensitiveThreads: threads
@@ -216,14 +227,14 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
     eventsWithinSevenDays: events
       .filter((e) => {
         const start = Date.parse(e.start);
-        return Number.isFinite(start) && start >= now && start <= now + 7 * 86_400_000;
+        return Number.isFinite(start) && start >= nowMs && start <= nowMs + 7 * 86_400_000;
       })
       .map((e) => ({ id: e.id, title: e.title, start: e.start, child: e.children })),
   };
 
   return {
-    generatedAt: new Date().toISOString(),
-    window: { from: since.toISOString(), to: new Date().toISOString(), days: opts.days },
+    generatedAt: now.toISOString(),
+    window: { from: since.toISOString(), to: now.toISOString(), days: opts.days },
     week: opts.isoWeek,
     // Stated rather than implied: a digest narrowed to one child otherwise
     // looks exactly like a family that has only one, and a summariser reading
@@ -380,10 +391,10 @@ export async function collectAlbums(
 export async function loadCalendar(
   client: AulaClient,
   family: Family,
-  opts: { days: number; child?: string },
+  opts: { days: number; child?: string; now?: Date },
 ) {
   const children = selectChildren(family, opts.child);
-  const start = startOfDay(new Date());
+  const start = startOfDay(opts.now ?? new Date());
   const end = new Date(start.getTime() + opts.days * 86_400_000);
   const events = await client.getCalendarEvents({
     childInstitutionProfileIds: children.map((c) => c.id),
@@ -395,13 +406,17 @@ export async function loadCalendar(
   return events.map((e) => normaliseEvent(e, nameById)).sort((a, b) => a.start.localeCompare(b.start));
 }
 
+function emptyMessages(): Array<ReturnType<typeof normaliseMessage>> {
+  return [];
+}
+
 export async function withFullMessages(client: AulaClient, threads: ThreadSummary[]) {
   const details = await mapLimit(threads, 4, async (thread) => {
     try {
       return await client.getThread(thread.id, 0);
     } catch (err) {
       // One unreadable thread should not sink a whole digest.
-      process.emitWarning(`Could not load thread ${thread.id}: ${(err as Error).message}`);
+      process.emitWarning(`Could not load thread ${thread.id}: ${errorMessage(err)}`);
       return null;
     }
   });
@@ -416,9 +431,9 @@ export async function withFullMessages(client: AulaClient, threads: ThreadSummar
     if (!detail) {
       return {
         ...base,
-        totalMessageCount: undefined as number | undefined,
+        totalMessageCount: undefined,
         moreMessagesExist: false,
-        messages: [] as ReturnType<typeof normaliseMessage>[],
+        messages: emptyMessages(),
         messagesUnavailable: true,
       };
     }

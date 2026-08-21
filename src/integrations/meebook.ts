@@ -16,15 +16,19 @@
  */
 
 import { type WidgetTokens, widgetFetch } from '../widgets.ts';
+import {
+  expectType,
+  isArrayOf,
+  isOptional,
+  isRecord,
+  isString,
+} from '../validation.ts';
 import type { IntegrationContext, WeekPlan, WeekPlanItem } from './types.ts';
 
 const MEEBOOK_URL = 'https://app.meebook.com/aulaapi/relatedweekplan/all';
 
 type MeebookTask = {
-  id?: number;
   type?: string;
-  author?: string;
-  group?: string;
   /** Subject chip. Literally "Ingen fag tilknyttet" when there is none. */
   pill?: string;
   title?: string;
@@ -33,12 +37,39 @@ type MeebookTask = {
 };
 
 type MeebookPerson = {
-  id?: number;
   name?: string;
-  unilogin?: string;
   weekPlan?: Array<{ date?: string; tasks?: MeebookTask[] }>;
   exceptionMessage?: string;
 };
+
+type MeebookDay = NonNullable<MeebookPerson['weekPlan']>[number];
+
+function isMeebookTask(value: unknown): value is MeebookTask {
+  return isRecord(value) &&
+    isOptional(value.type, isString) &&
+    isOptional(value.pill, isString) &&
+    isOptional(value.title, isString) &&
+    isOptional(value.content, isString) &&
+    isOptional(value.editUrl, isString);
+}
+
+function isMeebookDay(value: unknown): value is MeebookDay {
+  return isRecord(value) &&
+    isOptional(value.date, isString) &&
+    isOptional(value.tasks, (tasks): tasks is MeebookTask[] => isArrayOf(tasks, isMeebookTask));
+}
+
+function isMeebookPerson(value: unknown): value is MeebookPerson {
+  return isRecord(value) &&
+    isOptional(value.name, isString) &&
+    isOptional(value.weekPlan, (days): days is MeebookDay[] => isArrayOf(days, isMeebookDay)) &&
+    isOptional(value.exceptionMessage, isString);
+}
+
+function decodePeople(value: unknown): MeebookPerson[] {
+  return expectType(value, (people): people is MeebookPerson[] =>
+    isArrayOf(people, isMeebookPerson), 'a Meebook week plan');
+}
 
 const NO_SUBJECT = 'Ingen fag tilknyttet';
 
@@ -63,7 +94,7 @@ export async function getWeekPlan(
   for (const code of ctx.institutionCodes) params.append('institutionFilter[]', code);
 
   const people = await tokens.withToken(widgetId, async (token) => {
-    return ((await widgetFetch<MeebookPerson[]>({
+    return await widgetFetch({
       url: `${MEEBOOK_URL}?${params}`,
       widgetId,
       headers: {
@@ -74,7 +105,7 @@ export async function getWeekPlan(
         origin: 'https://www.aula.dk',
         referer: 'https://www.aula.dk/',
       },
-    })) ?? []);
+    }, decodePeople);
   });
 
   const items: WeekPlanItem[] = [];

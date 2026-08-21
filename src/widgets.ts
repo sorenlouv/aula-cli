@@ -15,6 +15,7 @@
 
 import type { AulaClient } from './client.ts';
 import type { ProfileContext } from './types.ts';
+import { errorMessage } from './validation.ts';
 
 // --------------------------------------------------------------- the registry
 
@@ -261,7 +262,10 @@ export type WidgetRequest = {
  * returns either the parsed JSON or {@link EXPIRED} — never a raw Response, so
  * no call site can forget the expiry check.
  */
-export async function widgetFetch<T>(req: WidgetRequest): Promise<T | typeof EXPIRED> {
+export async function widgetFetch<T>(
+  req: WidgetRequest,
+  decode: (value: unknown) => T,
+): Promise<T | typeof EXPIRED> {
   const method = req.method ?? 'GET';
   assertWidgetEndpoint(req.url, method);
 
@@ -287,14 +291,24 @@ export async function widgetFetch<T>(req: WidgetRequest): Promise<T | typeof EXP
     }`, res.status);
   }
 
+  let parsed: unknown;
   try {
-    return JSON.parse(text) as T;
+    parsed = JSON.parse(text);
   } catch {
     throw new WidgetError(
       req.widgetId,
       `${new URL(req.url).host} returned non-JSON${
         summariseBody(text) ? ` — ${summariseBody(text)}` : ''
       }`,
+      res.status,
+    );
+  }
+  try {
+    return decode(parsed);
+  } catch (error) {
+    throw new WidgetError(
+      req.widgetId,
+      `${new URL(req.url).host} returned an unexpected JSON shape — ${errorMessage(error)}`,
       res.status,
     );
   }

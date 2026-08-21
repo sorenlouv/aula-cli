@@ -16,6 +16,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { AULA_DIR } from '../auth.ts';
 import { localIsoDate } from '../integrations/types.ts';
+import { isRecord, parseIsoDateParts } from '../validation.ts';
 
 /**
  * Under $AULA_DIR when that is set, like every other stored path — so a
@@ -53,17 +54,55 @@ export type BriefState = {
 
 export function loadState(path = STATE_PATH): BriefState {
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<BriefState>;
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    if (!isRecord(parsed)) return { seen: {} };
+
+    const seen = isRecord(parsed.seen)
+      ? Object.fromEntries(
+          Object.entries(parsed.seen).filter(
+            (entry): entry is [string, string] =>
+              typeof entry[1] === 'string' && Number.isFinite(Date.parse(entry[1])),
+          ),
+        )
+      : {};
+    const lastRun = parseLastRun(parsed.lastRun);
+    const lastDeploy = parseLastDeploy(parsed.lastDeploy);
     return {
-      seen: parsed.seen ?? {},
-      ...(parsed.lastRun ? { lastRun: parsed.lastRun } : {}),
-      ...(parsed.lastDeploy ? { lastDeploy: parsed.lastDeploy } : {}),
+      seen,
+      ...(lastRun ? { lastRun } : {}),
+      ...(lastDeploy ? { lastDeploy } : {}),
     };
   } catch {
     // A missing or corrupt state file must never stop a brief being produced —
     // the worst case is that everything is marked new for one run.
     return { seen: {} };
   }
+}
+
+function parseLastRun(value: unknown): LastRun | undefined {
+  if (!isRecord(value)) return undefined;
+  if (
+    typeof value.day !== 'string' ||
+    !parseIsoDateParts(value.day) ||
+    typeof value.at !== 'string' ||
+    !Number.isFinite(Date.parse(value.at)) ||
+    typeof value.complete !== 'boolean'
+  ) {
+    return undefined;
+  }
+  return { day: value.day, at: value.at, complete: value.complete };
+}
+
+function parseLastDeploy(value: unknown): LastDeploy | undefined {
+  if (!isRecord(value)) return undefined;
+  if (
+    typeof value.url !== 'string' || !value.url ||
+    typeof value.at !== 'string' || !Number.isFinite(Date.parse(value.at)) ||
+    typeof value.day !== 'string' || !parseIsoDateParts(value.day)
+  ) {
+    return undefined;
+  }
+  return { url: value.url, at: value.at, day: value.day };
 }
 
 export function saveState(state: BriefState, path = STATE_PATH): void {

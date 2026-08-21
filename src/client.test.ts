@@ -15,6 +15,7 @@ import { htmlToText, preview } from './html.ts';
 import {
   normaliseCommonFile,
   normaliseSchedule,
+  mapLimit,
   parseKeyValues,
   selectCommonFile,
   parseSince,
@@ -49,6 +50,20 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 const OK_PROFILES = { status: { code: 0 }, data: { profiles: [] } };
+
+test('API versions must be finite integers in the supported range', () => {
+  assert.throws(() => new AulaClient({ cookie: COOKIE, apiVersion: 0 }), /integer from 1 to 99/);
+  assert.throws(() => new AulaClient({ cookie: COOKIE, apiVersion: 1.5 }), /integer from 1 to 99/);
+
+  const previous = process.env.AULA_API_VERSION;
+  process.env.AULA_API_VERSION = 'latest';
+  try {
+    assert.throws(() => new AulaClient({ cookie: COOKIE }), /AULA_API_VERSION must be an integer/);
+  } finally {
+    if (previous === undefined) delete process.env.AULA_API_VERSION;
+    else process.env.AULA_API_VERSION = previous;
+  }
+});
 
 test('the guard refuses every write method Aula exposes', () => {
   const writeMethods = [
@@ -310,6 +325,27 @@ test('cookie auth never adds an access_token parameter', async () => {
   );
 });
 
+test('malformed JSON envelopes fail explicitly instead of becoming typed data', async () => {
+  let call = 0;
+  await withFetch(
+    async () => {
+      call++;
+      return call === 1 ? jsonResponse(OK_PROFILES) : jsonResponse(null);
+    },
+    async () => {
+      const client = new AulaClient({ cookie: COOKIE });
+      await assert.rejects(
+        () => client.getDailyPresence([11]),
+        (err: unknown) => {
+          assert.ok(err instanceof AulaApiError);
+          assert.match(err.message, /malformed JSON envelope/i);
+          return true;
+        },
+      );
+    },
+  );
+});
+
 // MitID is the only credential, so every expiry points at the same fix — and
 // that message is the whole of what the user (or Claude) gets to act on.
 test('an expired credential points at the MitID login', async () => {
@@ -468,6 +504,8 @@ test('parseSince understands relative and absolute forms', () => {
   assert.equal(parseSince('2026-08-01').toISOString().slice(0, 10), '2026-08-01');
   assert.ok(Math.abs(Date.now() - parseSince('14').getTime() - 14 * 86_400_000) < 5_000);
   assert.throws(() => parseSince('not-a-date'));
+  assert.throws(() => parseSince('2026-02-31'));
+  assert.throws(() => parseSince('2026-8-1'));
 });
 
 // -------------------------------------------------------- the raw escape hatch
@@ -694,6 +732,8 @@ test('resolveWeek accepts an explicit week, --next, or defaults to this week', (
   assert.match(resolveWeek(undefined, false), /^\d{4}-W\d{2}$/);
   assert.notEqual(resolveWeek(undefined, true), resolveWeek(undefined, false));
   assert.throws(() => resolveWeek('week 33', false));
+  assert.throws(() => resolveWeek('2026-W3', false));
+  assert.throws(() => resolveWeek('2025-W53', false));
 });
 
 test('raw key=value pairs collapse repeats into an array', () => {
@@ -704,6 +744,21 @@ test('raw key=value pairs collapse repeats into an array', () => {
   // A value may itself contain "=", so only the first one splits.
   assert.deepEqual(parseKeyValues(['q=a=b']), { q: 'a=b' });
   assert.throws(() => parseKeyValues(['nope']));
+});
+
+test('mapLimit bounds concurrency and preserves input order', async () => {
+  let active = 0;
+  let peak = 0;
+  const result = await mapLimit([3, 1, 2], 2, async (value) => {
+    active++;
+    peak = Math.max(peak, active);
+    await Bun.sleep(value);
+    active--;
+    return value * 10;
+  });
+  assert.deepEqual(result, [30, 10, 20]);
+  assert.equal(peak, 2);
+  await assert.rejects(() => mapLimit([1], 0, async (value) => value), RangeError);
 });
 
 // --------------------------------------------------------------- attachments
@@ -785,7 +840,10 @@ function sessionEnforcingAula(): { handler: FetchStub; sessions: number } & { se
         headers,
       });
     }
-    return new Response(JSON.stringify({ status: { code: 0 }, data: { threads: [], notifications: [], groups: [] } }), {
+    const data = method === 'messaging.getThreads'
+      ? { threads: [], moreMessagesExist: false, page: Number(url.searchParams.get('page') ?? 0) }
+      : [];
+    return new Response(JSON.stringify({ status: { code: 0 }, data }), {
       status: 200,
       headers,
     });
