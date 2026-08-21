@@ -185,7 +185,7 @@ and the daily brief get their sense of what matters.
   argue back with a new one.** "Jeg vil faktisk gerne se beskederne fra
   kommunen" means `forget` the line saying they are never relevant, not
   `remember` a line contradicting it. Two lines that disagree leave the model to
-  pick, and one of them is enforced in code:
+  pick:
 
   ```bash
   bun src/cli.ts preferences        # find its number

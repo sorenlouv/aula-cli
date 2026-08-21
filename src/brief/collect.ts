@@ -118,7 +118,16 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
   for (const thread of digest.threads) {
     // A thread names the children it concerns outright, which is as specific as
     // Aula gets. Those are always `child`-level regardless of who sent them.
-    const messages = thread.messages ?? [];
+    //
+    // Sorted oldest-first, and the same order feeds both the flattened `text`
+    // the extractor reads and the exchange the reader expands: Aula's own order
+    // is undocumented and `getThread` pages, so a conversation that reads
+    // backwards on the page is a real possibility worth spending one sort on.
+    // ISO 8601 sorts lexicographically; a message with no timestamp keeps its
+    // place, since `sort` is stable.
+    const messages = [...(thread.messages ?? [])]
+      .filter((m) => m.text.trim().length > 0)
+      .sort((a, b) => (a.at ?? '').localeCompare(b.at ?? ''));
     const body = messages
       .map((m) => `${m.from ?? 'ukendt'} (${m.fromRole ?? '?'}): ${m.text}`)
       .join('\n\n');
@@ -137,6 +146,11 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
       audience: thread.regarding.length > 0 ? 'child' : 'class',
       important: thread.sensitive || thread.unread,
       url: `${AULA_PORTAL}/beskeder`,
+      conversation: {
+        messages: messages.map((m) => ({ from: m.from ?? null, at: m.at ?? null, text: m.text })),
+        total: thread.totalMessageCount ?? messages.length,
+        truncated: thread.moreMessagesExist || messages.length < (thread.totalMessageCount ?? 0),
+      },
     });
   }
 

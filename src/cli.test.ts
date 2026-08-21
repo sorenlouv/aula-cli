@@ -665,6 +665,35 @@ test('a remembered wish reaches the model that writes the overview', () => {
   assert.match(calls, /Fællesbeskeder til alle forældre i kommunen/);
 });
 
+test("the model's relevance verdicts reach the ranker — the whole return leg", () => {
+  // The companion to the test above: that one proves a wish reaches the model,
+  // this one proves the model's answer reaches the page. Between them they
+  // cover the round trip, and the return leg is the half with no second
+  // opinion behind it — since the deterministic re-reading of preferences.md
+  // was removed, `extracted.relevance` is the only path from the user's list to
+  // where anything lands. Every piece of that path is unit-tested and the wiring
+  // is not: disconnecting it (index.ts dropping the field, rank() called with
+  // two arguments) leaves every other test in this repo green.
+  const answer = JSON.stringify({
+    topline: 'Rolig uge.',
+    signals: [],
+    childSummaries: {},
+    // thread:5003 is the fake school's "Til alle forældre"; thread:5002 is
+    // about one child. The rules layer finds a signal in both.
+    relevance: { 'thread:5003': 'hide', 'thread:5002': 'high' },
+  });
+  const box = sandboxWithClaude('ok', answer);
+
+  const result = box.run('new', '--no-deploy', '--no-open', '--text', '--explain');
+  assert.equal(result.code, 0, result.stderr);
+  // Rules alone find three signals and hide nothing. The hide verdict is the
+  // only thing that can move this count.
+  assert.match(result.stdout, /2 punkt\(er\) vist, 1 skjult efter jeres ønsker/);
+  // …and the score breakdown names the verdicts that did it, on both sides.
+  assert.match(result.stderr, /relevance:hide/);
+  assert.match(result.stderr, /relevance:high \+25/);
+});
+
 test('preferences reset puts the shipped list back and names the casualties', () => {
   const box = sandbox();
   box.run('remember', 'beskeder fra John (Hjaltes far) er altid vigtige');

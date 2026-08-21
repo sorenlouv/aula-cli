@@ -127,10 +127,23 @@ const THREADS = [
   },
 ];
 
-const MESSAGES: Record<number, string> = {
-  5001: 'Vi tager af sted mandag den 25. Husk regntøj.',
-  5002: 'Vi holder lukket fredag den 29.',
-  5003: 'Husk forældremødet på torsdag klokken 17.',
+/**
+ * Thread bodies, oldest first.
+ *
+ * 5001 is deliberately a back-and-forth rather than a single message: an active
+ * conversation is its own shape on the brief — summarised on the card, the whole
+ * exchange behind "læs hele samtalen" — and a fixture where every thread is one
+ * message would never exercise it.
+ */
+const MESSAGES: Record<number, { from: string; role: string; ago: number; html: string }[]> = {
+  5001: [
+    { from: 'Yrsa Storm', role: 'employee', ago: -4, html: 'Vi tager af sted mandag den 25. Husk regntøj.' },
+    { from: 'Far Eksempelsen', role: 'guardian', ago: -3, html: 'Skal de have madpakke med begge dage?' },
+    { from: 'Yrsa Storm', role: 'employee', ago: -2, html: 'Kun mandag. Tirsdag sørger vi for maden.' },
+    { from: 'Far Eksempelsen', role: 'guardian', ago: -1, html: 'Perfekt, tak.' },
+  ],
+  5002: [{ from: 'Pædagog Palle', role: 'employee', ago: -2, html: 'Vi holder lukket fredag den 29.' }],
+  5003: [{ from: 'Skoleleder', role: 'employee', ago: -3, html: 'Husk forældremødet på torsdag klokken 17.' }],
 };
 
 /** Keyed by the institution-profile id that makes the post visible. */
@@ -246,20 +259,19 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
           headers: { 'content-type': 'application/json' },
         });
       }
+      const messages = MESSAGES[threadId] ?? [];
       return envelope({
         id: threadId,
         subject: THREADS.find((t) => t.id === threadId)?.subject ?? '?',
-        totalMessageCount: 1,
+        totalMessageCount: messages.length,
         moreMessagesExist: false,
         recipients: [],
-        messages: [
-          {
-            id: `m-${threadId}`,
-            sendDateTime: iso(-1),
-            sender: { fullName: 'Yrsa Storm' },
-            text: { html: MESSAGES[threadId] ?? '' },
-          },
-        ],
+        messages: messages.map((m, i) => ({
+          id: `m-${threadId}-${i}`,
+          sendDateTime: iso(m.ago),
+          sender: { fullName: m.from, mailBoxOwner: { portalRole: m.role } },
+          text: { html: m.html },
+        })),
       });
     }
     case 'posts.getAllPosts': {

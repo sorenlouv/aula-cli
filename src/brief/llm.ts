@@ -18,13 +18,21 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildDateSupport, dueAtSupported, unsupportedDateClaims } from './dates.ts';
 import { BRIEF_DIR } from './state.ts';
-import type { BriefInput, Signal, SignalKind, Urgency } from './types.ts';
+import type { BriefInput, Relevance, Signal, SignalKind, SourceItem, Urgency } from './types.ts';
 
 const CACHE_DIR = join(BRIEF_DIR, 'cache');
+/**
+ * Bumped whenever the answer's shape changes. It is part of the cache key, so
+ * an entry written under the old contract is simply not found rather than
+ * read back with a field missing — the first run after an upgrade must not
+ * spend its day on yesterday's answer shape.
+ */
+const CONTRACT_VERSION = 2;
 const KINDS: ReadonlySet<string> = new Set<SignalKind>([
   'action', 'deadline', 'event', 'bring', 'info', 'social',
 ]);
 const URGENCIES: ReadonlySet<string> = new Set<Urgency>(['now', 'week', 'later', 'fyi']);
+const RELEVANCES: ReadonlySet<string> = new Set<Relevance>(['hide', 'low', 'normal', 'high']);
 
 /**
  * Which model (and how hard it thinks) is the quality/speed dial for the whole
@@ -236,8 +244,28 @@ export type ExtractResult = {
   topline: string | null;
   signals: Signal[];
   childSummaries: Record<string, string>;
+  /**
+   * One verdict per source, by key — see `Relevance`. A source the model gave
+   * no verdict is simply absent; the ranker reads that as `normal`.
+   */
+  relevance: Record<string, Relevance>;
+  /**
+   * One or two sentences per thread that is an actual back-and-forth, keyed by
+   * `sourceKey`. The card shows this instead of asking the reader to work out a
+   * six-message exchange from a single quote; the exchange itself is one tap
+   * away underneath it.
+   */
+  conversationSummaries: Record<string, string>;
   problems: string[];
 };
+
+/**
+ * Below this, a thread is a message rather than a conversation, and reading it
+ * beats reading *about* it — the card's own quote plus "læs mere" already show
+ * the whole thing, so a summary on top would be a second description of one
+ * paragraph.
+ */
+export const CONVERSATION_MIN_MESSAGES = 3;
 
 /**
  * Checks a model response against the input it was given.
@@ -337,6 +365,34 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
     }
   }
 
+  // A conversation summary is the one thing on the page the reader cannot check
+  // against a verbatim quote, so it is pinned to a source that is genuinely an
+  // exchange. Summarising a single message would put a second description of
+  // one paragraph above the paragraph itself.
+  const conversationSummaries: Record<string, string> = {};
+  const rawConversations = (root.conversationSummaries ?? {}) as Record<string, unknown>;
+  for (const [key, value] of Object.entries(rawConversations)) {
+    if (typeof value !== 'string' || !value.trim()) continue;
+    const source = byKey.get(key);
+    if (!source) {
+      problems.push(`conversationSummaries: ukendt sourceKey "${key}"`);
+      continue;
+    }
+    const messages = source.conversation?.messages.length ?? 0;
+    if (messages < CONVERSATION_MIN_MESSAGES) {
+      problems.push(`conversationSummaries.${key}: ${messages} besked(er) er ikke en samtale`);
+      continue;
+    }
+    const invented = unsupportedDateClaims(value, dates, { dueAt: null, sourceKey: key });
+    if (invented.length > 0) {
+      problems.push(
+        `conversationSummaries.${key}: dato uden kilde: ${invented.map((d) => `"${d}"`).join(', ')}`,
+      );
+      continue;
+    }
+    conversationSummaries[key] = value.trim();
+  }
+
   let topline = typeof root.topline === 'string' && root.topline.trim() ? root.topline.trim() : null;
   if (topline) {
     const invented = unsupportedDateClaims(topline, dates);
@@ -346,12 +402,61 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
     }
   }
 
+  // The verdicts. A key the model invented is reported like an invented
+  // sourceKey on a signal — it cannot reach the page, but it is the same sign
+  // of a confused answer. A value outside the four words falls back to
+  // `normal`, as an unknown kind falls back to `info`: the safe reading, not a
+  // retry. A map left out entirely is a retry-worthy problem, because every
+  // source was owed a verdict and the family's list reaches the ranking
+  // through nothing else; a few missing keys are not, since one more model
+  // call is a high price for a handful of defaults.
+  const relevance: Record<string, Relevance> = {};
+  const rawRelevance =
+    typeof root.relevance === 'object' && root.relevance !== null && !Array.isArray(root.relevance)
+      ? (root.relevance as Record<string, unknown>)
+      : null;
+  if (rawRelevance) {
+    for (const [key, value] of Object.entries(rawRelevance)) {
+      if (!byKey.has(key)) {
+        problems.push(`relevance: ukendt sourceKey "${key}"`);
+        continue;
+      }
+      relevance[key] = typeof value === 'string' && RELEVANCES.has(value) ? (value as Relevance) : 'normal';
+    }
+  } else if (input.items.length > 0) {
+    problems.push('relevance: mangler — én vurdering pr. kilde');
+  }
+
   return {
     topline,
     signals,
     childSummaries: summaries,
+    relevance,
+    conversationSummaries,
     problems,
   };
+}
+
+const PROMPT_TEXT_LIMIT = 4000;
+
+/**
+ * A source's text, trimmed to something a prompt can carry.
+ *
+ * A conversation is trimmed from the **front**, everything else from the back.
+ * Threads are ordered oldest-first (see `collect.ts`), so keeping the first
+ * 4000 characters of a long exchange hands the model the opening pleasantries
+ * and hides the question that was asked this morning. A post, by contrast, puts
+ * its point at the top.
+ *
+ * Only the prompt is trimmed. `source.text` stays whole, so quote validation
+ * still checks against everything that was fetched, and the page still shows
+ * every message the reader expands.
+ */
+function promptText(item: SourceItem): string {
+  if (item.text.length <= PROMPT_TEXT_LIMIT) return item.text;
+  return item.kind === 'thread'
+    ? `…${item.text.slice(-PROMPT_TEXT_LIMIT)}`
+    : `${item.text.slice(0, PROMPT_TEXT_LIMIT)}…`;
 }
 
 /** The payload the model sees. Trimmed, but never summarised before it gets there. */
@@ -374,7 +479,8 @@ function extractionPayload(input: BriefInput) {
       grupper: item.groups,
       handlerOm: item.childNames,
       raekkevidde: item.audience,
-      tekst: item.text.length > 4000 ? `${item.text.slice(0, 4000)}…` : item.text,
+      ...(item.conversation ? { antalBeskeder: item.conversation.messages.length } : {}),
+      tekst: promptText(item),
     })),
   };
 }
@@ -399,8 +505,17 @@ Svar KUN med JSON i præcis denne form, uden kodeblok og uden forklaring udenom:
       "sourceKey": "kildens sourceKey"
     }
   ],
-  "childSummaries": { "Fornavn": "1-2 sætninger om hvad der sker for barnet" }
+  "childSummaries": { "Fornavn": "1-2 sætninger om hvad der sker for barnet" },
+  "conversationSummaries": { "thread:123": "1-2 sætninger: hvad samtalen handler om, og hvor den står nu" },
+  "relevance": { "kildens sourceKey": "hide|low|normal|high" }
 }
+
+"relevance" er din vurdering af HVER kilde — én pr. sourceKey, ingen udeladt — målt mod familiens ønsker nederst:
+- "hide": familiens liste siger, at den slags ikke skal med. Vises ikke.
+- "low": familiens liste siger, at det betyder mindre for dem. Vises kun under "Godt at vide", aldrig som et punkt.
+- "normal": ingen af familiens ønsker taler for eller imod. Indhold og rækkevidde afgør placeringen.
+- "high": familiens liste siger, at det er vigtigt for dem — fx en afsender de har nævnt, eller et emne de har bedt om. Kommer altid på siden som et punkt, også hvis du ikke fandt noget konkret at udtrække fra den.
+Har familien ingen ønsker på listen, er alt "normal". Signalerne bestemmer, hvad der står på et punkt; "relevance" bestemmer, hvor højt kilden må nå.
 
 Ufravigelige regler:
 - "quote" SKAL være en ordret sammenhængende tekststump fra netop den kildes "tekst". Find du ikke belæg, så udelad signalet.
@@ -409,6 +524,7 @@ Ufravigelige regler:
 - Er samme sag sendt flere gange (fx samme møde i to tråde, eller samme tilbud fra to institutioner), så lav ÉT signal for den vigtigste kilde.
 - "concernsChild" er det vigtigste felt du udfylder. Sæt det til true, når beskeden kræver noget af forældrene VEDRØRENDE deres eget barn — tilmelding af barnet, noget barnet skal have med, en dag barnet skal møde anderledes, en aflysning der rammer barnets dag. Sæt det til false, når den ikke gør.
 - Hver kilde har en "raekkevidde": "child" og "class" er skrevet af nogen, der kender barnet; "institution" er sendt til hele skolen eller hele huset; "municipal" er sendt til alle forældre i kommunen. Hvor bredt noget er sendt ud, afgør ikke i sig selv, om det er relevant.
+- "conversationSummaries" laver du KUN for kilder med "antalBeskeder" på ${CONVERSATION_MIN_MESSAGES} eller derover — en enkelt besked læser man hellere selv. Skriv hvad samtalen handler om, hvem der har spurgt om hvad, og om der stadig mangler et svar fra os. Læseren kan folde hele samtalen ud under dit resumé, så skriv det som en indgang til den, ikke som en erstatning.
 - Skriv alt på dansk.`;
 
 /**
@@ -433,7 +549,7 @@ export function withPreferences(instructions: string, preferences: string[]): st
   if (lines.length === 0) return instructions;
   return `${instructions}
 
-Familiens ønsker til oversigten. De står på brugerens egen liste — ikke i noget, Aula har sendt — og de afgør, hvad der er vigtigt for netop denne familie: følg dem frem for dine egne prioriteringer, når I er uenige. De kan derimod aldrig ophæve reglerne ovenfor: du må stadig ikke opfinde kilder, datoer eller citater.
+Familiens ønsker til oversigten. De står på brugerens egen liste — ikke i noget, Aula har sendt — og de afgør, hvad der er vigtigt for netop denne familie: følg dem frem for dine egne prioriteringer, når I er uenige, og lad dem afgøre "relevance" for hver kilde. De kan derimod aldrig ophæve reglerne ovenfor: du må stadig ikke opfinde kilder, datoer eller citater.
 ${lines.map((p) => `- ${p}`).join('\n')}`;
 }
 
@@ -458,7 +574,7 @@ export async function extractSignals(
   // Keyed on the payload alone, a run made minutes after `aula remember` would
   // answer from a cache entry that never saw the new wish — the feature would
   // look broken exactly when it was being tried out.
-  const key = cacheKey({ payload, preferences: input.preferences });
+  const key = cacheKey({ contract: CONTRACT_VERSION, payload, preferences: input.preferences });
   const cachePath = join(CACHE_DIR, `extract-${key}.json`);
 
   if (opts.useCache !== false) {
@@ -491,6 +607,8 @@ export async function extractSignals(
       topline: null,
       signals: [],
       childSummaries: {},
+      relevance: {},
+      conversationSummaries: {},
       problems: ['modellens svar kunne ikke læses som JSON'],
     };
   }
