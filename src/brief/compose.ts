@@ -46,6 +46,10 @@ function composePayload(brief: RankedBrief, topline: string | null, summaries: R
     link: s.source.url,
     nyt: isNew(s.sourceKey),
     ogsaaFra: s.mergedSourceKeys.length,
+    // The family's own weighting of the source, as the extractor read their
+    // list — so the order within a section can follow it without the composer
+    // re-deriving it from the prose.
+    relevans: s.relevance,
   });
 
   const { input } = brief;
@@ -98,7 +102,7 @@ Svar KUN med ét JSON-objekt. Ingen kodeblok. Ingen forklaring:
 }
 
 Regler:
-1. "handling" og "kommende" er signalId'er fra inputtets "kraeverHandling" og "kommende" — vigtigst først; din rækkefølge ER prioriteringen. Alt du udelader, vises alligevel nederst i sin sektion, så udeladelse er nedprioritering, aldrig sletning. Et punkt fra "baggrund" må promoveres, hvis det reelt beder om noget.
+1. "handling" og "kommende" er signalId'er fra inputtets "kraeverHandling" og "kommende" — vigtigst først; din rækkefølge ER prioriteringen. "relevans" er familiens egen vægtning af kilden ("high" før "normal" før "low"), og den vejer tungere end din. Alt du udelader, vises alligevel nederst i sin sektion, så udeladelse er nedprioritering, aldrig sletning. Et punkt fra "baggrund" må promoveres, hvis det reelt beder om noget.
 2. "topline": behold eller skærp den givne topline. Konklusionen først, detaljen bagefter.
 3. "titel"/"hvorfor" udelades hvor inputtets formulering allerede er god; omskriv kun for at gøre det kortere, mere konkret eller imperativt.
 4. Skriv alt på dansk. Hold det skimbart på 20 sekunder.`;
@@ -116,8 +120,8 @@ export type ComposePlan = {
 
 /**
  * Reads whatever the model answered into a plan the renderer can trust:
- * unknown ids are dropped, hidden-tier ids are refused (the noise gate is not
- * the model's to reopen), duplicates keep their first placement.
+ * unknown ids are dropped, hidden-tier ids are refused (what the family's list
+ * hid is not the composer's to reopen), duplicates keep their first placement.
  */
 export function parsePlan(raw: unknown, brief: RankedBrief): { plan: ComposePlan; problems: string[] } {
   const problems: string[] = [];
@@ -365,7 +369,7 @@ function buildPage(brief: RankedBrief, act: CardSpec[], week: CardSpec[], opts: 
 
   ${degradedDay ? '' : `<section><h2>Datastatus</h2>${datastatus}</section>`}
 
-  ${hidden.length ? `<details class="muted"><summary>${hidden.length} fællesbeskeder skjult</summary>${hidden.map((s) => `<div class="di"><b>${escapeHtml(s.title)}</b><p>${escapeHtml(s.source.groups.join(', '))}</p></div>`).join('')}</details>` : ''}
+  ${hidden.length ? `<details class="muted"><summary>${hidden.length} skjult efter jeres ønsker</summary>${hidden.map((s) => `<div class="di"><b>${escapeHtml(s.title)}</b><p>${escapeHtml(s.source.author ?? s.source.groups.join(', '))}</p></div>`).join('')}</details>` : ''}
 
   <footer>Genereret lokalt af aula-cli · kun modelkald til Claude forlader maskinen</footer>
 </div>`;

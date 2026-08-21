@@ -1188,7 +1188,7 @@ function renderBrief(result: {
   const lines = [
     result.topline ?? '(ingen topline)',
     '',
-    `${result.signals} punkt(er) vist, ${result.hidden} fællesbesked(er) skjult — layout: ${result.layout}`,
+    `${result.signals} punkt(er) vist, ${result.hidden} skjult efter jeres ønsker — layout: ${result.layout}`,
     `HTML: ${result.html}`,
   ];
   if (result.pdf) lines.push(`PDF:  ${result.pdf}`);

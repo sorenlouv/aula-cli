@@ -32,6 +32,7 @@ const MUST_SHOW: RankedSignal = {
   tier: 'act',
   mustShow: true,
   audience: 'child',
+  relevance: 'normal',
   reasons: [],
   source: SOURCE,
   mergedSourceKeys: [],
@@ -44,6 +45,7 @@ const HIDDEN: RankedSignal = {
   tier: 'hidden',
   mustShow: false,
   audience: 'municipal',
+  relevance: 'hide',
   sourceKey: 'post:9',
   source: { ...SOURCE, key: 'post:9', title: 'Forældrekursus', audience: 'municipal', groups: ['Alle forældre'] },
 };

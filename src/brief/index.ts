@@ -25,7 +25,7 @@ import {
   saveState,
   whichAreNew,
 } from './state.ts';
-import type { RankedBrief } from './types.ts';
+import type { RankedBrief, Relevance } from './types.ts';
 import { validatePage } from './validate.ts';
 
 export type BriefOptions = {
@@ -74,6 +74,9 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   let topline: string | null = null;
   let summaries: Record<string, string> = {};
   let modelSignals: ReturnType<typeof signalsFromRules> = [];
+  // The family's list, as the model read it per source. Empty on the
+  // rules-only path, which then hides nothing — see `rank`.
+  let relevance: Record<string, Relevance> = {};
   let extractionRan = opts.useModel === false;
 
   if (opts.useModel !== false) {
@@ -82,6 +85,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
       topline = extracted.topline;
       summaries = extracted.childSummaries;
       modelSignals = extracted.signals;
+      relevance = extracted.relevance;
       extractionRan = true;
       for (const problem of extracted.problems) {
         notes.push(`Udtræk afvist: ${problem}`);
@@ -91,7 +95,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
     }
   }
 
-  const brief = rank(input, [...modelSignals, ...signalsFromRules(input, now)]);
+  const brief = rank(input, [...modelSignals, ...signalsFromRules(input, now)], relevance);
 
   // ---------------------------------------------------------------- compose
   const state = loadState();
