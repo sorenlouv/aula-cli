@@ -39,10 +39,17 @@ describe('preferences.md', () => {
     expect(readPreferences(prefsPath())).toEqual([]);
   });
 
-  test('a file that is only its header holds no preferences', () => {
+  test('an emptied list writes an empty file, not a stub', () => {
     const path = prefsPath();
     writePreferences([], path);
+    expect(readFileSync(path, 'utf8')).toBe('');
     expect(readPreferences(path)).toEqual([]);
+  });
+
+  test('the file holds the list and nothing else', () => {
+    const path = prefsPath();
+    writePreferences([JOHN], path);
+    expect(readFileSync(path, 'utf8')).toBe(`- ${JOHN}\n`);
   });
 
   test('remembers a wish, and reads it back verbatim', () => {
@@ -61,7 +68,7 @@ describe('preferences.md', () => {
   test('a leading bullet is the users, not ours', () => {
     const path = blank();
     addPreference('- ingen billeder, tak', path);
-    expect(readFileSync(path, 'utf8')).toContain('\n- ingen billeder, tak\n');
+    expect(readFileSync(path, 'utf8')).toBe('- ingen billeder, tak\n');
   });
 
   test('the same wish twice says so rather than writing it twice', () => {
@@ -103,29 +110,34 @@ describe('preferences.md', () => {
     expect(() => removePreference(1, blank())).toThrow(/Nothing is remembered yet/);
   });
 
-  test('hand-edited markdown parses: the file is meant to be opened', () => {
-    // The header tells the user they may edit it, so anything a person would
-    // plausibly type has to survive — asterisks, indentation, their own notes.
+  test('a line typed by hand counts, with or without the dash', () => {
+    // The failure this replaced: the file invited hand-editing, the parser took
+    // bullets only, and a line typed without a dash was dropped in silence —
+    // the worst possible outcome for a preference file.
     expect(
       parsePreferences(
         [
           '# Mine præferencer',
           '',
-          'Noget prosa, som ikke er et ønske.',
-          '* ingen billeder',
+          'jeg vil gerne se billeder',
+          '* ingen fællesbeskeder',
           '  - John er vigtig',
           '-',
           '- ',
           '',
         ].join('\n'),
       ),
-    ).toEqual(['ingen billeder', 'John er vigtig']);
+    ).toEqual(['jeg vil gerne se billeder', 'ingen fællesbeskeder', 'John er vigtig']);
   });
 
-  test('a corrupt file is an empty list — it must never stop the brief', () => {
+  test('an unreadable file never stops the brief', () => {
+    // Whatever is in there, reading it is not allowed to throw: the 06:30 run
+    // has nobody watching, and a broken preference must not cost the overview.
     const path = prefsPath();
     writePreferences([JOHN], path);
     writeFileSync(path, Buffer.from([0xff, 0xfe, 0x00]));
+    expect(() => readPreferences(path)).not.toThrow();
+    rmSync(path);
     expect(readPreferences(path)).toEqual([]);
   });
 

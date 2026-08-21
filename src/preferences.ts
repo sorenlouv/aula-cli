@@ -23,12 +23,18 @@
  *   stored path, which is what keeps the tests off the real one.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { AULA_DIR } from './auth.ts';
-import { UsageError } from './errors.ts';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
+import { AULA_DIR } from "./auth.ts";
+import { UsageError } from "./errors.ts";
 
-export const PREFERENCES_PATH = join(AULA_DIR, 'preferences.md');
+export const PREFERENCES_PATH = join(AULA_DIR, "preferences.md");
 
 /**
  * A ceiling, not a target. Every line goes into every brief prompt, so an
@@ -67,13 +73,14 @@ export const MAX_PREFERENCES = 30;
  * for, the cheaper of the two failures for a tool whose worst outcome is a
  * miss.
  */
-export const MUNICIPAL_IS_NOISE = 'Fællesbeskeder til alle forældre i kommunen er aldrig relevante for os.';
+export const MUNICIPAL_IS_NOISE =
+  "Fællesbeskeder til alle forældre i kommunen er aldrig relevante for os.";
 
 export const DEFAULT_PREFERENCES: readonly string[] = [
-  'Det vigtigste for mig er ting der skal medbringes, afleveres, tilmeldes eller besvares — og nye faste aftaler i ugen.',
-  'Beskeder og opslag fra mit barns egen klasse eller stue er næsten altid relevante.',
-  'En besked til hele skolen tæller kun, når den handler om mit barns dag: skolefoto, som hele klassen skal med til, er relevant — et forældrekursus er ikke.',
-  'Tilbud vi selv kan vælge til — kurser, forløb, netværk, temaaftener, foredrag — er ikke opgaver for os.',
+  "Det vigtigste for mig er ting der skal medbringes, afleveres, tilmeldes eller besvares — og nye faste aftaler i ugen.",
+  "Beskeder og opslag fra mit barns egen klasse eller stue er næsten altid relevante.",
+  "En besked til hele skolen tæller kun, når den handler om mit barns dag: skolefoto, som hele klassen skal med til, er relevant — et forældrekursus er ikke.",
+  "Tilbud vi selv kan vælge til — kurser, forløb, netværk, temaaftener, foredrag — er mindre relevante.",
   MUNICIPAL_IS_NOISE,
 ];
 
@@ -93,10 +100,10 @@ export const DEFAULT_PREFERENCES: readonly string[] = [
  */
 export function parsePreferences(raw: string): string[] {
   return raw
-    .split('\n')
+    .split("\n")
     .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith('#'))
-    .map((line) => line.replace(/^[-*]\s+/, '').trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#"))
+    .map((line) => line.replace(/^[-*]\s*/, "").trim())
     .filter((line) => line.length > 0);
 }
 
@@ -106,7 +113,7 @@ export function parsePreferences(raw: string): string[] {
  */
 export function readPreferences(path = PREFERENCES_PATH): string[] {
   try {
-    return parsePreferences(readFileSync(path, 'utf8'));
+    return parsePreferences(readFileSync(path, "utf8"));
   } catch {
     return [];
   }
@@ -126,11 +133,16 @@ export function loadPreferences(path = PREFERENCES_PATH): string[] {
   return readPreferences(path);
 }
 
-export function writePreferences(lines: string[], path = PREFERENCES_PATH): void {
+export function writePreferences(
+  lines: string[],
+  path = PREFERENCES_PATH,
+): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   // Written as a Markdown list so the file reads well anywhere, parsed as if
   // the dashes were not there — see `parsePreferences`.
-  const body = lines.length ? `${lines.map((line) => `- ${line}`).join('\n')}\n` : '';
+  const body = lines.length
+    ? `${lines.map((line) => `- ${line}`).join("\n")}\n`
+    : "";
   writeFileSync(path, body, { mode: 0o600 });
   // `mode` on write only applies when the file is created, and this one may
   // predate the rule — or have been created by hand.
@@ -139,7 +151,10 @@ export function writePreferences(lines: string[], path = PREFERENCES_PATH): void
 
 /** A preference is one line. Pasted newlines and stray bullets are the user's, not ours. */
 function normalise(text: string): string {
-  return text.replace(/^\s*[-*]\s+/, '').replace(/\s+/g, ' ').trim();
+  return text
+    .replace(/^\s*[-*]\s+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export type RememberResult = {
@@ -149,18 +164,25 @@ export type RememberResult = {
   preferences: string[];
 };
 
-export function addPreference(text: string, path = PREFERENCES_PATH): RememberResult {
+export function addPreference(
+  text: string,
+  path = PREFERENCES_PATH,
+): RememberResult {
   const line = normalise(text);
   if (!line) {
-    throw new UsageError('Usage: aula remember "det du vil huskes på" — fx "beskeder fra John (Peters far) er altid vigtige".');
+    throw new UsageError(
+      'Usage: aula remember "det du vil huskes på" — fx "beskeder fra John (Peters far) er altid vigtige".',
+    );
   }
   const preferences = loadPreferences(path);
-  const already = preferences.find((existing) => existing.toLowerCase() === line.toLowerCase());
+  const already = preferences.find(
+    (existing) => existing.toLowerCase() === line.toLowerCase(),
+  );
   if (already) return { added: false, text: already, preferences };
   if (preferences.length >= MAX_PREFERENCES) {
     throw new UsageError(
       `There are already ${preferences.length} preferences, which is the limit.\n` +
-        'Run `aula preferences` to see them and `aula forget <nr>` to drop one first.',
+        "Run `aula preferences` to see them and `aula forget <nr>` to drop one first.",
     );
   }
   const next = [...preferences, line];
@@ -177,7 +199,10 @@ export function addPreference(text: string, path = PREFERENCES_PATH): RememberRe
  * from a script and from Claude — so printing the casualties is the whole
  * safety net.
  */
-export function resetPreferences(path = PREFERENCES_PATH): { dropped: string[]; preferences: string[] } {
+export function resetPreferences(path = PREFERENCES_PATH): {
+  dropped: string[];
+  preferences: string[];
+} {
   const defaults = new Set<string>(DEFAULT_PREFERENCES);
   const dropped = readPreferences(path).filter((line) => !defaults.has(line));
   const preferences = [...DEFAULT_PREFERENCES];
@@ -186,7 +211,10 @@ export function resetPreferences(path = PREFERENCES_PATH): { dropped: string[]; 
 }
 
 /** `index` is 1-based: the number `aula preferences` printed next to the line. */
-export function removePreference(index: number, path = PREFERENCES_PATH): { removed: string; preferences: string[] } {
+export function removePreference(
+  index: number,
+  path = PREFERENCES_PATH,
+): { removed: string; preferences: string[] } {
   const preferences = loadPreferences(path);
   const removed = preferences[index - 1];
   if (removed === undefined) {
