@@ -51,6 +51,7 @@ import { explain } from './brief/rank.ts';
 import { BRIEF_DIR, loadState, recordDeploy, saveState, todayIsComplete } from './brief/state.ts';
 import { runDoctor } from './doctor.ts';
 import { AulaSessionError, UsageError } from './errors.ts';
+import { fmt } from './io.ts';
 import { AulaAuthFlowError } from './vendor/aula-auth/index.ts';
 import { resolveFamily, selectChildren, type Family } from './family.ts';
 import { runLogin, runLogout, runRefreshStepUp, runStatus } from './login.ts';
@@ -1213,11 +1214,27 @@ function parseAuthMethod(raw: string | undefined): 'APP' | 'CODE_TOKEN' {
 
 // ----------------------------------------------------------------------- run
 
+/**
+ * One shape for every failure a user is meant to read: a marked, bold headline
+ * on its own line, and everything the message says after that indented beneath
+ * it. The indent is what makes a wall of stderr scannable — the reader can see
+ * where the problem starts without reading it first.
+ *
+ * Nothing is re-wrapped here. Messages built from a `Remedy` are already set to
+ * the terminal width, and re-flowing the rest would join lines their authors
+ * broke on purpose.
+ */
+function reportProblem(message: string): void {
+  const [headline = '', ...rest] = message.split('\n');
+  console.error(`${fmt.red('✗')} ${fmt.bold(headline)}`);
+  for (const line of rest) console.error(line === '' ? '' : `  ${line}`);
+}
+
 try {
   process.exitCode = await main();
 } catch (err) {
   if (err instanceof UsageError) {
-    console.error(err.message);
+    reportProblem(err.message);
     process.exitCode = 1;
   } else if (
     err instanceof AulaAuthError ||
@@ -1226,12 +1243,17 @@ try {
     // token refresh is a credentials problem, not a bug, so no stack trace.
     err instanceof AulaAuthFlowError
   ) {
-    console.error(err.message);
+    reportProblem(err.message);
     process.exitCode = 2;
   } else if (err instanceof AulaApiError) {
-    console.error(`Aula API error: ${err.message}`);
+    // No "Aula API error:" prefix any more. It labelled the failure without
+    // saying anything about it, and it pushed the part worth reading — which
+    // is now a plain-language headline — into the middle of the line.
+    reportProblem(err.message);
     process.exitCode = 3;
   } else {
+    // An unexpected error is a bug in this client, so the stack is the useful
+    // part and it is printed raw rather than dressed up as advice.
     console.error(err instanceof Error ? (err.stack ?? err.message) : String(err));
     process.exitCode = 1;
   }

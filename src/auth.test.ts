@@ -138,3 +138,64 @@ test('logout removes the stored login and the cached responses', () => {
   assert.ok(!existsSync(join(box.dir, 'cache')), 'the cache holds message bodies — it goes too');
   assert.equal(JSON.parse(box.run('status').stdout).loggedIn, false);
 });
+
+/**
+ * The guard on the fixture seeder.
+ *
+ * `seed-tokens.ts` writes a *fixture* login through the real store. Run once
+ * without `$AULA_DIR` it overwrites `~/.aula/tokens.json` — including the
+ * refresh token, so nothing can recover it and the only way back is MitID with
+ * the phone. That is a bad enough half-hour on its own; what made it worse is
+ * that the resulting failure does not look like a credentials problem, because
+ * Aula reports a token it will not accept as an HTTP 500.
+ *
+ * `HOME` is redirected so this test is safe to run: if the guard ever stops
+ * working, the file it destroys is in a temp directory rather than the one
+ * belonging to whoever ran `bun test`.
+ */
+function seedWithFakeHome(overrides: Record<string, string> = {}) {
+  const home = mkdtempSync(join(tmpdir(), 'aula-fake-home-'));
+  sandboxes.push(home);
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    HOME: home,
+    NO_COLOR: '1',
+    ...overrides,
+  };
+  if (!('AULA_DIR' in overrides)) delete env.AULA_DIR;
+
+  const r = Bun.spawnSync({ cmd: ['bun', join(ROOT, 'src/testing/seed-tokens.ts')], env });
+  return { home, code: r.exitCode, stderr: r.stderr.toString() };
+}
+
+test('the token seeder refuses to write fixture credentials into the real ~/.aula', () => {
+  const seeded = seedWithFakeHome();
+
+  assert.equal(seeded.code, 1, 'it must refuse rather than write');
+  assert.ok(
+    !existsSync(join(seeded.home, '.aula', 'tokens.json')),
+    'no token file may be created at all',
+  );
+  assert.match(seeded.stderr, /Refusing to seed fixture credentials/);
+  assert.match(seeded.stderr, /AULA_DIR=\$\(mktemp -d\)/, 'and it should show how to run it right');
+});
+
+test('the token seeder refuses even when $AULA_DIR is pointed at the real store', () => {
+  const home = mkdtempSync(join(tmpdir(), 'aula-fake-home-'));
+  sandboxes.push(home);
+  const real = join(home, '.aula');
+
+  const r = Bun.spawnSync({
+    cmd: ['bun', join(ROOT, 'src/testing/seed-tokens.ts')],
+    env: { ...process.env, HOME: home, AULA_DIR: real, NO_COLOR: '1' },
+  });
+
+  assert.equal(r.exitCode, 1, 'naming the real directory explicitly is not consent');
+  assert.ok(!existsSync(join(real, 'tokens.json')));
+});
+
+test('the token seeder still works where the tests point it', () => {
+  const box = sandbox();
+  box.storeTokens();
+  assert.ok(existsSync(box.tokenPath), 'a sandboxed $AULA_DIR is exactly what it is for');
+});

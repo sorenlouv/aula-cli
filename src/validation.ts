@@ -8,11 +8,24 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * "Absent, or a T" — where *absent* covers `null` as well as `undefined`.
+ *
+ * JSON has no `undefined`. Parsing a payload can only produce it from a key
+ * that is not there at all; an optional field the server does send but has
+ * nothing to put in arrives as `null`. Accepting only `undefined` therefore
+ * rejects the commonest way a JSON API says "not applicable" — which is how a
+ * MitID response with `"nextAuthenticator": null` came to be reported as an
+ * unexpected shape, hiding the perfectly good error message underneath it.
+ *
+ * The narrowed type keeps the `null`, so callers have to deal with it rather
+ * than being told a field is missing when it is present and empty.
+ */
 export function isOptional<T>(
   value: unknown,
   predicate: (candidate: unknown) => candidate is T,
-): value is T | undefined {
-  return value === undefined || predicate(value);
+): value is T | null | undefined {
+  return value === undefined || value === null || predicate(value);
 }
 
 export function isArrayOf<T>(
@@ -109,3 +122,37 @@ function isoWeeksInYear(year: number): number {
   const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
   return Math.ceil(((date.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
 }
+
+/**
+ * A one-line sketch of a parsed payload: keys and their JSON types, never
+ * their values.
+ *
+ * For when a guard rejects something and "unexpected shape" is all the error
+ * can say. Diagnosing the MitID login meant hand-writing this function at a
+ * REPL to discover that two fields were `null` rather than absent — which is
+ * exactly the sort of thing the error should have been able to say itself.
+ *
+ * Values are deliberately omitted rather than truncated. These payloads carry
+ * session ids, salts and signatures, and an error message is the last place
+ * that should be making its own judgement about which of them are secret.
+ */
+export function describeShape(value: unknown, depth = 2): string {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '[]';
+    return depth <= 0 ? '[…]' : `[${describeShape(value[0], depth - 1)}, …×${value.length}]`;
+  }
+  if (typeof value !== 'object') return typeof value;
+  if (depth <= 0) return '{…}';
+
+  const entries = Object.entries(value);
+  const shown = entries
+    .slice(0, SHAPE_MAX_KEYS)
+    .map(([key, item]) => `${key}: ${describeShape(item, depth - 1)}`);
+  if (entries.length > SHAPE_MAX_KEYS) shown.push(`…+${entries.length - SHAPE_MAX_KEYS} more`);
+  return `{${shown.join(', ')}}`;
+}
+
+/** Enough keys to recognise a payload, few enough to stay one readable line. */
+const SHAPE_MAX_KEYS = 12;

@@ -325,7 +325,7 @@ test('cookie auth never adds an access_token parameter', async () => {
   );
 });
 
-test('malformed JSON envelopes fail explicitly instead of becoming typed data', async () => {
+test('a response with no status envelope fails explicitly instead of becoming typed data', async () => {
   let call = 0;
   await withFetch(
     async () => {
@@ -338,7 +338,11 @@ test('malformed JSON envelopes fail explicitly instead of becoming typed data', 
         () => client.getDailyPresence([11]),
         (err: unknown) => {
           assert.ok(err instanceof AulaApiError);
-          assert.match(err.message, /malformed JSON envelope/i);
+          assert.match(err.message, /could not read/i);
+          // The method, and a way to see what Aula actually sent — the two
+          // things that make this reportable rather than just annoying.
+          assert.match(err.message, /presence\.getDailyOverview/);
+          assert.match(err.message, /aula raw presence\.getDailyOverview/);
           return true;
         },
       );
@@ -915,5 +919,94 @@ test('a failed bootstrap is not sticky for the life of the client', async () => 
     sent.filter((m) => m === 'profiles.getProfileContext').length,
     2,
     'a bootstrap that threw must be retried, not remembered as done',
+  );
+});
+
+/**
+ * The failure that started all this.
+ *
+ * Aula answers an access token it will not accept with HTTP 500 *and* a status
+ * code 0 — "success" — envelope, so believing the envelope handed `"intern
+ * fejl"` on as data and the user was eventually told the payload was malformed:
+ * a shape complaint, three layers from the cause, for a dead login.
+ */
+const INTERN_FEJL = { status: { code: 0, message: 'intern fejl' }, data: 'intern fejl' };
+
+test('a 500 with a success envelope is reported as a rejected login, not a shape error', async () => {
+  const seen: string[] = [];
+  await withFetch(
+    async (input) => {
+      const authenticated = new URL(String(input)).searchParams.has('access_token');
+      seen.push(authenticated ? 'authenticated' : 'anonymous');
+      // A healthy Aula turns a credential-free request away cleanly, which is
+      // what tells the two causes of a 500 apart.
+      return authenticated
+        ? jsonResponse(INTERN_FEJL, 500)
+        : jsonResponse({ status: { code: 448 }, data: null }, 403);
+    },
+    async () => {
+      const client = new AulaClient({
+        auth: { kind: 'token', accessToken: 'stale', username: 'u' },
+      });
+      await assert.rejects(() => client.getProfiles(), (err: unknown) => {
+        assert.ok(err instanceof AulaAuthError, 'a token Aula will not accept is an auth problem');
+        assert.match(err.message, /rejected your login/i);
+        assert.match(err.message, /bun run login/);
+        assert.doesNotMatch(err.message, /malformed|payload/i, 'the old, misleading complaint');
+        return true;
+      });
+    },
+  );
+
+  assert.equal(
+    seen.filter((s) => s === 'anonymous').length,
+    1,
+    'it should ask once whether Aula is up at all, and not once per failed read',
+  );
+});
+
+test('a 500 that Aula gives everyone is reported as an outage, not as a login problem', async () => {
+  await withFetch(
+    async () => jsonResponse(INTERN_FEJL, 500),
+    async () => {
+      const client = new AulaClient({
+        auth: { kind: 'token', accessToken: 'fine', username: 'u' },
+      });
+      await assert.rejects(() => client.getProfiles(), (err: unknown) => {
+        assert.ok(err instanceof AulaApiError);
+        assert.ok(!(err instanceof AulaAuthError), 'logging in again would not help');
+        assert.match(err.message, /having trouble/i);
+        // Sending someone through a MitID round-trip on their phone to fix an
+        // outage is the specific waste this distinction buys.
+        assert.doesNotMatch(err.message, /bun run login/);
+        return true;
+      });
+    },
+  );
+});
+
+test('a success envelope of the wrong shape says what arrived and how to look at it', async () => {
+  let call = 0;
+  await withFetch(
+    async () => {
+      call++;
+      // The version probe has to succeed or the read never happens.
+      return call === 1
+        ? jsonResponse(OK_PROFILES)
+        : jsonResponse({ status: { code: 0 }, data: 'intern fejl' });
+    },
+    async () => {
+      const client = new AulaClient({
+        auth: { kind: 'token', accessToken: 'tok', username: 'u' },
+      });
+      await assert.rejects(() => client.getProfiles(), (err: unknown) => {
+        // The detail is wrapped to the terminal, so match on the flattened text.
+        const flat = (err as Error).message.replace(/\s+/g, ' ');
+        assert.match(flat, /does not understand/i);
+        assert.match(flat, /a string \("intern fejl"\)/, 'name what actually arrived');
+        assert.match(flat, /aula raw profiles\.getProfilesByLogin/, 'and how to go and see it');
+        return true;
+      });
+    },
   );
 });

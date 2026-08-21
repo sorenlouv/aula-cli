@@ -748,3 +748,38 @@ test('preferences reset puts the shipped list back and names the casualties', ()
   assert.notEqual(bad.code, 0);
   assert.match(bad.stderr, /preferences reset/);
 });
+
+/**
+ * What the user actually reads when their login has died.
+ *
+ * This is the end-to-end version of the failure that produced "Aula API error:
+ * Malformed object payload from profiles.getProfilesByLogin." — a message that
+ * named the wrong layer, offered nothing to do, and sent at least one person
+ * reading the client's validation code instead of logging in again.
+ */
+test('a login Aula will not accept is reported in plain language, with the fix', () => {
+  const box = sandbox({ FAKE_AULA_REJECT_TOKEN: '1' });
+  const result = box.run('whoami');
+
+  assert.equal(result.code, 2, 'a credentials problem, so the skill can tell it from a bug');
+
+  const flat = result.stderr.replace(/\s+/g, ' ');
+  assert.match(flat, /Aula rejected your login/i);
+  assert.match(flat, /bun run login/, 'the fix travels with the failure');
+  assert.doesNotMatch(flat, /Malformed|payload|envelope/i, 'no shape complaints');
+  assert.doesNotMatch(flat, /Aula API error/, 'the prefix that labelled without saying anything');
+
+  // The first line has to carry the point on its own: `doctor` reports only
+  // that line, and the CLI is the only place the rest is even shown.
+  assert.match(result.stderr.split('\n')[0] ?? '', /Aula rejected your login\.$/);
+});
+
+test('Aula being down does not send the user off to redo MitID', () => {
+  const box = sandbox({ FAKE_AULA_DOWN: '1' });
+  const result = box.run('whoami');
+
+  assert.equal(result.code, 3, 'not a credentials problem');
+  const flat = result.stderr.replace(/\s+/g, ' ');
+  assert.match(flat, /Aula is having trouble/i);
+  assert.doesNotMatch(flat, /bun run login/, 'logging in again cannot fix an outage');
+});

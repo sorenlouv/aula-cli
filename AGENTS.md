@@ -37,6 +37,31 @@ handles this; keep the cookie jar alive across requests.
 Aula rejects `Authorization: Bearer` outright. The token goes in the query
 string.
 
+### A rejected access token is an HTTP 500 with a *success* envelope
+
+Send a token Aula will not accept — expired, malformed, from another login —
+and you get:
+
+```
+HTTP 500
+{"status":{"code":0,"message":"intern fejl"},"data":"intern fejl"}
+```
+
+Code `0` is *success*. So the envelope check passes, `"intern fejl"` is handed
+on as the payload, and the failure finally surfaces wherever that string first
+fails to be an object — a shape complaint several layers from a dead login.
+Sending **no** token returns a clean HTTP 403 + code `448` instead, so this is
+specifically how Aula reports a token it dislikes.
+
+The same 500 is what Aula returns when it is genuinely broken, and the body
+does not distinguish them — but an experiment does: while Aula is healthy a
+*credential-free* request is answered cleanly, and while it is not, that
+request 5xxes too. `AulaClient.#serverError` makes exactly that one extra
+request so the error can say which of the two happened, because the reactions
+are opposite: one is a MitID login with the phone, the other is waiting.
+
+Never trust the envelope on a 5xx.
+
 ### Status code 10 means two unrelated things
 
 Told apart only by the HTTP status:
@@ -166,6 +191,15 @@ Three separate traps in one endpoint:
 - The login jar holds cookies for `login.aula.dk`, `broker.unilogin.dk` and
   `nemlog-in.mitid.dk` — **nothing for `www.aula.dk`**. Do not expect it to
   contain an API session; that comes from the bootstrap above.
+- MitID sends **`null`**, not absence, for optional fields it has nothing to put
+  in. A `/next` that reports an error carries `"nextAuthenticator": null` and
+  `"nextSessionId": null`. A guard that treats "optional" as *only* `undefined`
+  rejects the whole response — and since the payload underneath is usually the
+  CAP008 message this CLI already explains well, the cost is a clear error
+  turning into an unactionable one. `isOptional` in `src/validation.ts` accepts
+  both, and the response interfaces say `| null` where the wire does. Assume
+  nullable at any JSON boundary: **JSON has no `undefined`**, so a parsed
+  payload can only produce it from a key that is not there at all.
 
 ## Finding an endpoint that is not wrapped yet
 
@@ -227,6 +261,17 @@ the sensitive ones and look exactly like success.
 `auth.test.ts` go further and run the CLI as a process against a stubbed Aula
 injected with `bun --preload`, which is the only level at which a flag that is
 parsed and then dropped — `digest --child`, once — is visible at all.
+
+Those process-level tests need a login on disk, so they spawn
+`src/testing/seed-tokens.ts` with `$AULA_DIR` pointed at a temp directory. Run
+that script **without** `$AULA_DIR` and it would overwrite the real
+`~/.aula/tokens.json` — including the refresh token, which no amount of
+retrying gets back. It refuses to run outside a sandbox for that reason; if you
+need a fixture login by hand:
+
+```bash
+AULA_DIR=$(mktemp -d) bun src/testing/seed-tokens.ts
+```
 
 But no stubbed suite can tell you whether the API still behaves, because nearly
 every trap above returns a *successful-looking* response. That is what `doctor`

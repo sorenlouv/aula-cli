@@ -65,51 +65,63 @@ export interface NextAuthenticator {
   authenticatorSessionId: string;
 }
 
-/** Raw response from `POST /next`. Errors shaped per Python parse path. */
+/**
+ * Raw response from `POST /next`. Errors shaped per Python parse path.
+ *
+ * The `| null` on the optional fields is not defensive typing — it is what
+ * MitID sends. A `/next` that reports an error carries `"nextAuthenticator":
+ * null` and `"nextSessionId": null` rather than omitting them, and treating
+ * that as "absent" is what previously turned an ordinary CAP008 into a parse
+ * failure. Anything optional here should be assumed nullable until the wire
+ * says otherwise.
+ */
 export interface NextAuthenticatorResponse {
-  nextAuthenticator?: NextAuthenticator;
+  nextAuthenticator?: NextAuthenticator | null;
   combinations?: ReadonlyArray<{
     id: string;
     combinationItems: ReadonlyArray<{ name: string }>;
-  }>;
+  }> | null;
   errors?: ReadonlyArray<{
-    errorCode?: string;
-    message?: string;
-    userMessage?: { text?: { text?: string }; supportErrorId?: string };
-  }>;
+    errorCode?: string | null;
+    message?: string | null;
+    userMessage?: {
+      text?: { text?: string | null } | null;
+      supportErrorId?: string | null;
+    } | null;
+  }> | null;
   /** Set after PASSWORD prove; named differently because MitID. */
-  nextSessionId?: string;
+  nextSessionId?: string | null;
 }
 
 /** Returned by `POST /init-auth` (APP). Polled via `pollUrl`. */
 export interface AppInitAuthResponse {
-  pollUrl?: string;
-  ticket?: string;
-  errorCode?: string;
+  pollUrl?: string | null;
+  ticket?: string | null;
+  errorCode?: string | null;
 }
 
 /** Single poll response shape. We discriminate on `status`. */
 export interface AppPollResponse {
   status: string;
-  channelBindingValue?: string;
-  updateCount?: number;
-  confirmation?: boolean;
+  channelBindingValue?: string | null;
+  updateCount?: number | null;
+  confirmation?: boolean | null;
   payload?: {
     response: string;
     responseSignature: string;
-  };
+  } | null;
 }
 
 /** Common SRP init response (init / codetoken-init / password-init). */
 export interface SrpInitResponse {
-  pbkdf2Salt?: { value: string };
+  pbkdf2Salt?: { value: string } | null;
   srpSalt: { value: string };
   randomB: { value: string };
 }
 
 /** Response from `PUT /finalization`. */
 export interface FinalizationResponse {
-  authorizationCode?: string;
+  authorizationCode?: string | null;
 }
 
 /** What `identifyAsUser` returns to the caller — the available auth methods. */

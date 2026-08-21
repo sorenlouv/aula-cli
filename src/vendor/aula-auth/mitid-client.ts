@@ -19,6 +19,7 @@
 
 import { Buffer } from 'node:buffer';
 import {
+  describeShape,
   errorMessage,
   isArrayOf,
   isNumber,
@@ -704,7 +705,14 @@ function parseResponse<T>(
   description: string,
 ): T {
   const value = parseJsonValue(body, description);
-  if (!predicate(value)) throw new MitidError(`${description} has an unexpected JSON shape`);
+  if (!predicate(value)) {
+    // The shape, not just the verdict. "Unexpected shape" on its own sends the
+    // reader to a REPL to find out which field it meant; MitID sends thirty-key
+    // payloads and the answer is usually one of them being null.
+    throw new MitidError(
+      `${description} has an unexpected JSON shape — MitID sent ${describeShape(value)}`,
+    );
+  }
   return value;
 }
 
