@@ -569,3 +569,82 @@ test('new --catch-up runs when the last run was incomplete', () => {
   assert.equal(state.lastRun.complete, true);
   assert.equal(state.lastRun.day, day);
 });
+
+// -------------------------------------------------------------- preferences
+
+test('remember, preferences, forget — the curation round trip', () => {
+  const box = sandbox();
+  const path = join(box.dir, 'preferences.md');
+
+  // A fresh install already has opinions, and says so. Before this they were
+  // sentences in the extraction prompt that no user could see or change.
+  assert.equal(existsSync(path), false);
+  const shipped = box.run('preferences');
+  assert.equal(shipped.code, 0, shipped.stderr);
+  assert.match(shipped.stdout, /1\. Det vigtigste for mig/);
+  assert.match(shipped.stdout, /5\. Fællesbeskeder til alle forældre i kommunen/);
+  assert.ok(existsSync(path), 'the defaults are written down, not held in code');
+
+  const remembered = box.run('remember', 'beskeder fra John (Hjaltes far) er altid vigtige');
+  assert.equal(remembered.code, 0, remembered.stderr);
+  assert.match(remembered.stdout, /Remembered:/);
+  assert.match(readFileSync(path, 'utf8'), /^- beskeder fra John \(Hjaltes far\) er altid vigtige$/m);
+  assert.match(box.run('preferences').stdout, /6\. beskeder fra John/);
+
+  // Claude will say it twice sooner or later; twice is still once.
+  assert.match(box.run('remember', 'Beskeder fra John (Hjaltes far) er ALTID vigtige').stdout, /Already remembered/);
+
+  // The point of the exercise: a shipped opinion the family disagrees with
+  // can be dropped, and stays dropped.
+  const forgotten = box.run('forget', '5');
+  assert.equal(forgotten.code, 0, forgotten.stderr);
+  assert.match(forgotten.stdout, /Forgotten: "Fællesbeskeder/);
+  const after = box.run('preferences');
+  assert.ok(!/kommunen/.test(after.stdout), 'the dropped default must not come back');
+  assert.match(after.stdout, /5\. beskeder fra John/);
+
+  const bad = box.run('forget', 'den om John');
+  assert.notEqual(bad.code, 0);
+  assert.match(bad.stderr, /aula preferences/);
+});
+
+test('a remembered wish reaches the model that writes the overview', () => {
+  // The wiring failure this file exists for: every piece works in isolation
+  // and the preference still never leaves the disk.
+  const box = sandboxWithClaude('ok', 'ikke JSON');
+  const log = join(box.dir, 'claude-calls.log');
+  box.env.FAKE_CLAUDE_LOG = log;
+  box.run('remember', 'beskeder fra John (Hjaltes far) er altid vigtige');
+
+  const result = box.run('new', '--no-deploy', '--no-open');
+  assert.equal(result.code, 0, result.stderr);
+
+  // The fake logs argv and nothing else, so a hit here is proof the wish
+  // travelled in the instructions — not on stdin, where the school's own
+  // untrusted prose goes.
+  const calls = readFileSync(log, 'utf8');
+  assert.match(calls, /beskeder fra John \(Hjaltes far\) er altid vigtige/);
+  assert.match(calls, /brugerens egen liste/);
+  // …and so do the opinions the tool ships with, by the same route.
+  assert.match(calls, /Fællesbeskeder til alle forældre i kommunen/);
+});
+
+test('preferences reset puts the shipped list back and names the casualties', () => {
+  const box = sandbox();
+  box.run('remember', 'beskeder fra John (Hjaltes far) er altid vigtige');
+  box.run('forget', '5'); // drop a shipped opinion too
+
+  const reset = box.run('preferences', 'reset');
+  assert.equal(reset.code, 0, reset.stderr);
+  assert.match(reset.stdout, /Reset preferences to the defaults/);
+  assert.match(reset.stdout, /Dropped 1 of your own/);
+  assert.match(reset.stdout, /beskeder fra John \(Hjaltes far\)/);
+
+  const listed = box.run('preferences').stdout;
+  assert.match(listed, /5\. Fællesbeskeder til alle forældre i kommunen/, 'the dropped default is back');
+  assert.ok(!/John/.test(listed), "the user's own line is gone");
+
+  const bad = box.run('preferences', 'nulstil');
+  assert.notEqual(bad.code, 0);
+  assert.match(bad.stderr, /preferences reset/);
+});

@@ -13,6 +13,7 @@ import {
   loadGroups,
 } from './../digest.ts';
 import { resolveFamily } from './../family.ts';
+import { loadPreferences } from './../preferences.ts';
 import type {
   Audience,
   BriefInput,
@@ -243,6 +244,10 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
     },
     items,
     health,
+    // Local, user-owned and never fetched — the one part of the input that does
+    // not come from Aula. Seeded with this tool's own opinions on first use, so
+    // they can be argued with rather than only obeyed.
+    preferences: loadPreferences(),
     albums: albums.map((album) => ({
       title: album.title,
       at: album.createdAt,

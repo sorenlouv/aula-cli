@@ -94,6 +94,13 @@ export type BriefInput = {
   /** Album titles are warm, low-priority content; kept apart from `items`. */
   albums: Array<{ title: string; at: string | null; childNames: string[] }>;
   newMediaCount: number;
+  /**
+   * The family's own standing wishes for the overview, verbatim from
+   * `~/.aula/preferences.md` — see `preferences.ts`. User-authored, which is
+   * why they may travel in the prompt's instructions while Aula's own prose
+   * stays on stdin.
+   */
+  preferences: string[];
 };
 
 export type SignalKind = 'action' | 'deadline' | 'event' | 'bring' | 'info' | 'social';

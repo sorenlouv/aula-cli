@@ -69,6 +69,9 @@ ranking what actually matters to this family is your job.
 | `new` | Generate the daily "Aula AI oversigt" and open it |
 | `open [--web]` | Open the newest overview — the local page, or the hosted copy |
 | `publish [--off]` | Keep a hosted copy of the overview (per installation; `--off` stops) |
+| `remember "<ønske>"` | Record a standing wish about what this family wants highlighted |
+| `preferences` / `forget <n>` | List those wishes / drop number n |
+| `preferences reset` | Back to the list aula-cli ships with (says what it dropped) |
 | `doctor --text` | Call every endpoint and report status + timing |
 | `cache status` / `cache clear` | What is cached; drop it all |
 
@@ -138,6 +141,61 @@ conversation may already be stale.
   Say the week was quiet when it was quiet.
 - **Distinguish a real deadline from a passing mention**, and flag anything
   whose deadline has already passed.
+
+## What this family wants highlighted
+
+`~/.aula/preferences.md` is the list the overview is written to. It ships with
+this tool's own opinions — what counts as an obligation, that municipal
+broadcasts are noise — and grows with whatever the user tells you: *"beskeder fra
+John (Hjaltes far) er altid vigtige"*, *"jeg er ligeglad med billeder"*. Nothing
+editorial is hard-coded anywhere else, so this list is where both your answers
+and the daily brief get their sense of what matters.
+
+- **Read them** before answering a broad question ("hvad har jeg misset?",
+  "noget vigtigt?") and honour them when you decide what to lead with. It is a
+  local file, so this costs nothing:
+
+  ```bash
+  bun src/cli.ts preferences
+  ```
+
+- **Record one** the moment the user states a standing wish — "husk at…", "jeg
+  vil altid gerne vide…", "du behøver ikke nævne…":
+
+  ```bash
+  bun src/cli.ts remember "beskeder fra John (Hjaltes far) er altid vigtige"
+  ```
+
+  Keep their own words and their own language; you are recording what they
+  said, not summarising it. Then tell them it is noted and that it takes effect
+  from the next overview.
+
+- **A standing wish, not the current question.** "Hvad skrev John i sidste uge?"
+  is a question. "Sig altid til når John skriver" is a preference. Recording
+  every passing interest fills the list with noise and pushes out the wishes
+  that matter.
+
+- **Never edit `preferences.md` yourself, and never put these wishes in
+  `CLAUDE.md` or your own memory instead.** The daily brief runs `claude -p`
+  with no tools at 06:30; this file is the only channel that reaches it. A
+  preference recorded anywhere else silently does nothing. `remember` also
+  catches duplicates and keeps the format the brief can read.
+
+- **When the user disagrees with one of the shipped lines, drop it — do not
+  argue back with a new one.** "Jeg vil faktisk gerne se beskederne fra
+  kommunen" means `forget` the line saying they are never relevant, not
+  `remember` a line contradicting it. Two lines that disagree leave the model to
+  pick, and one of them is enforced in code:
+
+  ```bash
+  bun src/cli.ts preferences        # find its number
+  bun src/cli.ts forget 5
+  ```
+
+- `forget <n>` drops one — show the numbered list first, so the user is picking
+  the line they meant. `preferences reset` returns the whole list to the shipped
+  defaults; it prints the user's own lines as it drops them, so read those back
+  to them rather than letting them scroll off.
 
 ## The daily brief
 

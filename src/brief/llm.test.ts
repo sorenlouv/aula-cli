@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { briefInput, sourceItem } from '../testing/brief-fixtures.ts';
 import { installFakeClaude } from '../testing/fake-claude.ts';
-import { parseClaudeJson, parseJsonLoosely, runClaude, spawnClaude, validateExtraction } from './llm.ts';
+import { parseClaudeJson, parseJsonLoosely, runClaude, spawnClaude, validateExtraction, withPreferences } from './llm.ts';
 import type { BriefInput, SourceItem } from './types.ts';
 
 const SOURCE: SourceItem = sourceItem({
@@ -36,6 +36,29 @@ const good = {
   why: 'Fast ugentlig løbedag',
   sourceKey: 'post:1',
 };
+
+describe('withPreferences', () => {
+  const BASE = 'Du læser Aula-indhold.';
+
+  test('an empty list leaves the instructions exactly as they were', () => {
+    expect(withPreferences(BASE, [])).toBe(BASE);
+    expect(withPreferences(BASE, ['  ', ''])).toBe(BASE);
+  });
+
+  test('the wishes are appended verbatim, under a heading that says who wrote them', () => {
+    const out = withPreferences(BASE, ['beskeder fra John (Hjaltes far) er altid vigtige']);
+    expect(out.startsWith(BASE)).toBe(true);
+    expect(out).toContain('- beskeder fra John (Hjaltes far) er altid vigtige');
+    // Who is speaking is the load-bearing part: these outrank the model's own
+    // judgement precisely because they did not come from Aula.
+    expect(out).toContain('brugerens egen liste');
+  });
+
+  test('they never license invention — the rules above them still stand', () => {
+    const out = withPreferences(BASE, ['alt fra skolen er vigtigt']);
+    expect(out).toContain('opfinde kilder, datoer eller citater');
+  });
+});
 
 describe('parseJsonLoosely', () => {
   test('accepts a bare object, a fenced block, and prose around it', () => {

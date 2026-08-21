@@ -37,6 +37,7 @@ export function briefInput(overrides: Partial<BriefInput> = {}): BriefInput {
     health: [],
     albums: [],
     newMediaCount: 0,
+    preferences: [],
     ...overrides,
   };
 }

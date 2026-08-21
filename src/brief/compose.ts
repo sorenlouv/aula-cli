@@ -13,7 +13,7 @@
 
 import { escapeHtml } from '../html.ts';
 import { buildDateSupport, DA_MONTHS, DA_WEEKDAYS, unsupportedDateClaims } from './dates.ts';
-import { parseJsonLoosely, runClaude } from './llm.ts';
+import { parseJsonLoosely, runClaude, withPreferences } from './llm.ts';
 import type { RankedBrief, RankedSignal } from './types.ts';
 
 function danishDate(isoDay: string): string {
@@ -240,7 +240,10 @@ export async function composePage(
     opts.summaries ?? {},
     opts.isNew ?? (() => false),
   );
-  const answer = await runClaude(INSTRUCTIONS, JSON.stringify(payload), {
+  // The extractor decides what is true; the composer decides what leads. Both
+  // are places a wish can land — "billeder må gerne ligge nederst" is nothing
+  // the extractor can act on and everything this call can.
+  const answer = await runClaude(withPreferences(INSTRUCTIONS, brief.input.preferences), JSON.stringify(payload), {
     timeoutMs: opts.timeoutMs ?? 300_000,
   });
   const { plan, problems } = parsePlan(parseJsonLoosely(answer), brief);
