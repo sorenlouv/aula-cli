@@ -13,6 +13,7 @@
 
 import { escapeHtml } from '../html.ts';
 import { buildDateSupport, DA_MONTHS, DA_WEEKDAYS, unsupportedDateClaims } from './dates.ts';
+import { doneKeys } from './done.ts';
 import { parseJsonLoosely, runClaude, withPreferences } from './llm.ts';
 import type { RankedBrief, RankedSignal } from './types.ts';
 
@@ -281,7 +282,7 @@ function buildPage(brief: RankedBrief, act: CardSpec[], week: CardSpec[], opts: 
   const { input } = brief;
   const colour = new Map(input.family.children.map((c, i) => [c.firstName, `c${i + 1}`]));
   const card = ({ signal: s, titel, hvorfor }: CardSpec) => `
-    <div class="card ${s.urgency === 'now' ? 'now' : 'soon'}" data-signal-id="${escapeHtml(s.id)}" data-source-id="${escapeHtml(s.sourceKey)}">
+    <div class="card ${s.urgency === 'now' ? 'now' : 'soon'}" data-signal-id="${escapeHtml(s.id)}" data-source-id="${escapeHtml(s.sourceKey)}" data-done-keys="${escapeHtml(doneKeys(s).join(' '))}">
       <div class="row">
         ${s.dueAt ? `<span class="chip ${s.urgency === 'now' ? 'now' : 'soon'}">${escapeHtml(capitalise(danishDate(s.dueAt)))}</span>` : ''}
         ${opts.isNew?.(s.sourceKey) ? '<span class="chip new">Ny</span>' : ''}
@@ -291,6 +292,7 @@ function buildPage(brief: RankedBrief, act: CardSpec[], week: CardSpec[], opts: 
       ${hvorfor ?? s.why ? `<p class="why">${escapeHtml(hvorfor ?? s.why ?? '')}</p>` : ''}
       ${s.quote ? `<blockquote>«${escapeHtml(s.quote)}»</blockquote>` : ''}
       <div class="src">${escapeHtml(s.source.title)}${s.source.author ? ` · ${escapeHtml(s.source.author)}` : ''}${s.source.url ? ` · <a href="${escapeHtml(s.source.url)}">åbn i Aula</a>` : ''}</div>
+      <button class="tick" type="button" aria-pressed="false" aria-label="Markér som klaret"></button>
     </div>`;
 
   const context = brief.signals.filter((s) => s.tier === 'context' && !opts.planned?.has(s.id));
@@ -324,11 +326,13 @@ function buildPage(brief: RankedBrief, act: CardSpec[], week: CardSpec[], opts: 
 
   ${degradedDay ? `<section><h2>Datastatus</h2>${datastatus}</section>` : ''}
 
-  <section><h2>Kræver handling <span class="count">${act.length}</span></h2>
-    ${act.length ? act.map(card).join('') : `<div class="panel">${escapeHtml(opts.emptyAct ?? 'Intet kræver handling lige nu.')}</div>`}
+  <section data-section="act"><h2>Kræver handling <span class="count" data-count>${act.length}</span></h2>
+    ${act.map(card).join('')}
+    <div class="panel" data-empty${act.length ? ' hidden' : ''}>${escapeHtml(opts.emptyAct ?? 'Intet kræver handling lige nu.')}</div>
+    <button class="klaret" type="button" aria-expanded="false" data-klaret hidden></button>
   </section>
 
-  ${week.length ? `<section><h2>Kommende <span class="count">${week.length}</span></h2>${week.map(card).join('')}</section>` : ''}
+  ${week.length ? `<section data-section="week"><h2>Kommende <span class="count" data-count>${week.length}</span></h2>${week.map(card).join('')}<button class="klaret" type="button" aria-expanded="false" data-klaret hidden></button></section>` : ''}
 
   <section><h2>Per barn</h2><div class="grid">
     ${input.family.children

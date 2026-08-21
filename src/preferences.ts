@@ -38,17 +38,6 @@ export const PREFERENCES_PATH = join(AULA_DIR, 'preferences.md');
  */
 export const MAX_PREFERENCES = 30;
 
-const HEADER = `# Mine præferencer til Aula-oversigten
-
-Én linje per ønske, skrevet som du selv ville sige det. Claude læser dem, hver
-gang oversigten laves. Linjerne herunder er dem, aula-cli starter med — ret
-dem, slet dem, eller læg dine egne til. Det er din liste nu.
-
-Tilføj med \`aula remember "…"\`, se dem med \`aula preferences\`, fjern med
-\`aula forget <nr>\`. Du må også gerne rette direkte i filen her.
-
-`;
-
 /**
  * What aula-cli believes about a family's week, before it is told otherwise.
  *
@@ -88,11 +77,26 @@ export const DEFAULT_PREFERENCES: readonly string[] = [
   MUNICIPAL_IS_NOISE,
 ];
 
-/** Any bullet is a preference; headings, blank lines and prose are not. */
+/**
+ * Every line is a preference. Nothing else is in this file.
+ *
+ * It used to open with a paragraph explaining itself, and that paragraph was a
+ * trap: it invited hand-editing while the parser accepted bullets only, so a
+ * line typed without a dash was dropped in silence — and the explanation came
+ * back by itself on the next write, because every write reproduced it. The file
+ * holds the list and nothing else now; the explaining is done by
+ * `aula preferences`, where it cannot be mistaken for content.
+ *
+ * So the dash is decoration, stripped if present and not required. Blank lines
+ * and Markdown headings are the only things skipped, because neither is
+ * something a person types meaning "remember this".
+ */
 export function parsePreferences(raw: string): string[] {
   return raw
     .split('\n')
-    .map((line) => /^\s*[-*]\s+(.*)$/.exec(line)?.[1]?.trim() ?? '')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'))
+    .map((line) => line.replace(/^[-*]\s+/, '').trim())
     .filter((line) => line.length > 0);
 }
 
@@ -124,8 +128,10 @@ export function loadPreferences(path = PREFERENCES_PATH): string[] {
 
 export function writePreferences(lines: string[], path = PREFERENCES_PATH): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const body = lines.map((line) => `- ${line}`).join('\n');
-  writeFileSync(path, `${HEADER}${body}\n`, { mode: 0o600 });
+  // Written as a Markdown list so the file reads well anywhere, parsed as if
+  // the dashes were not there — see `parsePreferences`.
+  const body = lines.length ? `${lines.map((line) => `- ${line}`).join('\n')}\n` : '';
+  writeFileSync(path, body, { mode: 0o600 });
   // `mode` on write only applies when the file is created, and this one may
   // predate the rule — or have been created by hand.
   chmodSync(path, 0o600);

@@ -7,10 +7,16 @@
  * The `beforeprint` hook is not a nicety. A collapsed <details> prints as a
  * heading with nothing under it, so without it the forwarded PDF silently loses
  * whole sections — which was caught the first time a PDF was actually made.
+ *
+ * Both scripts are inlined here rather than in the body, because `compose.ts`
+ * owns the markup and `validate.ts` checks that body for external references.
+ * Putting behaviour in the document wrapper keeps that separation intact and
+ * gets it onto the fallback layout for free.
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DONE_SCRIPT } from './done.ts';
 import { BRIEF_CSS } from './styles.ts';
 import { BRIEF_DIR } from './state.ts';
 
@@ -29,6 +35,10 @@ const PRINT_HOOK = `
   });
 `;
 
+/** Separate tags so a throw in one cannot take the other down with it. */
+const SCRIPTS = `<script>${PRINT_HOOK}</script>
+<script>${DONE_SCRIPT}</script>`;
+
 function wrapDocument(bodyHtml: string, title: string): string {
   return `<!doctype html>
 <html lang="da">
@@ -40,7 +50,7 @@ function wrapDocument(bodyHtml: string, title: string): string {
 </head>
 <body>
 ${bodyHtml}
-<script>${PRINT_HOOK}</script>
+${SCRIPTS}
 </body>
 </html>
 `;
@@ -57,7 +67,7 @@ function artifactDocument(bodyHtml: string, title: string): string {
   return `<title>${title}</title>
 <style>${BRIEF_CSS}</style>
 ${bodyHtml}
-<script>${PRINT_HOOK}</script>
+${SCRIPTS}
 `;
 }
 
