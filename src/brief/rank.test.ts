@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import { DEFAULT_PREFERENCES, MUNICIPAL_IS_NOISE } from '../preferences.ts';
 import { briefInput, sourceItem } from '../testing/brief-fixtures.ts';
 import { classifyAudience } from './collect.ts';
-import { ACT_CAP, rank, signalsFromRules } from './rank.ts';
+import { ACT_CAP, namedInPreferences, rank, signalsFromRules } from './rank.ts';
 import type { BriefInput, Signal, SourceItem } from './types.ts';
 
 const TODAY = new Date(2026, 7, 13);
@@ -10,8 +11,13 @@ function item(partial: Partial<SourceItem> & Pick<SourceItem, 'key'>): SourceIte
   return sourceItem({ title: 'Titel', at: null, author: null, ...partial });
 }
 
-function input(items: SourceItem[]): BriefInput {
-  return briefInput({ items });
+/**
+ * A real installation, which always has the shipped opinions on its list —
+ * `preferences.md` is seeded on first use. Ranking now depends on that list,
+ * so a fixture without it would be testing an install nobody has.
+ */
+function input(items: SourceItem[], preferences: string[] = []): BriefInput {
+  return briefInput({ items, preferences: [...DEFAULT_PREFERENCES, ...preferences] });
 }
 
 describe('classifyAudience', () => {
@@ -322,5 +328,158 @@ describe('rank', () => {
     const brief = rank(input(items), signalsFromRules(input(items), TODAY));
     expect(brief.signals).toHaveLength(0);
     expect(brief.unusedSources.map((s) => s.key)).toEqual(['post:99']);
+  });
+});
+
+describe('namedInPreferences', () => {
+  const WISH = 'beskeder fra John (Peters far) er altid vigtige';
+  const JOHN = [WISH];
+
+  test('finds the sender the family named', () => {
+    expect(namedInPreferences('John Madsen', JOHN)).toBe(WISH);
+  });
+
+  test('matches the Danish genitive, so "Idas mor" finds Ida', () => {
+    expect(namedInPreferences('Ida Hansen', ['Idas mor skriver om vigtige ting'])).not.toBeNull();
+  });
+
+  test('a name is a word, not a substring — this is the false positive that matters', () => {
+    // "Ida" inside "sidan", "Per" inside "perfekt": a wish that merely happens
+    // to contain those letters must not quietly promote a stranger's post.
+    expect(namedInPreferences('Ida Hansen', ['vi vil gerne vide besked om sidan'])).toBeNull();
+    expect(namedInPreferences('Per Storm', ['dagen skal helst være perfekt'])).toBeNull();
+  });
+
+  test('short name parts are skipped: initials and particles match everything', () => {
+    expect(namedInPreferences('Jo Berg', ['jo, det er vigtigt for os'])).toBeNull();
+  });
+
+  test('an author Aula did not give us matches nothing', () => {
+    expect(namedInPreferences(null, JOHN)).toBeNull();
+  });
+});
+
+describe('the preference floor', () => {
+  const JOHN = 'beskeder fra John (Peters far) er altid vigtige';
+
+  const withWish = (items: SourceItem[], wishes: string[]) => input(items, wishes);
+
+  const backgroundNote: Signal = {
+    id: 'model:0',
+    kind: 'info',
+    title: 'John skriver om legeaftalen',
+    child: null,
+    dueAt: null,
+    urgency: 'fyi',
+    quote: null,
+    why: null,
+    sourceKey: 'thread:7',
+    origin: 'model',
+    concernsChild: false,
+  };
+
+  test('a named sender read as background is promoted to week', () => {
+    const items = [
+      item({ key: 'thread:7', kind: 'thread', title: 'Legeaftale', author: 'John Madsen', audience: 'institution' }),
+    ];
+    const brief = rank(withWish(items, [JOHN]), [backgroundNote]);
+    expect(brief.signals[0]?.tier).toBe('week');
+    expect(brief.signals[0]?.mustShow).toBe(true);
+    expect(brief.signals[0]?.reasons.join(' ')).toContain('preference floor → week');
+  });
+
+  test('a named sender no signal covered still reaches the page', () => {
+    // The promise is "sig altid til når John skriver". A model that extracted
+    // nothing from his message is exactly the day that promise is tested.
+    const items = [
+      item({ key: 'thread:8', kind: 'thread', title: 'Hej igen', text: 'Vi ses på fredag.', author: 'John Madsen' }),
+    ];
+    const brief = rank(withWish(items, [JOHN]), []);
+    expect(brief.signals).toHaveLength(1);
+    expect(brief.signals[0]?.tier).toBe('week');
+    expect(brief.signals[0]?.origin).toBe('rule');
+    expect(brief.unusedSources).toHaveLength(0);
+  });
+
+  test('a wish for less of something never promotes', () => {
+    // "jeg er ligeglad med hvad John skriver" asks for the opposite, and the
+    // floor only ever pushes up — so it must decline to read this one at all.
+    const items = [
+      item({ key: 'thread:9', kind: 'thread', title: 'Endnu en besked', author: 'John Madsen' }),
+    ];
+    const brief = rank(withWish(items, ['jeg er ligeglad med hvad John skriver']), [
+      { ...backgroundNote, sourceKey: 'thread:9' },
+    ]);
+    expect(brief.signals[0]?.tier).toBe('context');
+    expect(brief.signals[0]?.reasons.join(' ')).not.toContain('preference floor');
+  });
+
+  test('an explicit wish outranks the audience prior', () => {
+    // Municipal breadth is the strongest suppressor there is, and a name the
+    // family wrote down themselves is the one thing allowed past it.
+    const items = [
+      item({ key: 'post:10', title: 'Fra forvaltningen', author: 'John Madsen', audience: 'municipal' }),
+    ];
+    const brief = rank(withWish(items, [JOHN]), [{ ...backgroundNote, sourceKey: 'post:10' }]);
+    expect(brief.signals[0]?.tier).toBe('week');
+  });
+
+  test('with no preferences nothing moves', () => {
+    const items = [
+      item({ key: 'thread:11', kind: 'thread', title: 'Legeaftale', author: 'John Madsen', audience: 'institution' }),
+    ];
+    const brief = rank(briefInput({ items }), [{ ...backgroundNote, sourceKey: 'thread:11' }]);
+    expect(brief.signals[0]?.tier).toBe('context');
+    expect(brief.signals[0]?.reasons.join(' ')).not.toContain('preference');
+  });
+});
+
+describe('a shipped opinion the family disagrees with', () => {
+  const municipalOffer = () =>
+    item({
+      key: 'post:30',
+      title: 'Tilbud om forældrekursus',
+      text: 'Ansøgningsfristen er tirsdag den 1. september 2026.',
+      audience: 'municipal',
+    });
+
+  test('is enforced deterministically while the list still says so', () => {
+    const items = [municipalOffer()];
+    const brief = rank(input(items), signalsFromRules(input(items), TODAY));
+    expect(brief.signals[0]?.tier).toBe('hidden');
+  });
+
+  test('stops being enforced the moment it is dropped', () => {
+    // The whole point of moving these out of the prompt: a family that wants
+    // the municipality's messages can have them. Without this, dropping the
+    // line would change the prompt and nothing else — a setting that visibly
+    // does nothing, which is worse than no setting.
+    const items = [municipalOffer()];
+    const kept = DEFAULT_PREFERENCES.filter((line) => line !== MUNICIPAL_IS_NOISE);
+    const theirs = briefInput({ items, preferences: [...kept] });
+    const brief = rank(theirs, signalsFromRules(theirs, TODAY));
+    expect(brief.signals[0]?.tier).not.toBe('hidden');
+  });
+
+  test('an emptied list hides nothing at all', () => {
+    const items = [municipalOffer()];
+    const theirs = briefInput({ items, preferences: [] });
+    const brief = rank(theirs, signalsFromRules(theirs, TODAY));
+    expect(brief.signals[0]?.tier).not.toBe('hidden');
+  });
+
+  test('breadth still sorts it low — dropping the line shows it, it does not promote it', () => {
+    const items = [
+      municipalOffer(),
+      item({ key: 'post:31', title: 'Husk gummistøvler på torsdag', text: 'Husk gummistøvler på torsdag.' }),
+    ];
+    const theirs = briefInput({
+      items,
+      preferences: DEFAULT_PREFERENCES.filter((line) => line !== MUNICIPAL_IS_NOISE),
+    });
+    const brief = rank(theirs, signalsFromRules(theirs, TODAY));
+    const municipal = brief.signals.find((s) => s.sourceKey === 'post:30');
+    const ours = brief.signals.find((s) => s.sourceKey === 'post:31');
+    expect((ours?.score ?? 0) > (municipal?.score ?? 0)).toBe(true);
   });
 });

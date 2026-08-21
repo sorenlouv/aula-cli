@@ -12,6 +12,7 @@
  * prevent.
  */
 
+import { MUNICIPAL_IS_NOISE } from '../preferences.ts';
 import { extractHits, urgencyFor } from './rules.ts';
 import type {
   Audience,
@@ -141,12 +142,22 @@ function scoreOf(
   return { score, reasons };
 }
 
-function tierOf(signal: Signal, audience: Audience, important: boolean): Tier {
+function tierOf(
+  signal: Signal,
+  audience: Audience,
+  important: boolean,
+  municipalIsNoise: boolean,
+): Tier {
   // Who it was sent to is a strong prior, never a veto. The content decides.
   // A message to every school in the municipality saying the schools are shut
   // on Friday still shuts ours, and burying it because of its address would be
   // the same mistake as promoting a course offer because of its deadline.
-  if (audience === 'municipal' && !signal.concernsChild && !important) return 'hidden';
+  //
+  // `municipalIsNoise` is the family's own say in it. This is the only gate in
+  // the pipeline that hides rather than sorts, so it is the only one that must
+  // not be beyond a user's reach: it stays shut exactly as long as their list
+  // says municipal broadcasts are noise. See `MUNICIPAL_IS_NOISE`.
+  if (municipalIsNoise && audience === 'municipal' && !signal.concernsChild && !important) return 'hidden';
   // A school-wide message earns a place only when it asks something of us about
   // our own child. Photo-day sign-up does; a parenting course on offer does not.
   if (audience === 'institution' && !signal.concernsChild && !important) return 'context';
@@ -177,6 +188,47 @@ function looksLikeChildBusiness(item: { text: string; childNames: string[] }): b
 }
 
 /**
+ * Words that turn a wish into its opposite.
+ *
+ * The preference floor below only ever *promotes*, so a line asking for less of
+ * something must never be read as asking for more. This is a short closed list,
+ * not an attempt at Danish negation in general: a line it fails to classify is
+ * simply left to the model, which reads "jeg er ligeglad med billeder"
+ * perfectly well. A miss here costs a preference honoured by judgement alone —
+ * the same treatment every fuzzy preference gets — rather than one honoured
+ * backwards.
+ */
+const NOT_WANTED = /\b(ikke|aldrig|ligeglad|udelad\w*|skjul\w*|drop|spring over|uden|nedprioriter\w*)\b/i;
+
+/**
+ * Does the family's own list name the person who wrote this?
+ *
+ * A name is the one part of a free-text wish that can be matched without
+ * interpreting it: the author comes from Aula, the line comes from the user,
+ * and either the line contains that name or it does not. That is why
+ * *"beskeder fra John (Peters far) er altid vigtige"* survives a bad model day
+ * while *"hold øje med noget om svømning"* does not — by design, not by
+ * omission. The topical half is the model's job, and it is better at it.
+ *
+ * Matched as a whole word, with the Danish genitive -s allowed, so "Ida" hits
+ * "Idas mor" and not "sidan". Parts shorter than three letters are skipped:
+ * initials and particles ("van", "de") match everything and mean nothing.
+ */
+export function namedInPreferences(author: string | null, preferences: string[]): string | null {
+  if (!author) return null;
+  const names = author
+    .split(/\s+/)
+    .map((part) => part.replace(/[^\p{L}]/gu, ''))
+    .filter((part) => part.length >= 3);
+  for (const line of preferences) {
+    for (const name of names) {
+      if (new RegExp(`(^|\\P{L})${name}s?(\\P{L}|$)`, 'iu').test(line)) return line;
+    }
+  }
+  return null;
+}
+
+/**
  * Same thing said twice.
  *
  * When there is a date, the same child + date + kind is treated as one thing
@@ -198,6 +250,7 @@ function mergeKey(signal: Signal): string {
 export function rank(input: BriefInput, signals: Signal[]): RankedBrief {
   const itemByKey = new Map(input.items.map((item) => [item.key, item]));
   const degraded: string[] = [];
+  const municipalIsNoise = input.preferences.includes(MUNICIPAL_IS_NOISE);
 
   const scored: RankedSignal[] = [];
   for (const signal of signals) {
@@ -209,7 +262,7 @@ export function rank(input: BriefInput, signals: Signal[]): RankedBrief {
       continue;
     }
     const { score, reasons } = scoreOf(signal, source.audience, source.important);
-    const tier = tierOf(signal, source.audience, source.important);
+    const tier = tierOf(signal, source.audience, source.important, municipalIsNoise);
     scored.push({
       ...signal,
       score,
@@ -287,11 +340,38 @@ export function rank(input: BriefInput, signals: Signal[]): RankedBrief {
       signal.reasons.push('aula-important floor → week');
     }
   }
+
+  // ------------------------------------------------- preference floor
+  // The family's own list, honoured a second time.
+  //
+  // The model already has these wishes in its instructions and handles the
+  // fuzzy ones better than anything here could. But "sig altid til når John
+  // skriver" is a promise, and a promise kept only by a model is kept only on
+  // a good day — when it is not, the page looks exactly like a quiet week.
+  // So the checkable half is checked here too: a message from someone the list
+  // names by name cannot end below the fold. Same shape as the vigtig floor
+  // above, deliberately — the model may promote it further, it can no longer
+  // sink it. An explicit wish also outranks the audience prior, which is the
+  // one thing allowed to lift an item back out of `hidden`.
+  const wanted = input.preferences.filter((line) => !NOT_WANTED.test(line));
+  for (const signal of merged) {
+    if (signal.tier !== 'context' && signal.tier !== 'hidden') continue;
+    const named = namedInPreferences(signal.source.author, wanted);
+    if (!named) continue;
+    signal.tier = 'week';
+    signal.mustShow = true;
+    signal.reasons.push(`preference floor → week («${named}»)`);
+  }
+
   const covered = new Set(merged.flatMap((s) => [s.sourceKey, ...s.mergedSourceKeys]));
   for (const item of input.items) {
-    if (!item.important || covered.has(item.key)) continue;
+    if (covered.has(item.key)) continue;
+    // Nothing was extracted from it — which for a named sender is precisely
+    // the case the wish was made about.
+    const named = namedInPreferences(item.author, wanted);
+    if (!item.important && !named) continue;
     const base: Signal = {
-      id: `rule:important:${item.key}`,
+      id: `rule:${item.important ? 'important' : 'preference'}:${item.key}`,
       kind: 'info',
       title: item.title,
       child: item.childNames.length === 1 ? firstName(item.childNames[0] ?? '') : null,
@@ -303,14 +383,19 @@ export function rank(input: BriefInput, signals: Signal[]): RankedBrief {
       origin: 'rule',
       concernsChild: looksLikeChildBusiness(item),
     };
-    const { score, reasons } = scoreOf(base, item.audience, true);
+    const { score, reasons } = scoreOf(base, item.audience, item.important);
     merged.push({
       ...base,
       score,
       tier: 'week',
       mustShow: true,
       audience: item.audience,
-      reasons: [...reasons, 'aula-important floor: intet signal dækkede den'],
+      reasons: [
+        ...reasons,
+        item.important
+          ? 'aula-important floor: intet signal dækkede den'
+          : `preference floor: intet signal dækkede den («${named}»)`,
+      ],
       source: item,
       mergedSourceKeys: [],
     });

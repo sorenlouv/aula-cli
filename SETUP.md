@@ -196,6 +196,51 @@ Ask Claude things like:
 - "What does my daughter have on Thursday?"
 - "Har børnene noget i denne uge, jeg skal huske?"
 
+## 10. Teach it what matters to you
+
+The overview ranks what it believes a busy parent needs — that things to bring
+and sign up for come first, that a message to the whole municipality is noise.
+Those beliefs are not buried in the code: they are the first few lines of
+`~/.aula/preferences.md`, written out in plain Danish the first time you run
+anything.
+
+```bash
+aula preferences
+```
+
+Where they are wrong for your family, say so — to Claude, in your own words:
+
+> Husk at beskeder fra John (Peters far) altid er vigtige
+
+or, just as validly:
+
+> Jeg vil faktisk gerne se beskederne fra kommunen — drop den regel
+
+Claude records that with `aula remember`, and it lands as one line in
+`~/.aula/preferences.md`. Every overview from then on is written with your list
+in front of the model — and a message from someone you named by name can no
+longer end below the fold, because that half is enforced in `rank.ts` rather
+than left to the model's judgement.
+
+```bash
+aula preferences        # the whole list, numbered — defaults included
+aula forget 5           # drop number 5, shipped or your own
+aula preferences reset  # back to factory settings
+```
+
+`reset` prints the lines of your own that it drops, so nothing disappears
+without you seeing it.
+
+Every line is equal: the ones this tool started with can be reworded or deleted
+like any other, and the code follows the list rather than the other way round —
+delete the line about municipal messages and they start appearing. Wishes for
+*less* work the same way ("jeg er ligeglad med billeder"); those the model
+weighs on its own.
+
+The file is plain markdown and yours to edit in any editor. It stays on your
+machine with the rest of `~/.aula`: it names other people's children, so it has
+no business in the repository.
+
 ## Troubleshooting
 
 - **Exit code 2** — the login expired. `bun run login`, approve on the phone.

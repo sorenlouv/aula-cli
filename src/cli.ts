@@ -54,6 +54,13 @@ import { AulaSessionError, UsageError } from './errors.ts';
 import { AulaAuthFlowError } from './vendor/aula-auth/index.ts';
 import { resolveFamily, selectChildren, type Family } from './family.ts';
 import { runLogin, runLogout, runRefreshStepUp, runStatus } from './login.ts';
+import {
+  addPreference,
+  loadPreferences,
+  PREFERENCES_PATH,
+  removePreference,
+  resetPreferences,
+} from './preferences.ts';
 import { runSchedule } from './schedule.ts';
 import { SUPPORTED_WIDGET_IDS, type WeekPlan } from './integrations/index.ts';
 import { isoDate, localIsoDate } from './integrations/types.ts';
@@ -77,6 +84,11 @@ Everyday:
   schedule [--at HH:MM]        Generate the overview automatically every weekday,
                                retrying through the morning if the Mac was asleep
   schedule --remove            Stop generating it automatically
+  remember "<ønske>"           Teach the overview what matters to you — a sender
+                               to always highlight, something you never need
+  preferences                  Everything it has been told to remember
+  preferences reset            Back to the preferences aula-cli ships with
+  forget <n>                   Drop preference number n
   login                        Log in with MitID (tokens refresh themselves)
   logout                       Forget the stored login
   status                       Whether you are logged in, and for how much longer
@@ -128,6 +140,7 @@ Login options:
 
 Examples:
   aula new
+  aula remember "beskeder fra John (Peters far) er altid vigtige"
   aula open --web
   aula digest --days 14 --text
   aula messages --limit 30 --full --since 30d
@@ -227,6 +240,9 @@ async function main(): Promise<number> {
   if (command === 'cache') return runCache(positionals, asText, ttlMs);
   if (command === 'open') return runOpen(values.web === true);
   if (command === 'publish') return runPublish(positionals[0], values.off === true);
+  if (command === 'remember') return runRemember(positionals);
+  if (command === 'preferences') return runPreferences(positionals);
+  if (command === 'forget') return runForget(positionals[0]);
   // The scheduler's retries: a morning that already went right costs nothing,
   // not even a login check — this is answered from the state file alone.
   if (command === 'new' && values['catch-up'] === true) {
@@ -722,6 +738,90 @@ async function runPublish(extra: string | undefined, off: boolean): Promise<numb
   saveState(state);
   console.error('Every `aula new` (and the schedule) keeps it current; `aula publish --off` stops it.');
   console.log(result.url);
+  return 0;
+}
+
+/**
+ * `remember` / `preferences` / `forget` — curation, in the user's own words.
+ *
+ * Three plain verbs and no flags, because this is the one part of the tool a
+ * non-technical user drives themselves: they say "husk at John altid er
+ * vigtig" to Claude, the skill maps that onto `remember`, and the sentence is
+ * stored as they said it. Anything that needed a category, a weight or a
+ * syntax would end the sentence they were willing to say.
+ *
+ * Claude never edits `preferences.md` directly — see the note in
+ * `preferences.ts`. `preferences` and `forget` exist so the user can see and
+ * undo what was written on their behalf; a memory nobody can inspect is one
+ * nobody can trust.
+ */
+function runRemember(positionals: string[]): number {
+  // Unquoted works too: `aula remember beskeder fra John er vigtige`. A wish
+  // typed as a sentence is the normal case, not the odd one.
+  const result = addPreference(positionals.join(' '));
+  if (!result.added) {
+    console.log(`Already remembered: "${result.text}" — nothing changed.`);
+    return 0;
+  }
+  console.log(
+    `Remembered: "${result.text}"\n` +
+      `It takes effect on the next \`aula new\`. ${result.preferences.length} preference(s) in total — ` +
+      '`aula preferences` lists them.',
+  );
+  return 0;
+}
+
+function runPreferences(positionals: string[]): number {
+  const sub = positionals[0];
+  if (sub === 'reset') return runPreferencesReset();
+  if (sub !== undefined) {
+    throw new UsageError(`Unknown subcommand "${sub}". Use \`aula preferences\` or \`aula preferences reset\`.`);
+  }
+  // Seeds on first use: the tool's own opinions are the first thing this
+  // prints, which is the only way a user finds out they can be argued with.
+  const preferences = loadPreferences();
+  if (preferences.length === 0) {
+    console.log(
+      `The list is empty (${PREFERENCES_PATH}) — the overview is ranked on its own judgement alone.\n` +
+        '`aula remember "beskeder fra John (Peters far) er altid vigtige"` puts something back.',
+    );
+    return 0;
+  }
+  console.log(
+    [
+      `What the overview is written to: ${PREFERENCES_PATH}`,
+      '',
+      ...preferences.map((line, i) => `  ${i + 1}. ${line}`),
+      '',
+      '`aula remember "…"` adds one, `aula forget <n>` drops one — including the ones this tool',
+      'started with. The file is plain markdown; editing it by hand works just as well.',
+    ].join('\n'),
+  );
+  return 0;
+}
+
+function runPreferencesReset(): number {
+  const { dropped } = resetPreferences();
+  const lines = ['Reset preferences to the defaults the cli ships with'];
+  if (dropped.length) {
+    // Say what was destroyed, in full, so it can be typed back in.
+    lines.push(
+      '',
+      `Dropped ${dropped.length} of your own — \`aula remember\` puts any of them back:`,
+      ...dropped.map((line) => `  · ${line}`),
+    );
+  }
+  console.log(lines.join('\n'));
+  return 0;
+}
+
+function runForget(raw: string | undefined): number {
+  const index = Number(raw);
+  if (raw === undefined || !Number.isInteger(index)) {
+    throw new UsageError('Usage: aula forget <n> — the number shown by `aula preferences`.');
+  }
+  const { removed, preferences } = removePreference(index);
+  console.log(`Forgotten: "${removed}"\n${preferences.length} preference(s) left.`);
   return 0;
 }
 
