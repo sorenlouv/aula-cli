@@ -16,8 +16,21 @@ import type { RankedBrief } from './types.ts';
 
 type Violation = { rule: string; detail: string };
 
-const EXTERNAL_RESOURCE =
-  /<img\b|<script\b[^>]*\bsrc=|<link\b|@import|url\(\s*['"]?https?:/i;
+/**
+ * Tags that could pull something in over the network — plus `<style>`, which
+ * the body never has any business containing.
+ *
+ * Only *tags* are matched, and that is deliberate. Since the page grew its
+ * "læs mere" blocks, verbatim Aula prose reaches the markup, and this check
+ * runs over the rendered string with no way to tell a rendered tag from a
+ * quoted one. `escapeHtml` turns a literal `<` into `&lt;`, so no amount of
+ * angle brackets in a school post can trip these — whereas the CSS patterns
+ * this used to carry (`@import`, `url(https:`) have no such protection, and a
+ * parent who pasted a stylesheet URL into a message would have failed the whole
+ * layout. Those patterns only ever mattered inside a stylesheet anyway, and
+ * `<style\b` below is the stronger check for that.
+ */
+const EXTERNAL_RESOURCE = /<(?:img|script|link|style|iframe|object|embed|base)\b/i;
 
 export function validatePage(html: string, brief: RankedBrief): Violation[] {
   const violations: Violation[] = [];

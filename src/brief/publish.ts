@@ -25,13 +25,20 @@ const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const PRINT_HOOK = `
   // A collapsed <details> prints as a heading with nothing beneath it, so the
   // PDF that gets forwarded would quietly lose sections. Expand for print only.
+  //
+  // \`.more\` is excluded, and the exclusion is the point: those hold verbatim
+  // source material — whole message threads — rather than anything the brief
+  // says. Expanding them would turn two forwardable pages into twenty, so they
+  // are hidden in print instead (see the @media print rule in styles.ts) and
+  // the original stays one link away in Aula.
+  const SECTIONS = 'details:not(.more)';
   addEventListener('beforeprint', () => {
-    for (const d of document.querySelectorAll('details')) {
+    for (const d of document.querySelectorAll(SECTIONS)) {
       d.dataset.wasOpen = String(d.open); d.open = true;
     }
   });
   addEventListener('afterprint', () => {
-    for (const d of document.querySelectorAll('details')) d.open = d.dataset.wasOpen === 'true';
+    for (const d of document.querySelectorAll(SECTIONS)) d.open = d.dataset.wasOpen === 'true';
   });
 `;
 

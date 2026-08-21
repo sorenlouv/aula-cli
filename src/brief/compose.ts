@@ -15,7 +15,7 @@ import { escapeHtml } from '../html.ts';
 import { buildDateSupport, DA_MONTHS, DA_WEEKDAYS, unsupportedDateClaims } from './dates.ts';
 import { doneKeys } from './done.ts';
 import { parseJsonLoosely, runClaude, withPreferences } from './llm.ts';
-import type { RankedBrief, RankedSignal } from './types.ts';
+import type { ConversationMessage, RankedBrief, RankedSignal, SourceItem } from './types.ts';
 
 function danishDate(isoDay: string): string {
   const date = new Date(`${isoDay}T00:00:00`);
@@ -25,6 +25,85 @@ function danishDate(isoDay: string): string {
 
 function capitalise(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+/** "12. aug · 14:32" — short enough to sit beside a sender's name. */
+function messageWhen(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const time = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  return `${date.getDate()}. ${DA_MONTHS[date.getMonth()]?.slice(0, 3) ?? ''} · ${time}`;
+}
+
+const flatten = (value: string) => value.replace(/\s+/g, ' ').trim();
+
+/**
+ * Source prose as paragraphs.
+ *
+ * `htmlToText` has already turned Aula's markup into blank-line-separated
+ * blocks, so the shape is there to be honoured; a message pasted in as one wall
+ * of text is exactly what makes the original hard to read in the first place.
+ * Escaped, then broken — never the other way round.
+ */
+function paragraphs(text: string): string {
+  return text
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => `<p>${escapeHtml(block).replace(/\n/g, '<br>')}</p>`)
+    .join('');
+}
+
+function messageBlock(message: ConversationMessage): string {
+  const when = message.at ? messageWhen(message.at) : null;
+  return `<div class="msg"><div class="msg-head"><b>${escapeHtml(message.from ?? 'Ukendt afsender')}</b>${
+    when ? `<span>${escapeHtml(when)}</span>` : ''
+  }</div>${paragraphs(message.text)}</div>`;
+}
+
+/**
+ * The collapsible original, or nothing when there is nothing left to open.
+ *
+ * The brief is a summary, and a summary is only trustworthy if the thing it
+ * summarises is one tap away — "hvorfor står der det?" should never require
+ * opening Aula. So every entry carries its source underneath it, collapsed,
+ * because on most days most of them are not needed.
+ *
+ * `shown` is what the entry already puts on screen. A source whose whole text
+ * is the sentence already quoted above gets no toggle at all: a *læs mere* that
+ * reveals what the reader just read is the kind of small lie that teaches them
+ * to stop pressing things.
+ */
+function moreBlock(source: SourceItem, shown: string): string {
+  const conversation = source.conversation;
+  const messages = conversation?.messages ?? [];
+  const body = flatten(messages.length ? messages.map((m) => m.text).join(' ') : source.text);
+  if (!body || flatten(shown).includes(body)) return '';
+
+  if (messages.length > 0) {
+    const label =
+      messages.length === 1
+        ? 'Læs hele beskeden'
+        : conversation?.truncated
+          ? `Læs samtalen · ${messages.length} af ${conversation.total} beskeder`
+          : `Læs hele samtalen · ${messages.length} beskeder`;
+    // Said plainly rather than left to be inferred from a count: a partial
+    // exchange presented as the whole one is the same failure as a quiet empty
+    // week standing in for a failed fetch.
+    //
+    // Worded as "not all of them" rather than "the older ones", because both
+    // ways of losing a message land here — `getThread` pages, and a message
+    // whose body is empty (an attachment with no text) is dropped in
+    // `collect.ts`. Naming the wrong cause would be its own small lie.
+    const note = conversation?.truncated
+      ? '<p class="msg-note">Ikke alle beskeder i tråden vises her — hele tråden står i Aula.</p>'
+      : '';
+    return `<details class="more"><summary>${escapeHtml(label)}</summary><div class="body">${messages
+      .map(messageBlock)
+      .join('')}${note}</div></details>`;
+  }
+
+  return `<details class="more"><summary>Læs mere</summary><div class="body">${paragraphs(source.text)}</div></details>`;
 }
 
 /** What the composer is allowed to know: facts, already checked. */
@@ -197,13 +276,20 @@ type PageOptions = {
   emptyAct?: string;
   /** Signal ids the plan already shows as cards, so details do not repeat them. */
   planned?: Set<string>;
+  /** Thread summaries from the extraction, keyed by `sourceKey`. */
+  conversations?: Record<string, string>;
 };
 
 /** Renders the model's plan with the same machinery the fallback uses. */
 export function renderPlan(
   brief: RankedBrief,
   plan: ComposePlan,
-  opts: { topline?: string | null; summaries?: Record<string, string>; isNew?: (key: string) => boolean } = {},
+  opts: {
+    topline?: string | null;
+    summaries?: Record<string, string>;
+    conversations?: Record<string, string>;
+    isNew?: (key: string) => boolean;
+  } = {},
 ): string {
   const byId = new Map(brief.signals.map((s) => [s.id, s]));
   const spec = (entry: PlanEntry): CardSpec => ({
@@ -223,6 +309,7 @@ export function renderPlan(
     {
       topline: plan.topline ?? opts.topline ?? null,
       summaries: opts.summaries ?? {},
+      conversations: opts.conversations ?? {},
       ...(opts.isNew ? { isNew: opts.isNew } : {}),
       ...(plan.tomHandling ? { emptyAct: plan.tomHandling } : {}),
       planned,
@@ -235,6 +322,7 @@ export async function composePage(
   opts: {
     topline?: string | null;
     summaries?: Record<string, string>;
+    conversations?: Record<string, string>;
     isNew?: (key: string) => boolean;
     timeoutMs?: number;
   } = {},
@@ -255,6 +343,7 @@ export async function composePage(
   const html = renderPlan(brief, plan, {
     topline: opts.topline ?? null,
     summaries: opts.summaries ?? {},
+    conversations: opts.conversations ?? {},
     ...(opts.isNew ? { isNew: opts.isNew } : {}),
   });
   return { html, problems };
@@ -267,7 +356,12 @@ export async function composePage(
  */
 export function fallbackPage(
   brief: RankedBrief,
-  opts: { topline?: string | null; summaries?: Record<string, string>; note?: string } = {},
+  opts: {
+    topline?: string | null;
+    summaries?: Record<string, string>;
+    conversations?: Record<string, string>;
+    note?: string;
+  } = {},
 ): string {
   return buildPage(
     brief,
@@ -276,6 +370,7 @@ export function fallbackPage(
     {
       topline: opts.topline ?? null,
       summaries: opts.summaries ?? {},
+      conversations: opts.conversations ?? {},
       ...(opts.note ? { note: opts.note } : {}),
     },
   );
@@ -285,7 +380,13 @@ export function fallbackPage(
 function buildPage(brief: RankedBrief, act: CardSpec[], week: CardSpec[], opts: PageOptions): string {
   const { input } = brief;
   const colour = new Map(input.family.children.map((c, i) => [c.firstName, `c${i + 1}`]));
-  const card = ({ signal: s, titel, hvorfor }: CardSpec) => `
+  const card = ({ signal: s, titel, hvorfor }: CardSpec) => {
+    const why = hvorfor ?? s.why;
+    // What a six-message exchange is *about*, so the card is not a single quote
+    // the reader has to reconstruct a conversation from. Only threads long
+    // enough to need one have it — see `CONVERSATION_MIN_MESSAGES`.
+    const gist = opts.conversations?.[s.sourceKey];
+    return `
     <div class="card ${s.urgency === 'now' ? 'now' : 'soon'}" data-signal-id="${escapeHtml(s.id)}" data-source-id="${escapeHtml(s.sourceKey)}" data-done-keys="${escapeHtml(doneKeys(s).join(' '))}">
       <div class="row">
         ${s.dueAt ? `<span class="chip ${s.urgency === 'now' ? 'now' : 'soon'}">${escapeHtml(capitalise(danishDate(s.dueAt)))}</span>` : ''}
@@ -293,11 +394,14 @@ function buildPage(brief: RankedBrief, act: CardSpec[], week: CardSpec[], opts: 
         ${s.child ? `<span class="who"><span class="dot ${colour.get(s.child) ?? 'c1'}"></span>${escapeHtml(s.child)}</span>` : ''}
       </div>
       <p class="title">${escapeHtml(titel ?? s.title)}</p>
-      ${hvorfor ?? s.why ? `<p class="why">${escapeHtml(hvorfor ?? s.why ?? '')}</p>` : ''}
+      ${why ? `<p class="why">${escapeHtml(why)}</p>` : ''}
       ${s.quote ? `<blockquote>«${escapeHtml(s.quote)}»</blockquote>` : ''}
+      ${gist ? `<p class="gist">${escapeHtml(gist)}</p>` : ''}
+      ${moreBlock(s.source, [titel ?? s.title, why, s.quote, gist].filter(Boolean).join(' '))}
       <div class="src">${escapeHtml(s.source.title)}${s.source.author ? ` · ${escapeHtml(s.source.author)}` : ''}${s.source.url ? ` · <a href="${escapeHtml(s.source.url)}">åbn i Aula</a>` : ''}</div>
       <button class="tick" type="button" aria-pressed="false" aria-label="Markér som klaret"></button>
     </div>`;
+  };
 
   const context = brief.signals.filter((s) => s.tier === 'context' && !opts.planned?.has(s.id));
   const hidden = brief.signals.filter((s) => s.tier === 'hidden');
@@ -361,8 +465,18 @@ function buildPage(brief: RankedBrief, act: CardSpec[], week: CardSpec[], opts: 
   ${
     context.length || brief.unusedSources.length
       ? `<section><h2>Godt at vide</h2><details><summary>${context.length + brief.unusedSources.length} ting uden noget, du skal gøre</summary>
-      ${context.map((s) => `<div class="di" data-source-id="${escapeHtml(s.sourceKey)}"><b>${escapeHtml(s.title)}</b>${s.quote ? `<p>«${escapeHtml(s.quote)}»</p>` : ''}</div>`).join('')}
-      ${brief.unusedSources.map((i) => `<div class="di" data-source-id="${escapeHtml(i.key)}"><b>${escapeHtml(i.title)}</b><p>${escapeHtml(i.author ?? '')}</p></div>`).join('')}
+      ${context
+        .map((s) => {
+          const gist = opts.conversations?.[s.sourceKey];
+          return `<div class="di" data-source-id="${escapeHtml(s.sourceKey)}"><b>${escapeHtml(s.title)}</b>${s.quote ? `<p>«${escapeHtml(s.quote)}»</p>` : ''}${gist ? `<p class="gist">${escapeHtml(gist)}</p>` : ''}${moreBlock(s.source, [s.title, s.quote, gist].filter(Boolean).join(' '))}</div>`;
+        })
+        .join('')}
+      ${brief.unusedSources
+        .map((i) => {
+          const gist = opts.conversations?.[i.key];
+          return `<div class="di" data-source-id="${escapeHtml(i.key)}"><b>${escapeHtml(i.title)}</b><p>${escapeHtml(i.author ?? '')}</p>${gist ? `<p class="gist">${escapeHtml(gist)}</p>` : ''}${moreBlock(i, [i.title, gist].filter(Boolean).join(' '))}</div>`;
+        })
+        .join('')}
     </details></section>`
       : ''
   }
