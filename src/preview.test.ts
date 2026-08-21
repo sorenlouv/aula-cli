@@ -108,7 +108,6 @@ describe('briefResponse', () => {
       '/latest.html/..',
       '/brief-2026-08-19.pdf',
       '/state.json',
-      '/artifact-url',
       '/favicon.ico',
     ]) {
       expect(briefResponse(path, dir, gen).status).toBe(404);

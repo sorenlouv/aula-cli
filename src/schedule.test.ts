@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { agentPath, buildPlist, parseAt, schtasksCreateArgs } from './schedule.ts';
+import {
+  agentPath,
+  buildPlist,
+  cronLines,
+  parseAt,
+  RETRY_EVERY_MINUTES,
+  RETRY_FOR_MINUTES,
+  scheduleTimes,
+  schtasksCreateArgs,
+} from './schedule.ts';
 
 describe('parseAt', () => {
   test('defaults to the 06:30 weekday-morning slot', () => {
@@ -18,6 +27,21 @@ describe('parseAt', () => {
   });
 });
 
+describe('scheduleTimes', () => {
+  test('the run, then a retry every 15 minutes for three hours', () => {
+    const times = scheduleTimes({ hour: 6, minute: 30 });
+    expect(times[0]).toEqual({ hour: 6, minute: 30 });
+    expect(times[1]).toEqual({ hour: 6, minute: 45 });
+    expect(times.at(-1)).toEqual({ hour: 9, minute: 30 });
+    expect(times).toHaveLength(1 + RETRY_FOR_MINUTES / RETRY_EVERY_MINUTES);
+  });
+
+  test('stops at midnight rather than wrapping into another weekday', () => {
+    const times = scheduleTimes({ hour: 23, minute: 30 });
+    expect(times.map((t) => `${t.hour}:${t.minute}`)).toEqual(['23:30', '23:45']);
+  });
+});
+
 describe('buildPlist', () => {
   const plist = buildPlist({
     at: { hour: 6, minute: 30 },
@@ -26,14 +50,20 @@ describe('buildPlist', () => {
     logPath: '/tmp/launchd.log',
   });
 
-  test('runs `new --text` through bun, weekdays only', () => {
+  test('runs `new --text --catch-up` through bun, under caffeinate, weekdays only', () => {
+    expect(plist).toContain('<string>/usr/bin/caffeinate</string>');
+    expect(plist).toContain('<string>-s</string>');
     expect(plist).toContain('<string>/opt/homebrew/bin/bun</string>');
     expect(plist).toContain('<string>new</string>');
     expect(plist).toContain('<string>--text</string>');
-    // Weekdays 1-5, one calendar entry each — weekends stay quiet.
-    expect(plist.match(/<key>Weekday<\/key>/g)).toHaveLength(5);
-    expect(plist).toContain('<key>Hour</key><integer>6</integer>');
-    expect(plist).toContain('<key>Minute</key><integer>30</integer>');
+    expect(plist).toContain('<string>--catch-up</string>');
+    // Weekdays 1-5, one calendar entry per weekday per time — weekends stay quiet.
+    const times = scheduleTimes({ hour: 6, minute: 30 }).length;
+    expect(plist.match(/<key>Weekday<\/key>/g)).toHaveLength(5 * times);
+    expect(plist).not.toContain('<key>Weekday</key><integer>0</integer>');
+    expect(plist).not.toContain('<key>Weekday</key><integer>6</integer>');
+    expect(plist).toContain('<key>Hour</key><integer>6</integer><key>Minute</key><integer>30</integer>');
+    expect(plist).toContain('<key>Hour</key><integer>9</integer><key>Minute</key><integer>30</integer>');
   });
 
   test('bakes brief knobs into the agent, XML-escaped', () => {
@@ -77,14 +107,29 @@ describe('agentPath', () => {
 });
 
 describe('schtasksCreateArgs', () => {
-  test('a weekday-only task with a zero-padded start time', () => {
+  test('a weekday-only task with a zero-padded start time, repeating through the retry window', () => {
     const args = schtasksCreateArgs({ at: { hour: 6, minute: 5 }, bun: 'C:\\bun\\bun.exe' });
     expect(args).toContain('/SC');
     expect(args[args.indexOf('/SC') + 1]).toBe('WEEKLY');
     expect(args[args.indexOf('/D') + 1]).toBe('MON,TUE,WED,THU,FRI');
     expect(args[args.indexOf('/ST') + 1]).toBe('06:05');
+    expect(args[args.indexOf('/RI') + 1]).toBe(String(RETRY_EVERY_MINUTES));
+    expect(args[args.indexOf('/DU') + 1]).toBe('03:00');
     const tr = args[args.indexOf('/TR') + 1] ?? '';
     expect(tr).toContain('"C:\\bun\\bun.exe"');
-    expect(tr).toContain('new --text');
+    expect(tr).toContain('new --text --catch-up');
+  });
+});
+
+describe('cronLines', () => {
+  test('the run, then quarter-hour retries for three hours, weekdays only, all with --catch-up', () => {
+    const lines = cronLines({ hour: 6, minute: 30 });
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^30 6 \* \* 1-5 cd .* && bun src\/cli\.ts new --text --catch-up$/);
+    expect(lines[1]).toMatch(/^\*\/15 7-9 \* \* 1-5 .* --catch-up$/);
+  });
+
+  test('no retry line when the run is in the last hour of the day', () => {
+    expect(cronLines({ hour: 23, minute: 30 })).toHaveLength(1);
   });
 });

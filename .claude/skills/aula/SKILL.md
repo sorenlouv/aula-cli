@@ -68,6 +68,7 @@ ranking what actually matters to this family is your job.
 | `commonfile <id\|title>` | Download one shared file |
 | `new` | Generate the daily "Aula AI oversigt" and open it |
 | `open [--web]` | Open the newest overview — the local page, or the hosted copy |
+| `publish [--off]` | Keep a hosted copy of the overview (per installation; `--off` stops) |
 | `doctor --text` | Call every endpoint and report status + timing |
 | `cache status` / `cache clear` | What is cached; drop it all |
 
@@ -144,10 +145,13 @@ conversation may already be stale.
 page in `~/.aula/brief/` — and opens it (`--no-open` to skip). It calls
 `claude` itself for extraction and layout; `--no-llm` produces a rules-only
 page. `bun src/cli.ts open` shows the newest page without regenerating, and
-`open --web` opens the hosted copy where one is configured. A weekday-morning
-schedule is installed with `bun src/cli.ts schedule` (06:30 by default,
-`--at HH:MM` to change, `--remove` to stop; launchd on macOS, Task Scheduler
-on Windows). Offer it — don't install it unasked.
+`open --web` opens the hosted copy where one is configured — `bun src/cli.ts
+publish` sets that up (it publishes the newest page as a private artifact and
+saves the URL in `~/.aula/config.json`; `publish --off` stops it). A
+weekday-morning schedule is installed with `bun src/cli.ts schedule` (06:30 by
+default, `--at HH:MM` to change, `--remove` to stop; launchd on macOS, Task
+Scheduler on Windows; it retries through the morning if the Mac was asleep).
+Offer both — don't install or publish unasked.
 
 ## Session handling
 

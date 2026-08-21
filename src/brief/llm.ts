@@ -38,6 +38,127 @@ export function modelEffortArgs(): string[] {
   return [...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])];
 }
 
+/** How a `claude -p` subprocess ended, before any interpretation of what it said. */
+export type ClaudeExit = {
+  stdout: string;
+  stderr: string;
+  code: number;
+  /** The deadline passed and the process was killed by this module. */
+  timedOut: boolean;
+};
+
+/**
+ * Spawns `claude` with `args` and collects what it said, under a timeout that
+ * means it.
+ *
+ * Two things learned from a scheduled run that took 28 minutes to fail, with
+ * the laptop cycling through Power Nap the whole time:
+ *
+ * - **SIGTERM is a request, not a stop.** `claude` finishes what it was doing
+ *   before honouring it, and a request stuck on a connection that sleep has
+ *   left for dead can take a quarter of an hour to be given up. So the
+ *   deadline sends SIGTERM and, after a short grace, SIGKILL.
+ * - **`.text()` on the pipe waits for every holder of it to close**, and the
+ *   plugin hooks `claude` runs at the end of a turn inherit that pipe. So the
+ *   streams are drained as they arrive and read out once the process itself
+ *   has exited, with a second's grace for the tail — a lingering grandchild
+ *   cannot hold the brief hostage.
+ *
+ * `env` is merged over the agent's own; nothing is stripped.
+ */
+export async function spawnClaude(
+  args: string[],
+  opts: { stdin?: string; timeoutMs: number; graceMs?: number; env?: Record<string, string> },
+): Promise<ClaudeExit> {
+  const proc = Bun.spawn(['claude', ...args], {
+    stdin: opts.stdin === undefined ? 'ignore' : new TextEncoder().encode(opts.stdin),
+    stdout: 'pipe',
+    stderr: 'pipe',
+    // Always explicit: Bun's default is the environment as it was at startup,
+    // not `process.env` as it is now — which is the difference between the
+    // fake `claude` a test put on PATH and the real one.
+    env: { ...process.env, ...(opts.env ?? {}) },
+  });
+
+  let timedOut = false;
+  let hardKill: ReturnType<typeof setTimeout> | undefined;
+  const deadline = setTimeout(() => {
+    timedOut = true;
+    proc.kill('SIGTERM');
+    hardKill = setTimeout(() => proc.kill('SIGKILL'), opts.graceMs ?? 10_000);
+  }, opts.timeoutMs);
+
+  const out = proc.stdout.getReader();
+  const err = proc.stderr.getReader();
+  const outChunks: Uint8Array[] = [];
+  const errChunks: Uint8Array[] = [];
+  const draining = Promise.all([drain(out, outChunks), drain(err, errChunks)]);
+  try {
+    const code = await proc.exited;
+    await Promise.race([draining, Bun.sleep(1_000)]);
+    return {
+      stdout: Buffer.concat(outChunks).toString('utf8'),
+      stderr: Buffer.concat(errChunks).toString('utf8'),
+      code,
+      timedOut,
+    };
+  } finally {
+    clearTimeout(deadline);
+    if (hardKill) clearTimeout(hardKill);
+    // Releases the pipes even when a grandchild still holds the write end;
+    // otherwise the open descriptors keep this process alive after main()
+    // has returned, which is the same hostage situation one level up.
+    for (const reader of [out, err]) reader.cancel().catch(() => {});
+  }
+}
+
+/** Structural on purpose: Bun's reader type and TypeScript's lib disagree on the details. */
+async function drain<T>(reader: { read(): Promise<{ done: boolean; value?: T }> }, into: T[]): Promise<void> {
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      if (value) into.push(value);
+    }
+  } catch {
+    // A stream torn down by the kill is the expected end here.
+  }
+}
+
+/** The `--output-format json` envelope, reduced to what the pipeline acts on. */
+export type ClaudeReply = {
+  text: string;
+  isError: boolean;
+  /** Tools the session wanted and was refused — the deploy's clearest failure signal. */
+  denials: string[];
+};
+
+/**
+ * The result envelope is the last line of stdout; anything before it (a stray
+ * warning) is not ours. Null when there is no envelope, so the caller can fall
+ * back to the raw text rather than fail on a parse.
+ */
+export function parseClaudeJson(stdout: string): ClaudeReply | null {
+  try {
+    const parsed = JSON.parse(stdout.trim().split('\n').at(-1) ?? '') as {
+      type?: unknown;
+      result?: unknown;
+      is_error?: unknown;
+      permission_denials?: { tool_name?: unknown }[];
+    };
+    if (parsed.type !== 'result') return null;
+    return {
+      text: typeof parsed.result === 'string' ? parsed.result : '',
+      isError: parsed.is_error === true,
+      denials: (parsed.permission_denials ?? [])
+        .map((d) => d?.tool_name)
+        .filter((name): name is string => typeof name === 'string'),
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Runs `claude -p` with tools disabled, data on stdin.
  *
@@ -61,35 +182,33 @@ export function modelEffortArgs(): string[] {
  *
  * If this ever needs changing, re-run that probe rather than reading the help
  * text — the failure is silent and looks exactly like success.
+ *
+ * A call that hits its deadline is tried once more in a fresh process. That is
+ * the one failure a retry is good for: the stall is the connection, not the
+ * prompt, and the next request after a wake usually goes straight through.
+ * Every other failure — not logged in, a non-zero exit, an error envelope —
+ * is thrown as is.
  */
 export async function runClaude(
   instructions: string,
   stdin: string,
-  opts: { timeoutMs?: number } = {},
+  opts: { timeoutMs?: number; graceMs?: number } = {},
 ): Promise<string> {
-  const proc = Bun.spawn(
-    ['claude', '-p', instructions, '--tools', '', '--strict-mcp-config', ...modelEffortArgs()],
-    {
-      stdin: new TextEncoder().encode(stdin),
-      stdout: 'pipe',
-      stderr: 'pipe',
-    },
-  );
-
-  const timeout = setTimeout(() => proc.kill(), opts.timeoutMs ?? 240_000);
-  try {
-    const [out, err, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    if (code !== 0) {
-      throw new Error(`claude -p exited ${code}: ${err.trim() || '(no stderr)'}`);
+  const timeoutMs = opts.timeoutMs ?? 240_000;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const run = await spawnClaude(
+      ['-p', instructions, '--tools', '', '--strict-mcp-config', '--output-format', 'json', ...modelEffortArgs()],
+      { stdin, timeoutMs, ...(opts.graceMs !== undefined ? { graceMs: opts.graceMs } : {}) },
+    );
+    if (run.timedOut) continue;
+    const reply = parseClaudeJson(run.stdout);
+    if (run.code !== 0 || reply?.isError) {
+      const detail = reply?.text.trim() || run.stderr.trim() || run.stdout.trim() || '(no stderr)';
+      throw new Error(`claude -p exited ${run.code}: ${detail}`);
     }
-    return out.trim();
-  } finally {
-    clearTimeout(timeout);
+    return (reply?.text ?? run.stdout).trim();
   }
+  throw new Error(`claude -p timed out after ${Math.round(timeoutMs / 1000)}s (2 attempts)`);
 }
 
 /** Models like to wrap JSON in prose or a fence however firmly told not to. */

@@ -2,17 +2,19 @@
 
 > **Status: built and running.** `bun src/cli.ts new` produces an HTML page in
 > `~/.aula/brief/`, and `aula schedule` runs it weekdays at 06:30 — a launchd
-> agent on macOS, a Scheduled Task on Windows. What follows is the design and the
-> reasoning behind it; the phase table at the end records what each stage cost.
+> agent on macOS, a Scheduled Task on Windows — and retries through the morning
+> until the day's page is complete, because a laptop is asleep at 06:30 more
+> often than not. What follows is the design and the reasoning behind it; the
+> phase table at the end records what each stage cost.
 >
 > **HTML only.** PDF and PNG were dropped: they exist behind `--pdf` and `--png`
 > for a one-off, and the scheduled run passes neither. The forwarding argument in
 > [Delivery](#delivery-and-portability) is kept below as the reasoning that led
 > there, but it no longer describes what runs.
 >
-> **The hosted copy is opt-in and off unless configured.** Where a URL is
-> configured, the same run redeploys the page to it — see
-> [The hosted copy](#the-hosted-copy).
+> **The hosted copy is opt-in and off unless configured.** `aula publish` sets
+> it up, per installation; from then on the same run redeploys the page to it —
+> see [The hosted copy](#the-hosted-copy).
 
 Plan for a generated, self-contained HTML page covering Alma, Viggo and
 Ida: what needs acting on, what is coming, and what merely happened.
@@ -357,12 +359,28 @@ and the shared link shows today's brief instead of the day it was first
 published.
 
 **Off unless asked for.** Nothing leaves the machine until a URL exists in
-`AULA_ARTIFACT_URL` or `~/.aula/brief/artifact-url`. This is the one part of the
-pipeline that contradicts the local-only default chosen at the start — the page
-can carry sensitive information about a child, health details included — so it
-is a deliberate act of
-configuration, never something a clone of this repository inherits. `--no-deploy`
-skips it for a single run.
+`~/.aula/config.json`, and `aula publish` is the only thing that writes one.
+This is the one part of the pipeline that contradicts the local-only default
+chosen at the start — the page can carry sensitive information about a child,
+health details included — so it is a deliberate act of configuration, per
+installation and outside the repository: a clone inherits no URL, and no other
+user of the tool can see or redeploy someone else's artifact, since the publish
+runs under their own `claude` login. `publish` creates the artifact the first
+time (the tool's reply is the only place the new URL exists, so it is parsed back
+out and has to be the one URL in it) and redeploys to it after that; `publish
+--off` forgets it; `--no-deploy` skips it for a single run.
+
+**The Mac is asleep at 06:30.** Two consecutive mornings of `claude -p exited
+143` turned out to have nothing to do with `claude`: the power log showed the
+laptop in Deep Idle, waking for 180-second Power Nap windows, and launchd
+starting the job in one of them. The Aula reads finished inside the window; the
+model request did not, and the Mac slept on it — `~/.claude/projects` has the
+transcripts, prompt sent and nothing ever back. Our SIGTERM was then honoured
+only at the next wake, six to fourteen minutes later. The answers are in
+`schedule.ts` (caffeinate, retries every 15 minutes with `--catch-up`) and in
+`llm.ts` (SIGKILL after a grace, and one fresh process after a stall); the state
+file's `lastRun.complete` is what lets a retry know whether there is anything
+left to do.
 
 Four things about this leg are not obvious:
 
@@ -387,13 +405,21 @@ This is an undocumented lever and may stop working on any `claude` update. The
 failure mode is loud and harmless — the deploy reports the tool as unavailable,
 the note lands in the run's output, and the local brief is untouched.
 
-**No Aula text reaches that subprocess.** The page is assembled from posts and
-messages written by other people. If any of it were interpolated into the prompt
-— or readable by an agent holding a publishing tool — a sentence in a school post
-would be in a position to steer what gets published. So the prompt carries only a
-path and a URL this project produced itself, `Artifact` is the only tool granted,
-and a test asserts the prompt contains no Danish characters outside the values it
-interpolated.
+**No Aula text reaches that subprocess, and it may read one file.** The page is
+assembled from posts and messages written by other people. If any of it were
+interpolated into the prompt, a sentence in a school post would be in a position
+to steer what gets published. So the prompt carries only a path and a URL this
+project produced itself, and a test asserts it contains no Danish characters
+outside the values it interpolated. The agent originally got no reader at all,
+and that stopped working: the Artifact tool's own rule is that a file the model
+did not write must be read before it is published, and at high effort the model
+refused to push "content I haven't seen". It now gets `Read` for exactly the
+artifact path — a permission rule, so any other path is a prompt nobody is there
+to answer — and is told what the file is: other people's text, page content and
+never instructions. What an injected sentence could still steer is small by
+construction: the URL is fixed in the prompt and checked in the reply, the agent
+has no write, shell or network tool, and a published artifact is private to the
+account that published it.
 
 **It publishes with `force`, on purpose.** The publisher treats a version
 conflict as something to merge, which is right when two people edit one page and

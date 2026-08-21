@@ -1,6 +1,10 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { briefInput, sourceItem } from '../testing/brief-fixtures.ts';
-import { parseJsonLoosely, validateExtraction } from './llm.ts';
+import { installFakeClaude } from '../testing/fake-claude.ts';
+import { parseClaudeJson, parseJsonLoosely, runClaude, spawnClaude, validateExtraction } from './llm.ts';
 import type { BriefInput, SourceItem } from './types.ts';
 
 const SOURCE: SourceItem = sourceItem({
@@ -147,5 +151,119 @@ describe('validateExtraction', () => {
     expect(validateExtraction(INPUT, null).signals).toEqual([]);
     expect(validateExtraction(INPUT, { signals: 'nope' }).signals).toEqual([]);
     expect(validateExtraction(INPUT, { signals: [null] }).signals).toEqual([]);
+  });
+});
+
+// --------------------------------------------------------------- subprocess
+
+describe('the claude subprocess', () => {
+  const VALID = 'https://claude.ai/code/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
+  const ORIGINAL_PATH = process.env.PATH;
+  const dirs: string[] = [];
+  let log = '';
+
+  beforeAll(() => {
+    const fakeDir = mkdtempSync(join(tmpdir(), 'aula-fake-claude-'));
+    dirs.push(fakeDir);
+    process.env.PATH = installFakeClaude(fakeDir).path;
+  });
+  afterAll(() => {
+    if (ORIGINAL_PATH !== undefined) process.env.PATH = ORIGINAL_PATH;
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+  afterEach(() => {
+    delete process.env.FAKE_CLAUDE_MODE;
+    delete process.env.FAKE_CLAUDE_RESULT_JSON;
+    delete process.env.FAKE_CLAUDE_LOG;
+  });
+
+  function fake(mode: string, result?: string) {
+    const dir = mkdtempSync(join(tmpdir(), 'aula-fake-log-'));
+    dirs.push(dir);
+    log = join(dir, 'calls.log');
+    writeFileSync(log, '');
+    process.env.FAKE_CLAUDE_MODE = mode;
+    process.env.FAKE_CLAUDE_LOG = log;
+    if (result !== undefined) process.env.FAKE_CLAUDE_RESULT_JSON = JSON.stringify(result);
+    return { calls: () => readFileSync(log, 'utf8').split('\n').filter(Boolean) };
+  }
+
+  describe('parseClaudeJson', () => {
+    test('reads the result envelope, last JSON line wins', () => {
+      const out = 'some warning first\n{"type":"result","is_error":false,"result":"hello","permission_denials":[{"tool_name":"Bash"}]}\n';
+      expect(parseClaudeJson(out)).toEqual({ text: 'hello', isError: false, denials: ['Bash'] });
+    });
+
+    test('is null when stdout is not an envelope at all', () => {
+      expect(parseClaudeJson('plain prose')).toBeNull();
+      expect(parseClaudeJson('{"type":"other"}')).toBeNull();
+      expect(parseClaudeJson('')).toBeNull();
+    });
+  });
+
+  describe('spawnClaude', () => {
+    test('collects the envelope and the exit code', async () => {
+      fake('ok', 'svar');
+      const run = await spawnClaude(['-p', 'x'], { timeoutMs: 5_000 });
+      expect(run.code).toBe(0);
+      expect(run.timedOut).toBe(false);
+      expect(parseClaudeJson(run.stdout)?.text).toBe('svar');
+    });
+
+    test('passes stdin through to the process', async () => {
+      // The fake ignores stdin, but the spawn must not fail on it.
+      fake('ok');
+      const run = await spawnClaude(['-p', 'x'], { stdin: 'a'.repeat(100_000), timeoutMs: 5_000 });
+      expect(run.code).toBe(0);
+    });
+
+    test('a stalled process is killed at the deadline, and an orphan on the pipe does not delay the return', async () => {
+      fake('stall');
+      const started = Date.now();
+      const run = await spawnClaude(['-p', 'x'], { timeoutMs: 300, graceMs: 200 });
+      expect(run.timedOut).toBe(true);
+      // SIGTERM killed the script; the `sleep` it left behind still holds stdout.
+      expect(Date.now() - started).toBeLessThan(3_000);
+    });
+
+    test('a process that ignores SIGTERM gets SIGKILL after the grace', async () => {
+      fake('stall-ignore-term');
+      const started = Date.now();
+      const run = await spawnClaude(['-p', 'x'], { timeoutMs: 300, graceMs: 200 });
+      expect(run.timedOut).toBe(true);
+      expect(run.code).toBe(137);
+      expect(Date.now() - started).toBeLessThan(4_000);
+    });
+  });
+
+  describe('runClaude', () => {
+    test('returns the envelope text, tools off', async () => {
+      const f = fake('ok', '{"signals":[]}');
+      expect(await runClaude('instr', '{}', { timeoutMs: 5_000 })).toBe('{"signals":[]}');
+      expect(f.calls()[0]).toContain("--tools  --strict-mcp-config --output-format json");
+    });
+
+    test('tries once more after a stall, and only after a stall', async () => {
+      const f = fake('stall-then-ok', 'second');
+      expect(await runClaude('instr', '{}', { timeoutMs: 300, graceMs: 200 })).toBe('second');
+      expect(f.calls()).toHaveLength(2);
+    });
+
+    test('two stalls throw a bounded, explicit error', async () => {
+      const f = fake('stall');
+      await expect(runClaude('instr', '{}', { timeoutMs: 300, graceMs: 200 })).rejects.toThrow(/timed out after 0s \(2 attempts\)/);
+      expect(f.calls()).toHaveLength(2);
+    });
+
+    test('an error envelope throws its text, without a retry', async () => {
+      const f = fake('error');
+      await expect(runClaude('instr', '{}', { timeoutMs: 5_000 })).rejects.toThrow(/Not logged in/);
+      expect(f.calls()).toHaveLength(1);
+    });
+
+    test('the url the fake echoes back survives the envelope untouched', async () => {
+      fake('ok', VALID);
+      expect(await runClaude('instr', '{}', { timeoutMs: 5_000 })).toBe(VALID);
+    });
   });
 });
