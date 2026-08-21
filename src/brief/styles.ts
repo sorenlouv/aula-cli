@@ -48,6 +48,9 @@ export const BRIEF_CSS = `
 /* Explicit choice: the stamp wins over the OS in both directions. */
 :root[data-theme="dark"]{${DARK_TOKENS}}
 *{box-sizing:border-box}
+/* The page script hides with the attribute; a display rule further down must
+   not quietly win over it. */
+[hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--ink);
   font:16px/1.55 ui-sans-serif,-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
   -webkit-font-smoothing:antialiased}
@@ -68,7 +71,8 @@ h2{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-
   font-weight:650;margin:0 0 12px;display:flex;align-items:center;gap:10px}
 h2::after{content:"";flex:1;height:1px;background:var(--line)}
 .count{color:var(--ink-3);font-weight:500;letter-spacing:0}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px 16px;
+.card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  padding:18px 58px 16px 20px;
   margin-bottom:10px;box-shadow:var(--shadow);border-left:3px solid var(--line)}
 .card.now{border-left-color:var(--now)}
 .card.soon{border-left-color:var(--soon)}
@@ -84,6 +88,30 @@ blockquote{margin:0;padding:9px 14px;background:var(--quote);border-radius:8px;f
   color:var(--ink-2);font-style:italic}
 .src{margin-top:9px;font-size:12px;color:var(--ink-3)}
 .src a{color:var(--ink-3);text-decoration:underline;text-underline-offset:2px}
+
+/* Ticking off — see done.ts. The circle is drawn rather than imaged, because
+   the page may not reference an external resource and has to print. */
+.tick{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:50%;
+  border:1.5px solid var(--line);background:transparent;color:transparent;
+  font-size:15px;line-height:1;padding:0;cursor:pointer;display:grid;place-items:center;
+  -webkit-tap-highlight-color:transparent;transition:background .12s,border-color .12s,color .12s}
+.tick::before{content:"✓"}
+/* A thumb is wider than the circle it is aiming at. */
+.tick::after{content:"";position:absolute;inset:-9px;border-radius:50%}
+.tick:hover{border-color:var(--c2);color:var(--c2)}
+.tick:focus-visible{outline:2px solid var(--c2);outline-offset:2px}
+.tick[aria-pressed="true"]{background:var(--c2);border-color:var(--c2);color:var(--panel)}
+/* Hidden, never dropped: the toggle below puts them back. */
+.card.is-done{display:none}
+section.reveal .card.is-done{display:block;opacity:.55}
+section.reveal .card.is-done .title{text-decoration:line-through}
+/* "Intet kræver handling" under two visible cards reads as a contradiction,
+   however true the count is. While they are on show, the toggle says it. */
+section.reveal [data-empty]{display:none}
+.klaret{display:block;width:100%;margin:2px 0 0;padding:9px 13px;text-align:left;
+  border:1px dashed var(--line);border-radius:10px;background:transparent;
+  color:var(--ink-3);font:inherit;font-size:12.5px;cursor:pointer}
+.klaret:hover{color:var(--ink-2);border-color:var(--ink-3)}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(272px,1fr));gap:12px}
 .cc{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow)}
@@ -123,6 +151,13 @@ footer{margin-top:26px;text-align:center;color:var(--ink-3);font-size:12px}
   details{opacity:1}
   summary::after{display:none}
   .card,.cc,.di{break-inside:avoid}
+  /* A tick is something to press, so it is chrome, not content. The count it
+     produced stays — the forwarded PDF should still say two were dealt with —
+     but the cards themselves keep out of it however the section was left. */
+  .tick{display:none}
+  .card{padding-right:20px}
+  section.reveal .card.is-done{display:none}
+  .klaret{border-style:solid;cursor:auto}
 }
 @media (max-width:680px){
   .wrap{padding:26px 16px 60px}

@@ -103,6 +103,7 @@ same gate:
 | --- | --- |
 | Nothing required was dropped | every `must_show` signal id appears as `data-signal-id` |
 | Every claim is attributable | each claim block has `data-source-id` and a link |
+| Every card can be ticked off | each card carries `data-done-keys` |
 | Failures are visible | the datastatus block exists and names every failed fetch |
 | Noise stays down | no municipality-wide signal in the action region |
 | Portable | HTML parses; zero external resource references |
@@ -168,6 +169,60 @@ These are the whole point, and each becomes a test:
   plainly rather than showing an empty box. That is what makes it safe to skim.
 - **`NY` markers since the last brief**, so checking twice a week means reading
   only the delta.
+- **What you have dealt with stops asking.** Every card in the two action
+  sections has a tick; a ticked card is hidden, and stays hidden tomorrow. It
+  is hidden, never dropped — the section footer says *2 klaret · vis* and puts
+  them back, because a mis-tap must not become a silent omission.
+
+### Ticking things off
+
+A brief that keeps asking for something you did last Tuesday is worse than one
+that never asked: you stop reading the section. So the two action sections are
+tickable, and the tick survives the next morning's regeneration.
+
+**The store is the browser's, not the pipeline's.** The page is read on a
+phone, and nothing on a phone can write to `~/.aula`. So the record is
+`localStorage` on the origin the page is served from, and each fresh page hides
+what has already been ticked. `state.json` never learns: the ranker still ranks
+a done item, the composer still plans around it, and a model-written topline may
+still count it. That last one is visible — *"To ting kræver din opmærksomhed"*
+above a section reading `0` — and it is the honest price of the reader being the
+one who knows. The alternative is reading the hosted page back over the network
+on every run, in the one leg of the pipeline that already needs the network, a
+model and claude.ai credentials.
+
+Two things make it survive the daily republish, both measured rather than
+assumed:
+
+**The origin is per-artifact and stable.** The hosted page runs in a sandboxed
+frame on `<artifact-uuid>.frame.claudeusercontent.com` with `allow-same-origin`
+set — without that flag the frame would get an opaque origin and every
+`localStorage` access would throw. Storage is keyed by origin and not by
+version, so `force: true` replacing the whole page each morning leaves it
+untouched. Where storage is unavailable anyway — private browsing, a blocked
+frame — the tick still works and simply forgets on reload, which beats an inert
+button.
+
+**The key is not the signal id.** Model signals are numbered `model:0`,
+`model:1` … by their position in whatever came back and survived validation, so
+yesterday's `model:3` is tomorrow's something else entirely; storing that would
+tick off a *different* item each morning. The key is `sourceKey|dueAt` instead —
+Aula's own id, and a date `dates.ts` has already grounded in the source text.
+Deliberately excluded: the title, which the composer rewords by design, and the
+kind, which drifts between `action`, `deadline` and `bring` for one sentence.
+Including the date is also what scopes a tick correctly for something recurring
+— next Monday's *husk løbetøj* is a different date, so it comes back.
+
+A signal carries one key per source it was merged from, and matching on any of
+them is what stops a merge-winner flip resurrecting something already dealt
+with. The cost, stated plainly: two *distinct* obligations from one source on
+one date share a key, so ticking one hides both. Rare, and recoverable behind
+the *vis* toggle.
+
+This is not a muting system, and must not grow into one. A tick says *I did
+this*; *I never want to see this kind of thing* is a preference, and belongs on
+the family's own list.
+
 ## Architecture
 
 ```

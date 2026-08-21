@@ -43,6 +43,13 @@ export function validatePage(html: string, brief: RankedBrief): Violation[] {
     if (!tag.includes('data-source-id=')) {
       violations.push({ rule: 'attribution', detail: `signal ${id} har ingen data-source-id` });
     }
+    // A card the reader cannot tick off is a card that will still be there
+    // tomorrow after they have dealt with it — the complaint this whole
+    // mechanism exists to answer. The key is derived, so a renderer that
+    // forgets to write it fails here rather than shipping a dead tick.
+    if (!tag.includes('data-done-keys=')) {
+      violations.push({ rule: 'dismissible', detail: `signal ${id} har ingen data-done-keys` });
+    }
   }
 
   // 3. Failures are visible.
