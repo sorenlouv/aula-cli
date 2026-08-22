@@ -110,7 +110,7 @@ This repository's own `AGENTS.md` is notes for people working *on* the CLI, not
 a usage guide; Codex loads it when the repo is open, and nothing in it needs
 following to use the tool.
 
-## Offer these three
+## Offer these four
 
 Say what each one does and let the user choose. Each writes something outside
 this repository, so deleting the folder does not undo them.
@@ -154,6 +154,31 @@ whatever the school wrote about their children — for some families that
 includes health information.** Quote that to the user and get an explicit yes
 before running it. It is private to their claude.ai account until they share
 the link.
+
+### D. Their own calendar
+
+The overview knows the school's day, not that the dentist is at 13.30 on
+Thursday. Point it at the user's own calendars and both land on the same page,
+so they can see for themselves whether a day works.
+
+```bash
+bun src/cli.ts calendars                 # every calendar Claude can see; the ones being read are marked
+bun src/cli.ts calendars add 2 4         # start reading them — several at once
+bun src/cli.ts calendars remove 1        # stop reading one
+```
+
+Needs Google Calendar connected in Claude. That is the only supported route —
+there is no API key or calendar-link alternative, and `calendars` prints the few
+clicks when the connector is missing.
+
+**Show the list and let the user pick.** Never guess which calendars matter and
+never add one unasked: this writes to `~/.aula/config.json`, outside the
+repository. Adding reports how many appointments each calendar holds in the next
+fortnight — pass that back, and say so if one comes back empty when they
+expected otherwise.
+
+Nothing is read until a calendar is named here, and this can be done at any
+time, not only during setup.
 
 ## 5. Hand over
 

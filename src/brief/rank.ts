@@ -25,6 +25,7 @@ import { extractHits, urgencyFor } from './rules.ts';
 import type {
   Audience,
   BriefInput,
+  SourceItem,
   RankedBrief,
   RankedSignal,
   Relevance,
@@ -49,6 +50,10 @@ const AUDIENCE_SCORE: Record<Audience, number> = {
   // offers out of the cards is `concernsChild` in `tierOf`, and what hides
   // them is the family's own list, read by the model — not this number.
   municipal: -40,
+  // The family's own appointments. Just under `child`, so a school thing about
+  // one of them wins a contested slot — but only just, because an appointment
+  // they entered themselves is by definition something they meant.
+  family: 40,
 };
 
 /**
@@ -110,6 +115,13 @@ function isoOf(value: string | null): string | null {
 export function signalsFromRules(input: BriefInput, now = new Date()): Signal[] {
   const signals: Signal[] = [];
   for (const item of input.items) {
+    // A calendar entry is already the structured thing the Danish extractors
+    // exist to recover from a sentence, so running them over its title would
+    // only find the date it already has — or worse, a second one.
+    if (item.kind === 'personal') {
+      signals.push(personalSignal(item, now));
+      continue;
+    }
     const written = item.at ? new Date(item.at) : now;
     const reference = Number.isNaN(written.getTime()) ? now : written;
     const hits = extractHits(item.text, reference, now);
@@ -137,6 +149,36 @@ export function signalsFromRules(input: BriefInput, now = new Date()): Signal[] 
 
 function firstName(full: string): string {
   return full.split(' ')[0] ?? full;
+}
+
+/**
+ * The family's own appointment, as one signal.
+ *
+ * Always an `event`, never an `action`: it is a dated thing to know, and it
+ * takes its place among the week's other dated things on the same day as the
+ * school's own. `ACTIONABLE` deliberately excludes `event`, so nothing here can
+ * reach *Kræver handling* — which is the point. The cap there is five, and an
+ * appointment nobody has asked us to do anything about must not be able to
+ * push a real school deadline off the page.
+ */
+function personalSignal(item: SourceItem, now: Date): Signal {
+  const dueAt = isoOf(item.at);
+  return {
+    id: `${item.key}#0`,
+    kind: 'event',
+    title: item.title,
+    child: null,
+    dueAt,
+    urgency: urgencyFor(dueAt, now, 'later'),
+    // Nothing to quote: the title *is* the source text, and a "quote" repeating
+    // the line above it is the small lie the `Læs mere` rule already refuses.
+    quote: null,
+    why: null,
+    sourceKey: item.key,
+    origin: 'rule',
+    // Nobody asked us for this; we wrote it down ourselves.
+    concernsChild: false,
+  };
 }
 
 function scoreOf(

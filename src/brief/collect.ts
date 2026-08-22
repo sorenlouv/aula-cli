@@ -5,6 +5,14 @@
  */
 
 import type { AulaClient } from './../client.ts';
+import {
+  CalendarNotConnectedError,
+  loadPersonalEvents,
+  type PersonalEvent,
+  resolveCalendars,
+} from '../calendar/index.ts';
+import { readConfig } from '../config.ts';
+import { errorMessage } from '../validation.ts';
 import { localIsoDate } from '../integrations/types.ts';
 import {
   buildDigest,
@@ -207,6 +215,11 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
     });
   }
 
+  // --------------------------------------------------- the family's own diary
+  const personal = await collectPersonal({ days: opts.days, now });
+  items.push(...personal.items);
+  health.push(...personal.health);
+
   // ------------------------------------------------------------ presence map
   const presenceByChild = new Map<string, PresenceRow>();
   for (const row of digest.presence) {
@@ -316,4 +329,104 @@ function summariseWarning(warning: string): string {
     return `Ugeplan for ${who} kunne ikke hentes — ${host} svarede HTTP ${status}.`;
   }
   return flattened.length > 160 ? `${flattened.slice(0, 159)}…` : flattened;
+}
+
+/**
+ * The family's own appointments, as sources.
+ *
+ * No setup: where Google Calendar is connected in Claude, the family's own
+ * calendars are read. Where it is not, this does nothing and says nothing — an
+ * overview must not nag every morning about a feature nobody asked for.
+ * `aula calendars` exists to narrow the default, not to enable it.
+ *
+ * **They are shown, not analysed.** An appointment becomes a dated item like
+ * any other, and lands among the week's other dated things on the same day as
+ * the school's own events. An earlier version computed clashes here — against
+ * each child's registered komme/gå hours and against Aula's calendar — and it
+ * was removed: this family has no registered hours at all (33 template rows,
+ * none with a date, one with a time) and Aula's own calendar was empty in 7 of
+ * 13 briefs, so it could not fire. It could only misfire, and a false clash
+ * promotes to `act`, where the cap of five would push a real school deadline
+ * off the page. A reader looking at Thursday's dentist beside Thursday's
+ * forældremøde draws the conclusion anyway, and knows things the arithmetic
+ * never could — how far the dentist is, and whether a grandparent can fetch.
+ *
+ * Everything here degrades. A calendar that cannot be read becomes a warning on
+ * the page, never an exception and never an empty fortnight — the same rule as
+ * a vendor's ugeplan answering 500, and for the same reason: a missing
+ * appointment that looks like a free afternoon is the worst thing this feature
+ * could do.
+ */
+async function collectPersonal(
+  ctx: { days: number; now: Date },
+): Promise<{ items: SourceItem[]; health: HealthNote[] }> {
+  let calendars;
+  try {
+    calendars = await resolveCalendars(readConfig().calendars ?? []);
+  } catch (err) {
+    // No connector is the ordinary state for most installations, and the brief
+    // has nothing to tell them about it. Anything else is worth a line.
+    if (err instanceof CalendarNotConnectedError) return { items: [], health: [] };
+    return {
+      items: [],
+      health: [{ level: 'warn', message: `Egen kalender kunne ikke slås op: ${errorMessage(err)}` }],
+    };
+  }
+  if (calendars.length === 0) return { items: [], health: [] };
+
+  const from = new Date(ctx.now.getFullYear(), ctx.now.getMonth(), ctx.now.getDate());
+  const to = new Date(from.getTime() + ctx.days * 86_400_000);
+  const loaded = await loadPersonalEvents(calendars, { from, to });
+
+  const health: HealthNote[] = loaded.warnings.map((message) => ({ level: 'warn', message }));
+  if (loaded.notConnected) {
+    health.push({
+      level: 'warn',
+      message:
+        'Google Kalender er ikke forbundet i Claude, så jeres egne aftaler mangler her. ' +
+        'Kør `aula calendars` for at komme videre.',
+    });
+  } else if (loaded.warnings.length === 0) {
+    // What was read, in the footer that already says what was fetched — about
+    // the fetch, like every other line there, and never about the week.
+    const names = calendars.map((c) => `«${c.name}»`).join(' og ');
+    health.push({
+      level: 'ok',
+      message: `Egen kalender: ${names} blev læst (${loaded.events.length} aftaler i perioden).`,
+    });
+  }
+
+  return { items: loaded.events.map(toSourceItem), health };
+}
+
+/**
+ * One appointment as a source, so it travels the same road as everything else —
+ * ranked, composed, marked `NY`, tickable — instead of needing a section and a
+ * set of rules of its own.
+ *
+ * The time goes in the title because for a calendar entry the time *is* half of
+ * what it says; "Tandlæge" on its own is not the thing the reader needs.
+ */
+function toSourceItem(event: PersonalEvent): SourceItem {
+  const when = event.startTime ? ` kl. ${event.startTime}` : '';
+  return {
+    key: event.key,
+    kind: 'personal',
+    title: `${event.title}${when}`,
+    text: [event.title, event.location, `Fra kalenderen «${event.calendarName}»`]
+      .filter(Boolean)
+      .join(' · '),
+    // Local and naive on purpose: the ranker turns this into a Danish calendar
+    // day, and an all-day event has no instant to be faithful to.
+    at: `${event.date}T${event.startTime ?? '00:00'}:00`,
+    author: event.calendarName,
+    groups: [],
+    // Nothing here says which child an appointment is about. Guessing from the
+    // title would be a regex over prose the family wrote — the mistake
+    // `rank.ts` already made once, on a wish about Hjalte's father.
+    childNames: [],
+    audience: 'family',
+    important: false,
+    url: event.url,
+  };
 }

@@ -16,7 +16,7 @@ import { isRecord } from '../validation.ts';
 import { buildDateSupport, DA_MONTHS, DA_WEEKDAYS, unsupportedDateClaims } from './dates.ts';
 import { doneKeys } from './done.ts';
 import { parseJsonLoosely, runClaude, withPreferences } from './llm.ts';
-import type { ConversationMessage, RankedBrief, RankedSignal, SourceItem } from './types.ts';
+import type { ConversationMessage, RankedBrief, RankedSignal, SourceItem, SourceKind } from './types.ts';
 
 function danishDate(isoDay: string): string {
   const date = new Date(`${isoDay}T00:00:00`);
@@ -107,6 +107,23 @@ function moreBlock(source: SourceItem, shown: string): string {
   return `<details class="more"><summary>Læs mere</summary><div class="body">${paragraphs(source.text)}</div></details>`;
 }
 
+/**
+ * What each kind of source is called on the page.
+ *
+ * `Egen kalender` earns its own label rather than falling in with `Kalender`:
+ * the reader has to be able to tell "the school put this in Aula" from "we put
+ * this in our own calendar" at a glance, and a private appointment mislabelled
+ * as a school event is a small lie the rest of the page would then inherit.
+ */
+const SOURCE_LABEL: Record<SourceKind, string> = {
+  post: 'Opslag',
+  thread: 'Besked',
+  plan: 'Ugeplan',
+  event: 'Kalender',
+  album: 'Album',
+  personal: 'Egen kalender',
+};
+
 /** What the composer is allowed to know: facts, already checked. */
 function composePayload(brief: RankedBrief, topline: string | null, summaries: Record<string, string>, isNew: (key: string) => boolean) {
   const signal = (s: RankedSignal) => ({
@@ -123,7 +140,7 @@ function composePayload(brief: RankedBrief, topline: string | null, summaries: R
     urgency: s.urgency,
     quote: s.quote,
     why: s.why,
-    source: `${s.source.kind === 'post' ? 'Opslag' : s.source.kind === 'thread' ? 'Besked' : s.source.kind === 'plan' ? 'Ugeplan' : 'Kalender'} «${s.source.title}»`,
+    source: `${SOURCE_LABEL[s.source.kind]} «${s.source.title}»`,
     author: s.source.author,
     link: s.source.url,
     isNew: isNew(s.sourceKey),

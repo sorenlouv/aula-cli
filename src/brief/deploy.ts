@@ -43,7 +43,7 @@
  *   publish.
  */
 
-import { CONFIG_PATH, readConfig, writeConfig } from '../config.ts';
+import { CONFIG_PATH, readConfig, updateConfig } from '../config.ts';
 import { errorMessage } from '../validation.ts';
 import { modelEffortArgs, parseClaudeJson, spawnClaude } from './llm.ts';
 
@@ -82,9 +82,15 @@ export function readTarget(configPath = CONFIG_PATH): string | null {
   return readConfig(configPath).artifactUrl ?? null;
 }
 
-/** The one writer of the preference. `null` turns hosting off. */
+/**
+ * The one writer of the preference. `null` turns hosting off.
+ *
+ * Merged rather than written whole: this file also holds the family's
+ * calendars, and rebuilding it from the one field this module knows about
+ * would delete them — user data lost in a command about hosting.
+ */
 export function setTarget(url: string | null, configPath = CONFIG_PATH): void {
-  writeConfig(url ? { artifactUrl: url } : {}, configPath);
+  updateConfig({ artifactUrl: url ?? undefined }, configPath);
 }
 
 /**

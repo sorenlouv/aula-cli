@@ -69,6 +69,8 @@ ranking what actually matters to this family is your job.
 | `new` | Generate the daily "Aula AI oversigt" and open it |
 | `open [--web]` | Open the newest overview — the local page, or the hosted copy |
 | `publish [--off]` | Keep a hosted copy of the overview (per installation; `--off` stops) |
+| `calendars` | Which of the family's own calendars the overview reads |
+| `calendars add <n>` \| `remove <n>` | Start / stop reading one |
 | `remember "<ønske>"` | Record a standing wish about what this family wants highlighted |
 | `preferences` / `forget <n>` | List those wishes / drop number n |
 | `preferences reset` | Back to the list aula-cli ships with (says what it dropped) |
@@ -218,6 +220,38 @@ and the daily brief get their sense of what matters.
   the line they meant. `preferences reset` returns the whole list to the shipped
   defaults; it prints the user's own lines as it drops them, so read those back
   to them rather than letting them scroll off.
+
+## The family's own calendar
+
+The overview can also read the family's own calendar, so their own appointments
+appear among the week's other dated items, beside the school's own events for
+the same day. That is what lets a parent see *forældremøde torsdag 17.00* and
+*legeaftale torsdag 17.00* at once — the overview shows both and does not
+judge; the reader draws the conclusion.
+
+Where **Google Calendar is connected in Claude** there is nothing to set up:
+
+```bash
+bun src/cli.ts calendars              # what is read now, or what could be
+bun src/cli.ts calendars add 2        # start reading number 2
+bun src/cli.ts calendars remove 1     # stop reading number 1
+```
+
+`calendars` with nothing configured lists the calendars the connector can see,
+by name. Show the user that list and let them pick — do not guess which
+calendars matter, and do not add one unasked. Adding also reports how many
+appointments it found in the next fortnight, which is the confirmation that it
+worked; pass that back.
+
+Where Google Calendar is **not** connected, `calendars` says so and gives the
+few clicks that connect it. That is the only supported route — there is no API
+key or calendar-link alternative to offer, and a calendar the connector cannot
+reach cannot be read at all. Say so plainly rather than inventing a workaround.
+
+This can be set up at any time; it is not a one-chance step during onboarding.
+
+Nothing is read until a calendar is named here, and the list lives in
+`~/.aula/config.json` alongside the hosted-copy URL.
 
 ## The daily brief
 

@@ -580,3 +580,68 @@ describe("the family's list, as the model read it", () => {
     expect(low?.reasons).toContain('relevance:low -25');
   });
 });
+
+describe('the family\'s own appointments', () => {
+  function appointment(partial: Partial<SourceItem> = {}): SourceItem {
+    return item({
+      key: 'cal:far@eksempel.dk:evt1:2026-08-14T13:30:00+02:00',
+      kind: 'personal',
+      title: 'Tandlæge kl. 13:30',
+      text: 'Tandlæge · Fra kalenderen «Familien»',
+      at: '2026-08-14T13:30:00',
+      author: 'Familien',
+      audience: 'family',
+      ...partial,
+    });
+  }
+
+  test('an appointment is a dated thing to know, beside the school\'s own', () => {
+    // Shown, not analysed: it lands in "Kommende" with the week's other dated
+    // items, and the page never says whether anything clashed — see CALENDAR.md.
+    const source = appointment();
+    const brief = rank(input([source]), signalsFromRules(input([source]), TODAY));
+    const signal = brief.signals[0];
+    expect(signal?.tier).toBe('week');
+    expect(signal?.kind).toBe('event');
+    expect(signal?.why).toBeNull();
+  });
+
+  test('our own calendar can never reach Kræver handling', () => {
+    // The cap there is five. Nobody asked us for this appointment, so it must
+    // not be able to push a real school deadline off the page.
+    const sources = Array.from({ length: 8 }, (_, i) =>
+      appointment({ key: `cal:far@eksempel.dk:evt${i}:2026-08-14`, title: `Aftale ${i}` }),
+    );
+    const brief = rank(input(sources), signalsFromRules(input(sources), TODAY));
+    expect(brief.signals.filter((s) => s.tier === 'act')).toHaveLength(0);
+  });
+
+  test('the Danish extractors are not run over a calendar title', () => {
+    // "Frist" in an appointment somebody wrote for themselves is not a school
+    // deadline, and a calendar entry already carries the date the extractors
+    // exist to recover from prose. One appointment, one signal.
+    const source = appointment({ title: 'Frist for tilmelding d. 18/9 kl. 09:00' });
+    const signals = signalsFromRules(input([source]), TODAY);
+    expect(signals).toHaveLength(1);
+    expect(signals[0]?.kind).toBe('event');
+    expect(signals[0]?.dueAt).toBe('2026-08-14');
+  });
+
+  test('a school obligation still outranks our own appointment', () => {
+    // `family` sits just under `child` on purpose: both belong on the page, but
+    // the thing the school is asking for takes the contested slot.
+    const mine = appointment();
+    const school = item({
+      key: 'post:1',
+      kind: 'post',
+      audience: 'child',
+      title: 'Skolefoto',
+      text: 'Husk tilmelding til skolefoto senest fredag.',
+      at: '2026-08-13T09:00:00',
+      childNames: ['Ida'],
+    });
+    const brief = rank(input([mine, school]), signalsFromRules(input([mine, school]), TODAY));
+    const order = brief.signals.map((s) => s.sourceKey);
+    expect(order.indexOf('post:1')).toBeLessThan(order.indexOf(mine.key));
+  });
+});

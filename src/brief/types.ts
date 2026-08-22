@@ -28,10 +28,17 @@
  * day is addressed to the whole school and matters; a municipal course offer is
  * addressed to the whole school and does not. Breadth alone cannot separate
  * those two — see `concernsChild`, which is what does.
+ *
+ * `family` is the one value that does not come from Aula at all: an appointment
+ * out of the family's own calendar, addressed to nobody because they wrote it
+ * themselves. It sits just under `child` — a school thing about your daughter
+ * edges out your own dentist appointment when both are competing for the last
+ * slot on the page, but only just — and above `institution`, because something
+ * you put in your own calendar is by definition something you meant.
  */
-export type Audience = 'child' | 'class' | 'institution' | 'municipal';
+export type Audience = 'child' | 'class' | 'institution' | 'municipal' | 'family';
 
-export type SourceKind = 'post' | 'thread' | 'plan' | 'event' | 'album';
+export type SourceKind = 'post' | 'thread' | 'plan' | 'event' | 'album' | 'personal';
 
 /** One turn in a message thread, as it is shown when the reader expands it. */
 export type ConversationMessage = {

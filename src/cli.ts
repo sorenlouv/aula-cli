@@ -26,7 +26,14 @@ import {
   clearCache,
   flushCache,
 } from './cache.ts';
+import {
+  CalendarNotConnectedError,
+  type ConnectorCalendar,
+  listCalendars,
+  loadPersonalEvents,
+} from './calendar/index.ts';
 import { AulaApiError, AulaAuthError, AulaClient, CALENDAR_MAX_SPAN_DAYS } from './client.ts';
+import { readConfig, updateConfig } from './config.ts';
 import {
   buildDigest,
   collectAlbums,
@@ -86,6 +93,10 @@ Everyday:
                                the newest page as a private artifact and redeploys
                                to it on every run from then on
   publish --off                Stop updating the hosted copy and forget its URL
+  calendars                    Read your own calendar too, so family appointments
+                               show up beside the school's own events
+  calendars add <n>            Start reading one (run bare to see the list)
+  calendars remove <n>         Stop reading one
   schedule [--at HH:MM]        Generate the overview automatically every weekday,
                                retrying through the morning if the Mac was asleep
   schedule --remove            Stop generating it automatically
@@ -214,6 +225,8 @@ async function main(): Promise<number> {
   if (command === 'cache') return runCache(positionals, asText, ttlMs);
   if (command === 'open') return runOpen(values.web === true);
   if (command === 'publish') return runPublish(values.off === true);
+  // No Aula login needed: this reads the user's own calendars, not the school's.
+  if (command === 'calendars') return await runCalendars(positionals);
   if (command === 'remember') return runRemember(positionals);
   if (command === 'preferences') return runPreferences(positionals);
   if (command === 'forget') return runForget(positionals[0]);
@@ -713,6 +726,197 @@ async function runPublish(off: boolean): Promise<number> {
  * undo what was written on their behalf; a memory nobody can inspect is one
  * nobody can trust.
  */
+/**
+ * `calendars` — which of the family's own calendars the overview reads.
+ *
+ * The point of this command is that for most people there is nothing to set
+ * up. Where Google Calendar is connected in Claude, the calendars are already
+ * there to be listed and the only question left is which ones matter; where it
+ * is not, the answer is to connect it rather than to go hunting for a secret
+ * URL in a settings page. Both are one command.
+ *
+ * Nothing is read until a calendar is named here. A clone of this repository
+ * reads nobody's calendar, and the list lives in `~/.aula/config.json` with the
+ * rest of the per-installation preferences.
+ */
+async function runCalendars(positionals: string[]): Promise<number> {
+  const sub = positionals[0];
+  if (sub === undefined) return await showCalendars();
+  if (sub === 'add') return await addCalendar(positionals[1]);
+  if (sub === 'remove') return removeCalendar(positionals[1]);
+  throw new UsageError(
+    `Unknown subcommand "${sub}". Usage: aula ${usageFor('calendars')}`,
+  );
+}
+
+/** What is connected today — or, when nothing is, what could be. */
+async function showCalendars(): Promise<number> {
+  const configured = readConfig().calendars ?? [];
+  if (configured.length === 0) {
+    console.log('The overview reads none of your own calendars yet.\n');
+    return await offerCalendars();
+  }
+  console.log(
+    [
+      'The overview reads these calendars:',
+      '',
+      ...configured.map((c, i) => `  ${i + 1}. ${c.name}  (${c.id})`),
+      '',
+      "Their appointments appear on the overview among the week's other dated",
+      "items, beside the school's own events for the same day.",
+      '',
+      '`aula calendars add` shows what else is available; `aula calendars remove <n>` stops one.',
+    ].join('\n'),
+  );
+  return 0;
+}
+
+/**
+ * The pick list.
+ *
+ * Names, not ids: a non-technical user picks "Familien", never
+ * `a1b2c3d4e5f6@group.calendar.google.com`.
+ */
+async function offerCalendars(): Promise<number> {
+  const available = await availableCalendars();
+  if (available === null) return 0;
+  if (available.length === 0) {
+    console.log('Google Calendar is connected, but it lists no calendars.');
+    return 0;
+  }
+  const configured = new Set((readConfig().calendars ?? []).map((c) => c.id));
+  console.log(
+    [
+      'Calendars Claude can already see:',
+      '',
+      ...available.map((c, i) => {
+        const already = configured.has(c.id) ? '  — already added' : '';
+        return `  ${i + 1}. ${c.summary}${relation(c.accessRole)}${already}`;
+      }),
+      '',
+      'Add one with its number: `aula calendars add 2`',
+    ].join('\n'),
+  );
+  return 0;
+}
+
+/**
+ * Whose calendar this is, when the connector says.
+ *
+ * It currently does not: `list_calendars` returns id, summary, description and
+ * timeZone, and `accessRole` only comes back from `list_events`. Kept because
+ * the distinction is worth showing the moment it is available — reading a
+ * calendar somebody *else* shared is a large part of why this is the only
+ * supported route: Google issues a feed URL for calendars you own and no
+ * others, so the household's shared calendar is exactly what it cannot reach.
+ */
+function relation(accessRole: string | undefined): string {
+  if (accessRole === 'owner') return '  (your own)';
+  if (accessRole === 'writer') return '  (shared with you, you can edit)';
+  if (accessRole === 'reader' || accessRole === 'freeBusyReader') return '  (shared with you)';
+  return '';
+}
+
+/**
+ * Adding one, and then proving it worked.
+ *
+ * The confirmation is the important half. "Calendar added" proves nothing; the
+ * number of appointments it actually found in the coming fortnight proves the
+ * whole chain — connector, credentials, window, parsing — at the moment the
+ * user is still paying attention.
+ */
+async function addCalendar(ref: string | undefined): Promise<number> {
+  const available = await availableCalendars();
+  if (available === null) return 0;
+  if (ref === undefined) return await offerCalendars();
+
+  const index = Number(ref);
+  const chosen = Number.isInteger(index) && index >= 1 && index <= available.length
+    ? available[index - 1]
+    : available.find((c) => c.id === ref);
+  if (!chosen) {
+    console.error(
+      `No calendar "${ref}". \`aula calendars add\` lists them with the numbers to use.`,
+    );
+    return 1;
+  }
+
+  const existing = readConfig().calendars ?? [];
+  if (existing.some((c) => c.id === chosen.id)) {
+    console.log(`"${chosen.summary}" is already being read — nothing changed.`);
+    return 0;
+  }
+  const calendars = [...existing, { id: chosen.id, name: chosen.summary }];
+  updateConfig({ calendars });
+
+  console.log(`Added "${chosen.summary}".`);
+  const load = await loadPersonalEvents([{ id: chosen.id, name: chosen.summary }], {
+    from: new Date(),
+    to: new Date(Date.now() + 14 * 86_400_000),
+  });
+  for (const warning of load.warnings) console.error(warning);
+  if (load.warnings.length === 0) {
+    const soon = load.events.slice(0, 3);
+    console.log(
+      [
+        `${load.events.length} appointment(s) in the next 14 days.`,
+        ...soon.map((e) => `  · ${e.date}${e.startTime ? ` ${e.startTime}` : ''}  ${e.title}`),
+        '',
+        'They are in the next overview — `aula new` builds it now.',
+      ].join('\n'),
+    );
+  }
+  return 0;
+}
+
+function removeCalendar(raw: string | undefined): number {
+  const calendars = readConfig().calendars ?? [];
+  const index = Number(raw);
+  if (raw === undefined || !Number.isInteger(index) || index < 1 || index > calendars.length) {
+    throw new UsageError(
+      'Usage: aula calendars remove <n> — the number shown by `aula calendars`.',
+    );
+  }
+  const [dropped] = calendars.splice(index - 1, 1);
+  updateConfig({ calendars: calendars.length > 0 ? calendars : undefined });
+  console.log(
+    `Stopped reading "${dropped?.name}". \`aula calendars add\` puts it back.`,
+  );
+  return 0;
+}
+
+/**
+ * The connector's calendars, or `null` when there is no connector — in which
+ * case the user has already been told what to do about it.
+ *
+ * Connecting is a few clicks with no link to copy, and it is the only way to
+ * read a calendar somebody else shared — which is what a household's shared
+ * calendar usually is.
+ */
+async function availableCalendars(): Promise<ConnectorCalendar[] | null> {
+  try {
+    return await listCalendars();
+  } catch (err) {
+    if (err instanceof CalendarNotConnectedError) {
+      console.log(
+        [
+          'Google Calendar is not connected in Claude yet.',
+          '',
+          'Connect it once and there is nothing else to set up — it also reads',
+          'calendars other people have shared with you, which a calendar link cannot:',
+          '',
+          '  Claude  →  Settings  →  Connectors  →  Google Calendar  →  Connect',
+          '',
+          'Then run `aula calendars` again.',
+        ].join('\n'),
+      );
+      return null;
+    }
+    console.error(`Could not ask Claude for your calendars: ${errorMessage(err)}`);
+    return null;
+  }
+}
+
 function runRemember(positionals: string[]): number {
   // Unquoted works too: `aula remember beskeder fra John er vigtige`. A wish
   // typed as a sentence is the normal case, not the odd one.
