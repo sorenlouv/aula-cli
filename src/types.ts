@@ -266,9 +266,9 @@ export type PresenceEntry = {
 };
 
 /**
- * One entry in "Fælles Filer" — the shared-file shelf each institution keeps for
- * documents that are not tied to a message or post: holiday plans, class
- * timetables, policies.
+ * One entry in the shared-file shelf ("Fælles Filer" in Aula's own UI), which
+ * each institution keeps for documents that are not tied to a message or post:
+ * holiday plans, class timetables, policies.
  *
  * The double `file.file` nesting is Aula's, not a typo: the outer object is the
  * attachment record, the inner one is the stored blob carrying the presigned

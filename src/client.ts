@@ -741,8 +741,8 @@ export class AulaClient {
   }
 
   /**
-   * The recurring komme/gå schedule, as opposed to `getDailyPresence`, which
-   * is today's actual check-in/check-out.
+   * The recurring presence schedule — Aula's "Komme/gå" module — as opposed
+   * to `getDailyPresence`, which is today's actual check-in/check-out.
    *
    * Note the parameter name: this endpoint calls the child ids
    * `filterInstitutionProfileIds[]`, not `childIds[]`. Same ids, different
@@ -808,7 +808,7 @@ export class AulaClient {
 
   /**
    * A short-lived bearer token scoped to one third-party widget. This is the
-   * hinge the whole ugeplan/lektier world hangs off: Aula issues the token,
+   * hinge the whole weekly-plan/homework world hangs off: Aula issues the token,
    * the vendor's own API accepts it. See src/widgets.ts.
    */
   async getWidgetToken(widgetId: string): Promise<string> {
@@ -828,8 +828,8 @@ export class AulaClient {
   }
 
   /**
-   * "Fælles Filer" — the shared-file shelf, filtered by institution *code*
-   * rather than by any of the profile ids.
+   * The shared-file shelf ("Fælles Filer" in Aula's own UI), filtered by
+   * institution *code* rather than by any of the profile ids.
    *
    * `orderField` is mandatory and the accepted set is narrow: `title` works,
    * and the obvious guesses (`created`, `name`, `fileName`) are all rejected

@@ -48,7 +48,7 @@ test('widgets are detected from both the nested and the flat shape', () => {
     ['0004', '0029', '9999'],
   );
   assert.equal(detected[0]?.provider, 'meebook');
-  assert.equal(detected[1]?.capability, 'ugebrev');
+  assert.equal(detected[1]?.capability, 'weekly-letter');
   assert.equal(detected[2]?.provider, undefined, 'unknown widgets carry no provider');
   assert.equal(detected[2]?.name, 'Something new');
 });

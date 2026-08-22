@@ -46,7 +46,7 @@ describe('the printed copy', () => {
     expect(print).toContain('.more{display:none}');
   });
 
-  // A "læs mere" lives inside Godt at vide, so a descendant selector let the
+  // A more-block lives inside the context section, so a descendant selector let the
   // outer section's open state decide the inner block's arrow: shut, pointing
   // up. Measured in a browser, not reasoned about.
   test('a collapsed block nested in an open section keeps its own chevron', async () => {

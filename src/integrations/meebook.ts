@@ -134,7 +134,7 @@ export async function getWeekPlan(
 
   return {
     provider: 'meebook',
-    capability: 'ugeplan',
+    capability: 'weekly-plan',
     widgetId,
     isoWeek: ctx.isoWeek,
     items,

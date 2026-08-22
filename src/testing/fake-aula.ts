@@ -135,7 +135,7 @@ const THREADS = [
  *
  * 5001 is deliberately a back-and-forth rather than a single message: an active
  * conversation is its own shape on the brief — summarised on the card, the whole
- * exchange behind "læs hele samtalen" — and a fixture where every thread is one
+ * exchange behind the more-block — and a fixture where every thread is one
  * message would never exercise it.
  */
 const MESSAGES: Record<number, { from: string; role: string; ago: number; html: string }[]> = {

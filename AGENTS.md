@@ -16,6 +16,84 @@ allowlist to "just try" something, and do not route a call around `#request`.
 `presence.updatePresenceTemplate` is deliberately absent — it is the one API in
 the prior art that writes.
 
+## Code is English. Danish is what the reader sees.
+
+The product is Danish; the codebase is not. Danish belongs in exactly one place —
+strings a parent reads — and nowhere else.
+
+**Danish is allowed in:** rendered page text and CLI output, prompt prose, and
+the `problems`/`notes` diagnostics that reach the page.
+
+**Danish is banned from:** identifiers, type names, object keys, JSON keys
+exchanged with the model, `data-*` attributes, CSS class names, enum/sentinel
+values, and the explanatory prose of comments, doc-comments and test names.
+
+### Whose word is it?
+
+Three rules, and they decide every case:
+
+1. **The external contract is Danish → we are Danish.** MinUddannelse really
+   does send `kuvertnavn` and `ugebreve`. Mirror those verbatim in the response
+   type and map to English at the boundary — `min-uddannelse.ts` is the pattern.
+   The giveaway that a payload is genuinely theirs is a language mix nobody
+   would design: `MuTask` has `kuvertnavn` next to `title`, and `hold` whose
+   nested field is `name`.
+2. **The external contract is English → we stay English.** Never translate a
+   wire term into the Danish word for it.
+3. **The vocabulary is ours → always English.** Identifiers, type names, object
+   keys, JSON keys exchanged with the model, `data-*` attributes, CSS classes,
+   enum and sentinel values, and the prose of comments, doc-comments and test
+   names.
+
+**Rule 2 is the one that gets broken, because Aula's API is entirely English
+while Aula's UI is entirely Danish.** The wire says `activityType`, `pickup`,
+`selfDecider`, `commonFiles`, `institutionProfileId`; the screen the parent
+looks at says "Henteform", "Komme/gå", "Fælles Filer". Naming code after the
+screen is how a field ends up called `henteform` when the thing it is built
+from is `activityType`. Aula being a Danish product is not evidence that any
+particular term of theirs is Danish — go and look at the response.
+
+So: name the concept by the English wire term, and cross-reference the Danish
+UI label where it helps someone find the feature — `"Fælles Filer" in Aula's own
+UI`, not `Flattens a Fælles Filer entry`.
+
+**Guessing the language of a field is how you lose data silently.** `MuTask.hold`
+was typed as `{ name }` when MinUddannelse sends `{ navn }`, so `subject` never
+populated — and the test passed, because the fixture had been written to match
+our code instead of the wire. A self-authored fixture proves only that the code
+agrees with itself. Two things would have caught it: the fixture contradicted
+itself (`hold: [{ name }]` beside `forloeb: { navn }`), and MinUddannelse
+publishes its schema:
+
+```
+https://api.minuddannelse.net/csv/metadata?op=OpgavelisteRequest
+```
+
+That endpoint is public and needs no token — it lists `HoldDto` as `Id`, `Navn`,
+`FagId`, `FagNavn`. Check it before typing a MinUddannelse payload. (Only some
+`op=` values are public; `UgebrevRequest` answers 403.)
+
+Note also that a widget the family does not have is not testable from a normal
+account: Aula will happily mint a token for any `widgetId`, but the vendor then
+answers `403 Token is invalid (Person not found: …)`. `scaarup/aula` and
+`Casperjuel/aula-mcp` are the fallback sources when you cannot make the call.
+
+One further exception, on top of the three rules: **Danish specimens quoted in
+comments.** `rules.ts` matches literal Danish, so a comment showing `"på mandag"`
+or `"ansøgningsfristen"` is a specimen of the input, not a name. Translating
+those would make the comment describe code that does not exist.
+
+The mistake that catches most of the rest: never name one of our own concepts by
+the Danish label it renders as. The tiers are `act`, `week`, `context`, `hidden`
+— a comment saying "at most five items in *Kræver handling*" names the heading
+where it means the `act` tier. Pair the two only where the point is the
+rendering itself, as `BRIEF.md`'s page-section list does.
+
+Where a Danish label and an English code value both have to exist, keep them
+side by side rather than picking one: `cli-helpers.ts` maps Aula's presence
+constants through `{ da: 'På tur', en: 'on a field trip' }`, keyed by the wire
+number.
+
 ## The failure modes that lie to you
 
 ### An access token alone is not enough (the expensive one)
@@ -123,7 +201,7 @@ Which ids each endpoint accepts is **not** consistent:
 re-deriving at a call site — that is the whole reason it exists.
 
 A fourth identity: the **MitID username** (`valdemarex`) is not the Aula guardian id
-(`vald42a1`). Meebook, Systematic and EasyIQ SkolePortal's ugeplan key their
+(`vald42a1`). Meebook, Systematic and EasyIQ SkolePortal's Ugeplan widget key their
 session on the MitID one and reject the Aula one. It appears nowhere in the API —
 it is what the human types into MitID — so `login` records it on the stored token
 record, which is the one place it exists.

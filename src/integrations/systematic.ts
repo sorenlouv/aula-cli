@@ -6,7 +6,7 @@
  *
  * Two oddities: the bearer goes in `Aula-Authorization`, not `Authorization`,
  * and `sessionId` is the MitID username — one of the three consumers of it,
- * with Meebook and SkolePortal's ugeplan — rather than the Aula guardian id.
+ * with Meebook and SkolePortal's Ugeplan widget — rather than the Aula guardian id.
  */
 
 import { type WidgetTokens, widgetFetch } from '../widgets.ts';
@@ -124,7 +124,7 @@ export async function getReminders(
 
   return {
     provider: 'systematic',
-    capability: 'huskelisten',
+    capability: 'reminders',
     widgetId,
     isoWeek: ctx.isoWeek,
     items,

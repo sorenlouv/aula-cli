@@ -749,7 +749,7 @@ test('presence statuses match the values Aula actually renders', () => {
   assert.equal(presenceStatus(99), 'status 99');
 });
 
-test('a komme/gå template is flattened whichever henteform it uses', () => {
+test('a presence template is flattened whichever pickup type it uses', () => {
   const { days } = normaliseSchedule(
     {
       presenceWeekTemplates: [
@@ -788,7 +788,7 @@ test('a komme/gå template is flattened whichever henteform it uses', () => {
     'sorted by date, not by the order Aula returned',
   );
   assert.equal(days[0]?.exitTime, '14:00–16:00');
-  assert.equal(days[0]?.henteform, 'may leave alone within a window');
+  assert.equal(days[0]?.pickupType, 'may leave alone within a window');
   assert.equal(days[1]?.exitWith, 'Farmor');
   assert.equal(days[1]?.child, 'Alma');
   assert.equal(days[2]?.exitWith, null);

@@ -306,7 +306,7 @@ test('cache status reports what is stored, and clear empties it', () => {
 // dead string — a routine expiry becomes a hard failure.
 test('an expired widget token is still recoverable with the cache on', () => {
   const box = sandbox({ FAKE_AULA_STALE_TOKEN: '1' });
-  const plans = json(box.run('ugeplan'));
+  const plans = json(box.run('weekly-plan'));
 
   assert.equal(plans.length, 1);
   assert.ok(plans[0].items.length > 0, 'the retry should have produced a plan');
@@ -340,7 +340,7 @@ test('open --web without a configured hosted copy says how to get one', () => {
 // outage. Daycare children must simply never reach a weekly-plan vendor.
 test('weekly plans are fetched for school children only, with no warning for the rest', () => {
   const box = sandbox();
-  const plans = json(box.run('ugeplan', '--no-cache'));
+  const plans = json(box.run('weekly-plan', '--no-cache'));
   assert.deepEqual(
     plans[0].items.map((i: any) => i.childName),
     ['Alma Eksempelsen'],
@@ -362,7 +362,7 @@ test('--page is refused by commands that are not paginated', () => {
 
 test('--widget bypasses detection and reads the named vendor directly', () => {
   const box = sandbox();
-  const plans = json(box.run('ugeplan', '--widget', '0004', '--no-cache'));
+  const plans = json(box.run('weekly-plan', '--widget', '0004', '--no-cache'));
   assert.equal(plans.length, 1);
   assert.equal(plans[0].widgetId, '0004');
   assert.equal(plans[0].provider, 'meebook');
@@ -370,7 +370,7 @@ test('--widget bypasses detection and reads the named vendor directly', () => {
 
 test('--widget with an id that has no integration names the supported ones', () => {
   const box = sandbox();
-  const result = box.run('ugeplan', '--widget', '9999', '--no-cache');
+  const result = box.run('weekly-plan', '--widget', '9999', '--no-cache');
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /No integration for widget "9999"/);
   assert.match(result.stderr, /0004/, 'the error should list the supported ids');

@@ -107,7 +107,7 @@ export async function getWeekPlan(
 
   return {
     provider: 'easyiq',
-    capability: 'ugeplan',
+    capability: 'weekly-plan',
     widgetId,
     isoWeek: ctx.isoWeek,
     items,

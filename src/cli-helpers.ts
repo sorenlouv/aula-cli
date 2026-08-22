@@ -95,7 +95,8 @@ export function presenceStatusDanish(status: number | string | undefined): strin
 }
 
 /**
- * "Henteform" — how a child is allowed to leave, on a komme/gå template.
+ * How a child is allowed to leave, on a presence template. Aula's own UI
+ * calls this "henteform", on the "Komme/gå" module.
  * Wire constants from Aula's presence frontend; do not renumber.
  */
 const PRESENCE_ACTIVITY_TYPES: Readonly<Record<number, { da: string; en: string }>> =
@@ -112,7 +113,7 @@ function presenceActivityType(activityType: number | null | undefined): string |
 }
 
 /**
- * Flattens a Fælles Filer entry.
+ * Flattens a common-files entry ("Fælles Filer" in Aula's own UI).
  *
  * The `file.file` nesting is Aula's own: the outer object is the attachment
  * record (name, virus-scan status, uploader) and the inner one is the stored
@@ -259,7 +260,7 @@ export function upcomingBirthdays(contacts: BirthdayContact[], limit?: number): 
 
 /**
  * Flattens `presence.getPresenceTemplates` into one row per child per day.
- * The API nests the times differently for each henteform — `pickup`,
+ * The API nests the times differently for each pickup type — `pickup`,
  * `selfDecider`, `sendHome`, `goHomeWith` — so the caller would otherwise have
  * to know the enum to find an entry time.
  */
@@ -270,7 +271,7 @@ export function normaliseSchedule(templates: PresenceTemplates, window: { from: 
     date: string | null;
     entryTime: string | null;
     exitTime: string | null;
-    henteform: string | null;
+    pickupType: string | null;
     exitWith: string | null;
     comment: string | null;
   }> = [];
@@ -302,7 +303,7 @@ export function normaliseSchedule(templates: PresenceTemplates, window: { from: 
           selfDeciderWindow ??
           day.exitTime ??
           null,
-        henteform: presenceActivityType(day.activityType ?? null),
+        pickupType: presenceActivityType(day.activityType ?? null),
         exitWith: pickup?.exitWith ?? goHomeWith?.exitWith ?? null,
         comment: day.comment ?? null,
       });
