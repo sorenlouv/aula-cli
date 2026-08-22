@@ -191,6 +191,20 @@ Three separate traps in one endpoint:
 - The login jar holds cookies for `login.aula.dk`, `broker.unilogin.dk` and
   `nemlog-in.mitid.dk` — **nothing for `www.aula.dk`**. Do not expect it to
   contain an API session; that comes from the bootstrap above.
+- **An agent cannot drive the terminal login, and the failure is silent.**
+  `readline`'s `question()` on a stdin already at EOF never settles — it does
+  not throw and does not return empty, it waits — so a captured shell gets a
+  two-minute silence and a killed process. `prompt()` in `src/io.ts` aborts on
+  the stream closing (not on `isTTY`, which would break legitimate piping) and
+  throws with the flag that avoids the prompt. Every prompt added to the login
+  path needs the same treatment, and a `hint` saying how to get past it without
+  a terminal.
+- **The TQR mode cannot be relayed through a chat transcript**, which is what
+  makes the point above more than an error-message problem: the pair of codes
+  refreshes every few seconds, so by the time one is pasted it is stale, and it
+  is a picture either way. When stderr is not a terminal the approval is served
+  as a page on loopback instead (`src/login-page.ts`) and the user opens it. The
+  terminal renderer stays for the case where a human is sitting there.
 - MitID sends **`null`**, not absence, for optional fields it has nothing to put
   in. A `/next` that reports an error carries `"nextAuthenticator": null` and
   `"nextSessionId": null`. A guard that treats "optional" as *only* `undefined`
@@ -257,7 +271,20 @@ the sensitive ones and look exactly like success.
 
 ## Verifying a change
 
-`bun test src/` stubs `fetch` and needs no credentials. `cli.test.ts` and
+`bun test src/` stubs `fetch` and needs no credentials.
+
+The login approval page is the one thing tests cannot really show you, because
+what matters is whether a phone can read it. Drive it by hand without holding a
+real MitID session open:
+
+```bash
+bun scripts/login-page-demo.ts          # the rotating QR pair
+bun scripts/login-page-demo.ts otp      # the code-comparison mode
+```
+
+It builds its payloads with the production `buildQrPayloads`, so what a scanner
+sees there is the shape MitID actually sends.
+ `cli.test.ts` and
 `auth.test.ts` go further and run the CLI as a process against a stubbed Aula
 injected with `bun --preload`, which is the only level at which a flag that is
 parsed and then dropped — `digest --child`, once — is visible at all.
