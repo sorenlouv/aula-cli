@@ -202,18 +202,28 @@ not understand and `updateConfig` merges; the test is named for the bug.
 ## Setup
 
 ```
-aula calendars                   # what is being read now
-aula calendars add               # the calendars Claude can already see
-aula calendars add <n>           # start reading number n
-aula calendars remove <n>        # stop reading one
+aula calendars                   # every calendar, with the read ones marked
+aula calendars add <n> [<n> ...]     # start reading them
+aula calendars remove <n> [<n> ...]  # stop reading them
 ```
 
 Where the connector is available there is no setup at all — the list is names,
-never ids, and the user picks a number. Adding then proves itself:
+never ids, and the user picks numbers off it.
+
+**One list, not two.** The calendars being read and the ones merely available
+were briefly separate listings behind separate commands, each numbered from 1,
+so "2" meant a different calendar depending on which you had last looked at.
+They are one list now, marked, and the selected ones come first — which is what
+lets `remove <n>` keep working on a morning the connector does not answer,
+since positions 1..k are always the configured ones.
+
+Adding then proves itself, per calendar, because one silent empty calendar is
+exactly what a single combined total would hide:
 
 ```
-Added "Privat".
-4 appointment(s) in the next 14 days.
+Added "Privat" and "Familien".
+  Privat: 4 appointment(s) in the next 14 days
+  Familien: 17 appointment(s) in the next 14 days
   · 2026-08-25  Fødselsdag hos naboen
   · 2026-08-26 10:00  Tandlæge
 ```

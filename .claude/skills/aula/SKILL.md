@@ -70,7 +70,7 @@ ranking what actually matters to this family is your job.
 | `open [--web]` | Open the newest overview — the local page, or the hosted copy |
 | `publish [--off]` | Keep a hosted copy of the overview (per installation; `--off` stops) |
 | `calendars` | Which of the family's own calendars the overview reads |
-| `calendars add <n>` \| `remove <n>` | Start / stop reading one |
+| `calendars add <n> [<n> ...]` \| `remove <n> [...]` | Start / stop reading them |
 | `remember "<ønske>"` | Record a standing wish about what this family wants highlighted |
 | `preferences` / `forget <n>` | List those wishes / drop number n |
 | `preferences reset` | Back to the list aula-cli ships with (says what it dropped) |
@@ -232,16 +232,20 @@ judge; the reader draws the conclusion.
 Where **Google Calendar is connected in Claude** there is nothing to set up:
 
 ```bash
-bun src/cli.ts calendars              # what is read now, or what could be
-bun src/cli.ts calendars add 2        # start reading number 2
-bun src/cli.ts calendars remove 1     # stop reading number 1
+bun src/cli.ts calendars                 # every calendar, read ones marked
+bun src/cli.ts calendars add 2 4         # start reading numbers 2 and 4
+bun src/cli.ts calendars remove 1        # stop reading number 1
 ```
 
-`calendars` with nothing configured lists the calendars the connector can see,
-by name. Show the user that list and let them pick — do not guess which
-calendars matter, and do not add one unasked. Adding also reports how many
-appointments it found in the next fortnight, which is the confirmation that it
-worked; pass that back.
+`calendars` lists every calendar the connector can see, by name, marking the
+ones already being read. Show the user that list and let them pick — do not
+guess which calendars matter, and do not add one unasked. Several can be added
+in one command (`calendars add 2 4`), which is the normal case: picking the two
+a household cares about is one decision, not two.
+
+Adding reports how many appointments were found in each, which is the
+confirmation that it worked; pass that back. A calendar reporting zero when the
+user expected appointments is worth mentioning rather than glossing.
 
 Where Google Calendar is **not** connected, `calendars` says so and gives the
 few clicks that connect it. That is the only supported route — there is no API

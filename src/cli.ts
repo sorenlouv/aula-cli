@@ -93,10 +93,11 @@ Everyday:
                                the newest page as a private artifact and redeploys
                                to it on every run from then on
   publish --off                Stop updating the hosted copy and forget its URL
-  calendars                    Read your own calendar too, so family appointments
-                               show up beside the school's own events
-  calendars add <n>            Start reading one (run bare to see the list)
-  calendars remove <n>         Stop reading one
+  calendars                    Your own calendars, with the ones the overview
+                               reads marked — appointments from them show up
+                               beside the school's own events
+  calendars add <n> [<n> ...]  Start reading one or more, by number
+  calendars remove <n> [...]   Stop reading them
   schedule [--at HH:MM]        Generate the overview automatically every weekday,
                                retrying through the morning if the Mac was asleep
   schedule --remove            Stop generating it automatically
@@ -741,60 +742,86 @@ async function runPublish(off: boolean): Promise<number> {
  */
 async function runCalendars(positionals: string[]): Promise<number> {
   const sub = positionals[0];
+  const refs = positionals.slice(1);
   if (sub === undefined) return await showCalendars();
-  if (sub === 'add') return await addCalendar(positionals[1]);
-  if (sub === 'remove') return removeCalendar(positionals[1]);
+  if (sub === 'add') return await addCalendar(refs);
+  if (sub === 'remove') return removeCalendar(refs);
   throw new UsageError(
     `Unknown subcommand "${sub}". Usage: aula ${usageFor('calendars')}`,
   );
 }
 
-/** What is connected today — or, when nothing is, what could be. */
-async function showCalendars(): Promise<number> {
+/**
+ * One list, selected first.
+ *
+ * The calendars being read and the ones merely available used to be two
+ * separate listings behind two different commands, each numbered from 1 — so
+ * "2" meant a different calendar depending on which one you had last looked at.
+ * They are one list now, and the marker says which are being read.
+ *
+ * **Selected first, in configuration order**, which is what makes one list
+ * safe: positions 1..k are always the configured calendars, so `remove <n>`
+ * means the same thing whether or not the connector answered — and stays
+ * usable on a morning when it did not.
+ */
+type ListedCalendar = {
+  id: string;
+  name: string;
+  selected: boolean;
+  accessRole?: string;
+};
+
+async function calendarList(): Promise<ListedCalendar[] | null> {
   const configured = readConfig().calendars ?? [];
-  if (configured.length === 0) {
-    console.log('The overview reads none of your own calendars yet.\n');
-    return await offerCalendars();
-  }
-  console.log(
-    [
-      'The overview reads these calendars:',
-      '',
-      ...configured.map((c, i) => `  ${i + 1}. ${c.name}  (${c.id})`),
-      '',
-      "Their appointments appear on the overview among the week's other dated",
-      "items, beside the school's own events for the same day.",
-      '',
-      '`aula calendars add` shows what else is available; `aula calendars remove <n>` stops one.',
-    ].join('\n'),
-  );
-  return 0;
+  const available = await availableCalendars();
+
+  // Nothing chosen and nothing to choose from: `availableCalendars` has already
+  // said how to connect, and an empty list under that would only be noise.
+  if (available === null && configured.length === 0) return null;
+
+  const byId = new Map((available ?? []).map((c) => [c.id, c]));
+  const selected: ListedCalendar[] = configured.map((c) => {
+    const seen = byId.get(c.id);
+    return {
+      id: c.id,
+      // The connector's name wins where we have it: a calendar renamed in
+      // Google should not keep showing the name it had when it was added.
+      name: seen?.summary ?? c.name,
+      selected: true,
+      ...(seen?.accessRole ? { accessRole: seen.accessRole } : {}),
+    };
+  });
+  const rest: ListedCalendar[] = (available ?? [])
+    .filter((c) => !configured.some((existing) => existing.id === c.id))
+    .map((c) => ({
+      id: c.id,
+      name: c.summary,
+      selected: false,
+      ...(c.accessRole ? { accessRole: c.accessRole } : {}),
+    }));
+  return [...selected, ...rest];
 }
 
-/**
- * The pick list.
- *
- * Names, not ids: a non-technical user picks "Familien", never
- * `a1b2c3d4e5f6@group.calendar.google.com`.
- */
-async function offerCalendars(): Promise<number> {
-  const available = await availableCalendars();
-  if (available === null) return 0;
-  if (available.length === 0) {
+/** Everything available, with the ones being read marked. */
+async function showCalendars(): Promise<number> {
+  const list = await calendarList();
+  if (list === null) return 0;
+  if (list.length === 0) {
     console.log('Google Calendar is connected, but it lists no calendars.');
     return 0;
   }
-  const configured = new Set((readConfig().calendars ?? []).map((c) => c.id));
+
+  const chosen = list.filter((c) => c.selected).length;
   console.log(
     [
-      'Calendars Claude can already see:',
+      chosen > 0
+        ? 'Your calendars — the overview reads the marked ones:'
+        : 'Your calendars — the overview reads none of them yet:',
       '',
-      ...available.map((c, i) => {
-        const already = configured.has(c.id) ? '  — already added' : '';
-        return `  ${i + 1}. ${c.summary}${relation(c.accessRole)}${already}`;
-      }),
+      ...list.map((c, i) => `  ${c.selected ? '*' : ' '} ${i + 1}. ${c.name}${relation(c.accessRole)}`),
       '',
-      'Add one with its number: `aula calendars add 2`',
+      ...(chosen === list.length ? [] : ['  aula calendars add <n> [<n> ...]      start reading them']),
+      ...(chosen > 0 ? ['  aula calendars remove <n> [<n> ...]   stop reading them'] : []),
     ].join('\n'),
   );
   return 0;
@@ -817,50 +844,70 @@ function relation(accessRole: string | undefined): string {
   return '';
 }
 
+/** A number from the printed list, or a calendar id. Unresolvable gives null. */
+function pick(list: ListedCalendar[], ref: string): ListedCalendar | null {
+  const index = Number(ref);
+  if (Number.isInteger(index) && index >= 1 && index <= list.length) return list[index - 1] ?? null;
+  return list.find((c) => c.id === ref) ?? null;
+}
+
 /**
- * Adding one, and then proving it worked.
+ * Adding one or several, and then proving it worked.
+ *
+ * Several, because picking the two calendars a household actually cares about
+ * is one decision, not two — and each `add` costs a round trip to the
+ * connector, so making somebody run it twice is slower for no reason.
  *
  * The confirmation is the important half. "Calendar added" proves nothing; the
- * number of appointments it actually found in the coming fortnight proves the
+ * number of appointments actually found in the coming fortnight proves the
  * whole chain — connector, credentials, window, parsing — at the moment the
  * user is still paying attention.
  */
-async function addCalendar(ref: string | undefined): Promise<number> {
-  const available = await availableCalendars();
-  if (available === null) return 0;
-  if (ref === undefined) return await offerCalendars();
+async function addCalendar(refs: string[]): Promise<number> {
+  const list = await calendarList();
+  if (list === null) return 0;
+  if (refs.length === 0) return await showCalendars();
 
-  const index = Number(ref);
-  const chosen = Number.isInteger(index) && index >= 1 && index <= available.length
-    ? available[index - 1]
-    : available.find((c) => c.id === ref);
-  if (!chosen) {
-    console.error(
-      `No calendar "${ref}". \`aula calendars add\` lists them with the numbers to use.`,
-    );
-    return 1;
+  const chosen: ListedCalendar[] = [];
+  for (const ref of refs) {
+    const found = pick(list, ref);
+    if (!found) {
+      console.error(`No calendar "${ref}". \`aula calendars\` lists them with the numbers to use.`);
+      return 1;
+    }
+    if (found.selected) {
+      console.log(`"${found.name}" is already being read — nothing changed.`);
+      continue;
+    }
+    // The same calendar named twice in one command is a typo, not a request to
+    // add it twice; `readCalendars` would collapse it anyway.
+    if (!chosen.some((c) => c.id === found.id)) chosen.push(found);
   }
+  if (chosen.length === 0) return 0;
 
-  const existing = readConfig().calendars ?? [];
-  if (existing.some((c) => c.id === chosen.id)) {
-    console.log(`"${chosen.summary}" is already being read — nothing changed.`);
-    return 0;
-  }
-  const calendars = [...existing, { id: chosen.id, name: chosen.summary }];
-  updateConfig({ calendars });
+  const added = chosen.map((c) => ({ id: c.id, name: c.name }));
+  updateConfig({ calendars: [...(readConfig().calendars ?? []), ...added] });
+  console.log(`Added ${added.map((c) => `"${c.name}"`).join(' and ')}.`);
 
-  console.log(`Added "${chosen.summary}".`);
-  const load = await loadPersonalEvents([{ id: chosen.id, name: chosen.summary }], {
+  const load = await loadPersonalEvents(added, {
     from: new Date(),
     to: new Date(Date.now() + 14 * 86_400_000),
   });
   for (const warning of load.warnings) console.error(warning);
   if (load.warnings.length === 0) {
-    const soon = load.events.slice(0, 3);
+    // Per calendar, not just a total: a family adding two wants to see that
+    // both answered, and one silent empty calendar is exactly what a single
+    // combined number would hide.
+    const perCalendar = added.map((c) => {
+      const count = load.events.filter((e) => e.calendarName === c.name).length;
+      return `  ${c.name}: ${count} appointment(s) in the next 14 days`;
+    });
     console.log(
       [
-        `${load.events.length} appointment(s) in the next 14 days.`,
-        ...soon.map((e) => `  · ${e.date}${e.startTime ? ` ${e.startTime}` : ''}  ${e.title}`),
+        ...perCalendar,
+        ...load.events.slice(0, 3).map(
+          (e) => `  · ${e.date}${e.startTime ? ` ${e.startTime}` : ''}  ${e.title}`,
+        ),
         '',
         'They are in the next overview — `aula new` builds it now.',
       ].join('\n'),
@@ -869,22 +916,53 @@ async function addCalendar(ref: string | undefined): Promise<number> {
   return 0;
 }
 
-function removeCalendar(raw: string | undefined): number {
+/**
+ * Offline on purpose: the marked calendars are always 1..k of the one list, so
+ * this needs no connector — and a calendar you want to stop reading is exactly
+ * what you want to be able to stop reading on a morning the connector is down.
+ *
+ * Resolved to ids before anything is dropped, so `remove 1 2` cannot have its
+ * second number mean something different once the first is gone.
+ */
+function removeCalendar(refs: string[]): number {
   const calendars = readConfig().calendars ?? [];
-  const index = Number(raw);
-  if (raw === undefined || !Number.isInteger(index) || index < 1 || index > calendars.length) {
+  if (calendars.length === 0) {
+    console.error('The overview reads none of your calendars, so there is nothing to remove.');
+    return 1;
+  }
+  const range = calendars.length === 1 ? '1' : `1-${calendars.length}`;
+  if (refs.length === 0) {
     throw new UsageError(
-      'Usage: aula calendars remove <n> — the number shown by `aula calendars`.',
+      `Usage: aula calendars remove <n> [<n> ...] — ${range} in \`aula calendars\`, the marked ones.`,
     );
   }
-  const [dropped] = calendars.splice(index - 1, 1);
-  updateConfig({ calendars: calendars.length > 0 ? calendars : undefined });
+
+  const doomed: string[] = [];
+  for (const ref of refs) {
+    const index = Number(ref);
+    const at = Number.isInteger(index) ? index - 1 : calendars.findIndex((c) => c.id === ref);
+    const target = at >= 0 && at < calendars.length ? calendars[at] : undefined;
+    if (!target) {
+      // Name the range rather than repeating the usage line: the likely mistake
+      // is picking an unmarked number off the list, and the answer to that is
+      // which numbers are marked.
+      throw new UsageError(
+        `"${ref}" is not one of the calendars being read. ` +
+          `Those are ${range} in \`aula calendars\` — the marked ones.`,
+      );
+    }
+    doomed.push(target.id);
+  }
+
+  const kept = calendars.filter((c) => !doomed.includes(c.id));
+  const dropped = calendars.filter((c) => doomed.includes(c.id));
+  updateConfig({ calendars: kept.length > 0 ? kept : undefined });
   console.log(
-    `Stopped reading "${dropped?.name}". \`aula calendars add\` puts it back.`,
+    `Stopped reading ${dropped.map((c) => `"${c.name}"`).join(' and ')}. ` +
+      '`aula calendars add` puts them back.',
   );
   return 0;
 }
-
 /**
  * The connector's calendars, or `null` when there is no connector — in which
  * case the user has already been told what to do about it.
