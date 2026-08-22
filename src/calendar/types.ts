@@ -26,7 +26,7 @@ export type CalendarRef = {
  *
  * A repeating appointment arrives here as one `PersonalEvent` per occurrence —
  * the connector expands series itself, so there is no recurrence rule to
- * evaluate and no DST arithmetic of our own. See CALENDAR.md.
+ * evaluate and no DST arithmetic of our own.
  */
 export type PersonalEvent = {
   /**

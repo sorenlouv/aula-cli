@@ -345,6 +345,10 @@ function summariseWarning(warning: string): string {
  * forældremøde draws the conclusion anyway, and knows things the arithmetic
  * never could — how far the dentist is, and whether a grandparent can fetch.
  *
+ * The page also never reports the *absence* of a clash. A reassurance is a
+ * claim, it would be made every quiet week, and it would train the reader to
+ * skim the section that matters on the week it is wrong.
+ *
  * Everything here degrades. A calendar that cannot be read becomes a warning on
  * the page, never an exception and never an empty fortnight — the same rule as
  * a vendor's ugeplan answering 500, and for the same reason: a missing

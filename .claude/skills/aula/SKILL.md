@@ -223,46 +223,23 @@ and the daily brief get their sense of what matters.
 
 ## The family's own calendar
 
-The overview can also read the family's own calendar, so their own appointments
-appear among the week's other dated items, beside the school's own events for
-the same day. That is what lets a parent see *forældremøde torsdag 17.00* and
-*legeaftale torsdag 17.00* at once — the overview shows both and does not
-judge; the reader draws the conclusion.
-
-Where **Google Calendar is connected in Claude** there is nothing to set up:
+The overview can also read the family's own Google calendars, so their
+appointments appear among the week's other dated items, beside the school's
+events for the same day. It shows both and does not judge; the reader draws the
+conclusion.
 
 ```bash
 bun src/cli.ts calendars                 # every calendar, read ones marked
-bun src/cli.ts calendars set 2 4         # read exactly 2 and 4, and no others
+bun src/cli.ts calendars set 2 4         # read exactly these, and no others
 bun src/cli.ts calendars set none        # read none of them
 ```
 
-`calendars` lists every calendar the connector can see, by name, marking the
-ones already being read. Show the user that list and let them pick — do not
-guess which calendars matter, and do not set one unasked.
+**`set` states the whole answer, not a delta.** Omitting a calendar stops it
+being read, so when the user asks to add one, pass the ones already marked too.
 
-**`set` states the whole answer, so pass every calendar that should be read,
-not just a new one.** `set 2 4` reads exactly 2 and 4 and stops reading anything
-else. There is no diff to work out and no state to remember: read the list, say
-which ones matter. Repeating the same `set` changes nothing.
-
-The flip side is that omitting a calendar stops it being read, so when the user
-asks to *add* one, include the ones already marked. The command answers with
-what it started and stopped reading — check that against what was asked.
-
-It also reports how many appointments each newly set calendar holds in the next
-fortnight; pass that back, and say so if one comes back empty when the user
-expected otherwise.
-
-Where Google Calendar is **not** connected, `calendars` says so and gives the
-few clicks that connect it. That is the only supported route — there is no API
-key or calendar-link alternative to offer, and a calendar the connector cannot
-reach cannot be read at all. Say so plainly rather than inventing a workaround.
-
-This can be set up at any time; it is not a one-chance step during onboarding.
-
-Nothing is read until a calendar is named here, and the list lives in
-`~/.aula/config.json` alongside the hosted-copy URL.
+Show the list and let the user choose; never pick for them. Claude's Google
+Calendar connector is the only route there is, so if it is not connected, say so
+rather than reaching for an alternative.
 
 ## The daily brief
 

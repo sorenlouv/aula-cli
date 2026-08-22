@@ -10,7 +10,7 @@ import { toPersonalEvent } from './index.ts';
 
 const CAL = { id: 'far@eksempel.dk', name: 'Familien' };
 
-/** Shapes measured against the live connector — see CALENDAR.md. */
+/** Shapes measured against the live connector, not invented. */
 const TIMED = {
   id: 'evt1',
   summary: 'Tandlæge',

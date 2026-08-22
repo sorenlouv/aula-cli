@@ -3,7 +3,8 @@
  *
  * Claude's Google Calendar connector is the only source, deliberately — one
  * way in is one thing to keep working, and the alternatives each cost a setup
- * step a non-technical user cannot be asked to take. See CALENDAR.md.
+ * step a non-technical user cannot be asked to take. `connector.ts` records
+ * which alternatives, and what each one failed on.
  *
  * Failures are per calendar and never thrown onwards: one calendar that cannot
  * be read must not cost the family the other one, and must never look like a

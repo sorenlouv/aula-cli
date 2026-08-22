@@ -5,8 +5,19 @@
  * `claude -p` anyway. Where the user has connected Google Calendar there is
  * nothing left to set up: no Cloud project, no OAuth client, no URL to copy out
  * of a settings page — and it reaches calendars shared *to* the user, which is
- * what a household's shared calendar usually is. See CALENDAR.md for why every
- * other route was rejected.
+ * what a household's shared calendar usually is.
+ *
+ * The three alternatives were each rejected on a fact worth not rediscovering:
+ *
+ * - **The Calendar API.** `calendar.readonly` is a sensitive scope. Unverified
+ *   in *Testing*, refresh tokens expire after 7 days, which is fatal for an
+ *   unattended 06:30 job; verification wants a homepage, a privacy policy and a
+ *   demo video, and puts a client secret in a public repository.
+ * - **An ICS feed.** Google issues a secret address only for calendars you
+ *   *own*, so a partner's shared calendar — the one this feature exists for —
+ *   is precisely what it cannot reach. Recurrence would also become ours.
+ * - **EventKit.** macOS only, needs a compiled helper in a repository with no
+ *   build step, and its permission prompt has nobody to answer it at 06:30.
  *
  * **The model is not asked what the calendar says.** It is asked to place one
  * call, and the connector's own JSON is read straight off the `stream-json`
@@ -155,6 +166,11 @@ async function attemptTool(
     'Svar derefter kun med ordet DONE.',
   ].join('\n');
 
+  // `claude` needs `$USER` to find its keychain credentials: with `HOME` and
+  // `PATH` alone it reports *Not logged in*. launchd supplies it, so the
+  // scheduled run is fine — but reproducing that environment with `env -i` and
+  // only the plist's variables fails in a way indistinguishable from an expired
+  // login. Bisected; `USER` alone is what fixes it.
   const run = await spawnClaude(
     [
       '-p', prompt,

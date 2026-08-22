@@ -597,7 +597,7 @@ describe('the family\'s own appointments', () => {
 
   test('an appointment is a dated thing to know, beside the school\'s own', () => {
     // Shown, not analysed: it lands in "Kommende" with the week's other dated
-    // items, and the page never says whether anything clashed — see CALENDAR.md.
+    // items, and the page never says whether anything clashed — see `collectPersonal`.
     const source = appointment();
     const brief = rank(input([source]), signalsFromRules(input([source]), TODAY));
     const signal = brief.signals[0];
