@@ -77,13 +77,13 @@ ranking what actually matters to this family is your job.
 
 `commonfiles` is where the **class timetable (skema)** often lives — it is not
 in the calendar and not in the weekly plan. If the user asks what a child has
-on a given day and `ugeplan` is thin, look here for a "skema" PDF. Downloading
+on a given day and `weekly-plan` is thin, look here for a "skema" PDF. Downloading
 it gives a local path you can then read.
 
 **`galleries` is not in `digest`** — run it separately. It reads album metadata
 only, never the photos, and that metadata is often the best evidence of what a
 day actually contained: an album titled after a trip, dated that day, says the
-trip happened even when the ugeplan says nothing. Two caveats: the date is the
+trip happened even when the weekly plan says nothing. Two caveats: the date is the
 album's creation date (usually the day of the event, but it can lag a day), and
 there is no photo count.
 
@@ -92,10 +92,32 @@ Weekly plans come from third-party vendor widgets rather than Aula itself —
 
 | Command | What it gives you |
 | --- | --- |
-| `ugeplan [--week 2026-W33] [--next]` | Weekly plan (EasyIQ / Meebook / SkolePortal) |
-| `ugebrev` | Weekly letter (MinUddannelse) |
-| `opgaver` / `lektier` / `huskelisten` | Homework, per vendor |
+| `weekly-plan [--week 2026-W33] [--next]` | Weekly plan (EasyIQ / Meebook / SkolePortal) |
+| `weekly-letter` | Weekly letter (MinUddannelse) |
+| `tasks` / `assignments` / `reminders` | Homework, per vendor |
 | `homework` | All three homework sources in one call |
+
+**Commands are English; the user is Danish.** Nothing in the CLI answers to a
+Danish command name, so translate before you run anything. The words a parent
+actually uses, and what to run for each:
+
+| They say | Run |
+| --- | --- |
+| ugeplan, ugeskema, "hvad laver de i denne uge" | `weekly-plan` |
+| ugebrev, "brevet fra skolen" | `weekly-letter` |
+| lektier, opgaver, hjemmearbejde, huskelisten | `homework` (or `tasks` / `assignments` / `reminders` for one vendor) |
+| opslag, nyheder fra skolen | `posts` |
+| beskeder, samtaler | `messages` / `thread` |
+| kalender, arrangementer, forældremøde | `calendar` |
+| komme/gå, hentetider, afhentning | `pickup-times` / `presence` |
+| billeder, galleri, album | `galleries` |
+| skema | `commonfiles` (look for a "skema" PDF) |
+| kontaktliste | `contacts` |
+| fødselsdage | `birthdays` |
+| Fælles Filer | `commonfiles` / `commonfile` |
+
+`homework` is the safe default when they just say *lektier* — it reads all
+three vendors, and which one a school uses is not something they know.
 
 **A weekly plan carries a `warnings` array, and you must read it.** The vendors
 fail independently of Aula, and a failed fetch has the same shape as a quiet

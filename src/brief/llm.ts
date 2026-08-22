@@ -274,7 +274,7 @@ export type ExtractResult = {
 
 /**
  * Below this, a thread is a message rather than a conversation, and reading it
- * beats reading *about* it — the card's own quote plus "læs mere" already show
+ * beats reading *about* it — the card's own quote plus the more-block already show
  * the whole thing, so a summary on top would be a second description of one
  * paragraph.
  */
@@ -471,32 +471,32 @@ function promptText(item: SourceItem): string {
 /** The payload the model sees. Trimmed, but never summarised before it gets there. */
 function extractionPayload(input: BriefInput) {
   return {
-    idag: input.today,
-    uge: input.isoWeek,
-    born: input.family.children.map((c) => ({
-      navn: c.firstName,
-      fuldeNavn: c.name,
+    today: input.today,
+    isoWeek: input.isoWeek,
+    children: input.family.children.map((c) => ({
+      firstName: c.firstName,
+      name: c.name,
       institution: c.institution,
-      klasse: c.className,
+      className: c.className,
     })),
-    kilder: input.items.map((item) => ({
+    sources: input.items.map((item) => ({
       sourceKey: item.key,
       type: item.kind,
-      titel: item.title,
-      skrevet: item.at,
-      afsender: item.author,
-      grupper: item.groups,
-      handlerOm: item.childNames,
-      raekkevidde: item.audience,
-      ...(item.conversation ? { antalBeskeder: item.conversation.messages.length } : {}),
-      tekst: promptText(item),
+      title: item.title,
+      writtenAt: item.at,
+      author: item.author,
+      groups: item.groups,
+      childNames: item.childNames,
+      audience: item.audience,
+      ...(item.conversation ? { messageCount: item.conversation.messages.length } : {}),
+      text: promptText(item),
     })),
   };
 }
 
 const INSTRUCTIONS = `Du læser Aula-indhold for en dansk familie og udtrækker de ting, en travl forælder skal vide.
 
-Input er JSON på stdin: dagens dato, børnene, og en liste af kilder med fuld tekst.
+Input er JSON på stdin: dagens dato, børnene, og en liste af kilder med fuld tekst. Feltnavnene er engelske; alt indhold du skriver, er dansk.
 
 Svar KUN med JSON i præcis denne form, uden kodeblok og uden forklaring udenom:
 {
@@ -521,19 +521,19 @@ Svar KUN med JSON i præcis denne form, uden kodeblok og uden forklaring udenom:
 
 "relevance" er din vurdering af HVER kilde — én pr. sourceKey, ingen udeladt — målt mod familiens ønsker nederst:
 - "hide": familiens liste siger, at den slags ikke skal med. Vises ikke.
-- "low": familiens liste siger, at det betyder mindre for dem. Vises kun under "Godt at vide", aldrig som et punkt.
+- "low": familiens liste siger, at det betyder mindre for dem. Vises kun i "context", aldrig som et punkt.
 - "normal": ingen af familiens ønsker taler for eller imod. Indhold og rækkevidde afgør placeringen.
 - "high": familiens liste siger, at det er vigtigt for dem — fx en afsender de har nævnt, eller et emne de har bedt om. Kommer altid på siden som et punkt, også hvis du ikke fandt noget konkret at udtrække fra den.
 Har familien ingen ønsker på listen, er alt "normal". Signalerne bestemmer, hvad der står på et punkt; "relevance" bestemmer, hvor højt kilden må nå.
 
 Ufravigelige regler:
-- "quote" SKAL være en ordret sammenhængende tekststump fra netop den kildes "tekst". Find du ikke belæg, så udelad signalet.
+- "quote" SKAL være en ordret sammenhængende tekststump fra netop den kildes "text". Find du ikke belæg, så udelad signalet.
 - "sourceKey" SKAL være en af de kilder du fik. Opfind aldrig et.
 - Opfind aldrig datoer. Står der ingen dato, sæt dueAt til null.
 - Er samme sag sendt flere gange (fx samme møde i to tråde, eller samme tilbud fra to institutioner), så lav ÉT signal for den vigtigste kilde.
 - "concernsChild" er det vigtigste felt du udfylder. Sæt det til true, når beskeden kræver noget af forældrene VEDRØRENDE deres eget barn — tilmelding af barnet, noget barnet skal have med, en dag barnet skal møde anderledes, en aflysning der rammer barnets dag. Sæt det til false, når den ikke gør.
-- Hver kilde har en "raekkevidde": "child" og "class" er skrevet af nogen, der kender barnet; "institution" er sendt til hele skolen eller hele huset; "municipal" er sendt til alle forældre i kommunen. Hvor bredt noget er sendt ud, afgør ikke i sig selv, om det er relevant.
-- "conversationSummaries" laver du KUN for kilder med "antalBeskeder" på ${CONVERSATION_MIN_MESSAGES} eller derover — en enkelt besked læser man hellere selv. Skriv hvad samtalen handler om, hvem der har spurgt om hvad, og om der stadig mangler et svar fra os. Læseren kan folde hele samtalen ud under dit resumé, så skriv det som en indgang til den, ikke som en erstatning.
+- Hver kilde har en "audience": "child" og "class" er skrevet af nogen, der kender barnet; "institution" er sendt til hele skolen eller hele huset; "municipal" er sendt til alle forældre i kommunen. Hvor bredt noget er sendt ud, afgør ikke i sig selv, om det er relevant.
+- "conversationSummaries" laver du KUN for kilder med "messageCount" på ${CONVERSATION_MIN_MESSAGES} eller derover — en enkelt besked læser man hellere selv. Skriv hvad samtalen handler om, hvem der har spurgt om hvad, og om der stadig mangler et svar fra os. Læseren kan folde hele samtalen ud under dit resumé, så skriv det som en indgang til den, ikke som en erstatning.
 - Skriv alt på dansk.`;
 
 /**

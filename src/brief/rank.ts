@@ -34,7 +34,7 @@ import type {
   Urgency,
 } from './types.ts';
 
-/** At most this many items in "Kræver handling". If everything is urgent, nothing is. */
+/** At most this many items in the `act` tier. If everything is urgent, nothing is. */
 export const ACT_CAP = 5;
 
 const AUDIENCE_SCORE: Record<Audience, number> = {
@@ -187,12 +187,12 @@ function tierOf(
   // The family's list, as the model read it, is the only thing that hides —
   // with two things it yields to.
   //
-  // Aula's own vigtig flag is the first: a school shouting is not something a
+  // Aula's own `important` flag is the first: a school shouting is not something a
   // preference can mute, and `important` is set rarely enough to mean it.
   //
   // `concernsChild` is the second, and it is a floor rather than an exemption:
   // something that asks us for something about our own child is demoted to
-  // "Godt at vide" instead of hidden. The wish is still honoured — it never
+  // the `context` tier instead of hidden. The wish is still honoured — it never
   // becomes a card — but the item stays findable. This is the closure case,
   // and it is the reason `hide` is not simply absolute: *"fællesbeskeder til
   // alle forældre i kommunen er aldrig relevante"* is a fair thing to want and
@@ -284,11 +284,11 @@ function mergeKey(signal: Signal): string {
  * it off the page altogether. Same subject, same date, different answer to "do
  * you want this".
  *
- * And Aula's own `vigtig` flag, which is the same loss reached from the other
+ * And Aula's own `important` flag, which is the same loss reached from the other
  * side: the loser of a merge survives only as a key in the winner's
  * `mergedSourceKeys`, which counts as covered everywhere downstream — no card,
- * no "Godt at vide", no muted foot, not even `unusedSources` — and the vigtig
- * floor below only ever inspects the winner, so a flagged item that lost is
+ * no `context` tier, no muted foot, not even `unusedSources` — and the
+ * `important` floor below only ever inspects the winner, so a flagged item that lost is
  * past rescuing. Only one of the two is the school shouting, so: two entries.
  *
  * Both are read where they have settled: `tierOf` has run and the floors below
@@ -402,9 +402,9 @@ export function rank(
   }
 
   // ---------------------------------------------------------------- floor
-  // Aula's "vigtig" flag is the school shouting, and it is deterministic —
+  // Aula's `important` flag is the school shouting, and it is deterministic —
   // so the floor is too. The model benchmark showed mid-tier models reading
-  // a vigtig-marked mandatory sign-up as background, or missing it entirely;
+  // an important-marked mandatory sign-up as background, or missing it entirely;
   // either way it must not end below the fold. An under-read signal is
   // promoted to the week tier, and an important item no signal covered gets
   // a plain rule-made one. The model may still promote it further; it can
@@ -421,7 +421,7 @@ export function rank(
   // The family's own list, as the model read it — the promotion half.
   //
   // `tierOf` only ever lets a verdict push *down* (`hide`, `low`); `high` is
-  // applied here, after the cap, so it has the same shape as the vigtig floor:
+  // applied here, after the cap, so it has the same shape as the important floor:
   // a source the family says matters cannot end below the fold, whatever the
   // audience prior or the kind of signal made of it. The model may place it
   // higher; it can no longer lose it. Never `act`, though — that tier is for
@@ -450,7 +450,7 @@ export function rank(
   // and a model that extracted nothing from his message is exactly the day it
   // is tested — so a `high` source gets a plain rule-made signal, like an
   // important one. A `hide` source gets one too, in the hidden tier: it would
-  // otherwise surface under "Godt at vide" as an unused source, which is the
+  // otherwise surface in the `context` tier as an unused source, which is the
   // opposite of what the family asked, and the muted foot is where hidden
   // things are accounted for. Nothing is silently lost either way.
   const covered = new Set(merged.flatMap((s) => [s.sourceKey, ...s.mergedSourceKeys]));
