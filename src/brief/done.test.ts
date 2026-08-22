@@ -93,7 +93,7 @@ describe('the rendered page', () => {
   test('the sections the script drives are marked up for it', () => {
     expect(html).toContain('data-section="act"');
     expect(html).toContain('<span class="count" data-count>');
-    expect(html).toContain('data-klaret');
+    expect(html).toContain('data-done-toggle');
   });
 
   test('the empty-state sentence is present but hidden while work remains', () => {

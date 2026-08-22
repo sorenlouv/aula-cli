@@ -40,8 +40,8 @@ import {
 const BASE = 'https://skoleportal.easyiqcloud.dk';
 const AUTH_URL = `${BASE}/Aula/AuthenticateAulaUser`;
 const CHILDREN_URL = `${BASE}/Aula/GetChildren`;
-const UGEPLAN_URL = `${BASE}/Calendar/CalendarGetWeekplanEvents`;
-const LEKTIER_URL = `${BASE}/AulaHuskeliste/GetWeekplanEvents`;
+const WEEKPLAN_URL = `${BASE}/Calendar/CalendarGetWeekplanEvents`;
+const ASSIGNMENTS_URL = `${BASE}/AulaHuskeliste/GetWeekplanEvents`;
 
 type AuthResponse = { loginId?: string | number | null; childName?: string | null };
 type ChildRow = { Id: number; Login: string | null; Name?: string | null };
@@ -180,7 +180,7 @@ function toItem(event: SpEvent, childName: string, kind: string): WeekPlanItem {
   };
 }
 
-// ------------------------------------------------------------------- ugeplan
+// ------------------------------------------------------------------ weekplan
 
 /**
  * Widget 0128. Authenticates per child, because the `loginId` SkolePortal
@@ -223,7 +223,7 @@ export async function getWeekPlan(
       }
 
       const events = await tokens.withToken(widgetId, async (token) => {
-        const url = `${UGEPLAN_URL}?loginId=${encodeURIComponent(String(auth.loginId))}&date=${encodeURIComponent(date)}`;
+        const url = `${WEEKPLAN_URL}?loginId=${encodeURIComponent(String(auth.loginId))}&date=${encodeURIComponent(date)}`;
         return widgetFetch({
           url,
           widgetId,
@@ -242,7 +242,7 @@ export async function getWeekPlan(
 
   return {
     provider: 'easyiq_skoleportal',
-    capability: 'ugeplan',
+    capability: 'weekly-plan',
     widgetId,
     isoWeek: ctx.isoWeek,
     items,
@@ -250,10 +250,10 @@ export async function getWeekPlan(
   };
 }
 
-// -------------------------------------------------------------------- lektier
+// ---------------------------------------------------------------- assignments
 
 /**
- * Widget 0142. Differs from the ugeplan flow in four ways, all of which are
+ * Widget 0142. Differs from the weekplan flow in four ways, all of which are
  * load-bearing: the referer is `/LektierWidget`, `x-login` is the Aula
  * guardian id rather than the MitID username, `x-requested-with` is `Fetch`,
  * and there is an extra `GetChildren` call.
@@ -263,7 +263,7 @@ export async function getWeekPlan(
  * mirroring the browser, where the widget mounts with the first child selected
  * and then enumerates the rest.
  */
-export async function getLektier(
+export async function getAssignments(
   ctx: IntegrationContext,
   tokens: WidgetTokens,
   widgetId: string,
@@ -277,8 +277,8 @@ export async function getLektier(
   const first = ctx.children.find((c) => c.userId);
   if (!first) {
     return {
-      provider: 'easyiq_lektier',
-      capability: 'lektier',
+      provider: 'easyiq_assignments',
+      capability: 'assignments',
       widgetId,
       isoWeek: ctx.isoWeek,
       items,
@@ -330,7 +330,7 @@ export async function getLektier(
     try {
       const events = await tokens.withToken(widgetId, async (token) => {
         const url =
-          `${LEKTIER_URL}?loginId=${encodeURIComponent(String(row.Id))}` +
+          `${ASSIGNMENTS_URL}?loginId=${encodeURIComponent(String(row.Id))}` +
           `&date=${encodeURIComponent(date)}&activityFilter=null`;
         return widgetFetch({
           url,
@@ -340,7 +340,7 @@ export async function getLektier(
       });
       const childName = decodeEntities(row.Name ?? '').trim() || child.name;
       for (const event of Array.isArray(events) ? events : []) {
-        items.push(toItem(event, childName, 'lektier'));
+        items.push(toItem(event, childName, 'assignments'));
       }
     } catch (err) {
       warnings.push(`${child.name}: ${errorMessage(err)}`);
@@ -348,8 +348,8 @@ export async function getLektier(
   }
 
   return {
-    provider: 'easyiq_lektier',
-    capability: 'lektier',
+    provider: 'easyiq_assignments',
+    capability: 'assignments',
     widgetId,
     isoWeek: ctx.isoWeek,
     items,

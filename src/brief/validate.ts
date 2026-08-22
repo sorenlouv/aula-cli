@@ -21,7 +21,7 @@ type Violation = { rule: string; detail: string };
  * the body never has any business containing.
  *
  * Only *tags* are matched, and that is deliberate. Since the page grew its
- * "læs mere" blocks, verbatim Aula prose reaches the markup, and this check
+ * more-blocks, verbatim Aula prose reaches the markup, and this check
  * runs over the rendered string with no way to tell a rendered tag from a
  * quoted one. `escapeHtml` turns a literal `<` into `&lt;`, so no amount of
  * angle brackets in a school post can trip these — whereas the CSS patterns

@@ -20,13 +20,13 @@ import { errorMessage } from './validation.ts';
 // --------------------------------------------------------------- the registry
 
 /** What a widget provides. Drives which command can serve a request. */
-export type Capability = 'ugeplan' | 'ugebrev' | 'opgaver' | 'huskelisten' | 'lektier';
+export type Capability = 'weekly-plan' | 'weekly-letter' | 'tasks' | 'reminders' | 'assignments';
 
 /** Which vendor integration handles a widget. */
 export type Provider =
   | 'easyiq'
   | 'easyiq_skoleportal'
-  | 'easyiq_lektier'
+  | 'easyiq_assignments'
   | 'meebook'
   | 'minuddannelse'
   | 'systematic';
@@ -54,31 +54,31 @@ export type WidgetInfo = {
  * has seen in the wild.
  */
 export const WIDGETS: Readonly<Record<string, WidgetInfo>> = Object.freeze({
-  '0001': { name: 'EasyIQ Ugeplan', provider: 'easyiq', capability: 'ugeplan' },
+  '0001': { name: 'EasyIQ Ugeplan', provider: 'easyiq', capability: 'weekly-plan' },
   '0004': {
     name: 'Meebook Ugeplan',
     provider: 'meebook',
-    capability: 'ugeplan',
+    capability: 'weekly-plan',
     needsMitidUsername: true,
   },
-  '0023': { name: 'MinUddannelse Opgaveliste', provider: 'minuddannelse', capability: 'opgaver' },
-  '0029': { name: 'MinUddannelse Ugebrev', provider: 'minuddannelse', capability: 'ugebrev' },
-  '0030': { name: 'MinUddannelse Opgaveliste', provider: 'minuddannelse', capability: 'opgaver' },
+  '0023': { name: 'MinUddannelse Opgaveliste', provider: 'minuddannelse', capability: 'tasks' },
+  '0029': { name: 'MinUddannelse Ugebrev', provider: 'minuddannelse', capability: 'weekly-letter' },
+  '0030': { name: 'MinUddannelse Opgaveliste', provider: 'minuddannelse', capability: 'tasks' },
   '0062': {
     name: 'Huskelisten',
     provider: 'systematic',
-    capability: 'huskelisten',
+    capability: 'reminders',
     needsMitidUsername: true,
   },
   '0128': {
     name: 'EasyIQ SkolePortal Ugeplan',
     provider: 'easyiq_skoleportal',
-    capability: 'ugeplan',
+    capability: 'weekly-plan',
     needsMitidUsername: true,
   },
   // Lektier deliberately lacks the flag: its `x-login` is the Aula guardian
-  // id, not the MitID username — see getLektier in easyiq-skoleportal.ts.
-  '0142': { name: 'EasyIQ Lektier', provider: 'easyiq_lektier', capability: 'lektier' },
+  // id, not the MitID username — see getAssignments in easyiq-skoleportal.ts.
+  '0142': { name: 'EasyIQ Lektier', provider: 'easyiq_assignments', capability: 'assignments' },
 });
 
 export type DetectedWidget = { widgetId: string; name: string } & Partial<WidgetInfo>;
@@ -317,7 +317,7 @@ export async function widgetFetch<T>(
 /**
  * One readable line out of a vendor's error body.
  *
- * These messages are not debug output: they end up verbatim in `ugeplan`, in
+ * These messages are not debug output: they end up verbatim in `weekly-plan`, in
  * the digest JSON the skill reads, and in the brief's datastatus panel. Slicing
  * the first 200 raw characters — which is what this used to do — put a doctype,
  * three meta tags and half a stylesheet in front of a parent trying to find out

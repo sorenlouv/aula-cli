@@ -117,7 +117,7 @@ describe('validatePage', () => {
     }
   });
 
-  // The page now carries verbatim Aula prose behind its "læs mere" toggles, and
+  // The page now carries verbatim Aula prose behind its more-block toggles, and
   // this check cannot tell a tag it rendered from one a parent typed. Tags are
   // safe to match because `escapeHtml` neuters them; the CSS patterns this rule
   // used to carry were not, and would have failed the whole layout over a

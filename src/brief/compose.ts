@@ -66,12 +66,12 @@ function messageBlock(message: ConversationMessage): string {
  * The collapsible original, or nothing when there is nothing left to open.
  *
  * The brief is a summary, and a summary is only trustworthy if the thing it
- * summarises is one tap away — "hvorfor står der det?" should never require
+ * summarises is one tap away — "why does it say that?" should never require
  * opening Aula. So every entry carries its source underneath it, collapsed,
  * because on most days most of them are not needed.
  *
  * `shown` is what the entry already puts on screen. A source whose whole text
- * is the sentence already quoted above gets no toggle at all: a *læs mere* that
+ * is the sentence already quoted above gets no toggle at all: a more-block that
  * reveals what the reader just read is the kind of small lie that teaches them
  * to stop pressing things.
  */
@@ -114,58 +114,62 @@ function composePayload(brief: RankedBrief, topline: string | null, summaries: R
     sourceId: s.sourceKey,
     tier: s.tier,
     kind: s.kind,
-    titel: s.title,
-    barn: s.child,
-    dato: s.dueAt,
-    datoDansk: s.dueAt ? danishDate(s.dueAt) : null,
-    hastighed: s.urgency,
-    citat: s.quote,
-    hvorfor: s.why,
-    kilde: `${s.source.kind === 'post' ? 'Opslag' : s.source.kind === 'thread' ? 'Besked' : s.source.kind === 'plan' ? 'Ugeplan' : 'Kalender'} «${s.source.title}»`,
-    afsender: s.source.author,
+    title: s.title,
+    child: s.child,
+    dueAt: s.dueAt,
+    // Pre-rendered so the model never has to format a date itself, which is
+    // one of the few ways it can still invent one.
+    dueAtDanish: s.dueAt ? danishDate(s.dueAt) : null,
+    urgency: s.urgency,
+    quote: s.quote,
+    why: s.why,
+    source: `${s.source.kind === 'post' ? 'Opslag' : s.source.kind === 'thread' ? 'Besked' : s.source.kind === 'plan' ? 'Ugeplan' : 'Kalender'} «${s.source.title}»`,
+    author: s.source.author,
     link: s.source.url,
-    nyt: isNew(s.sourceKey),
-    ogsaaFra: s.mergedSourceKeys.length,
+    isNew: isNew(s.sourceKey),
+    alsoFrom: s.mergedSourceKeys.length,
     // The family's own weighting of the source, as the extractor read their
     // list — so the order within a section can follow it without the composer
     // re-deriving it from the prose.
-    relevans: s.relevance,
+    relevance: s.relevance,
   });
 
   const { input } = brief;
   return {
-    idag: input.today,
-    idagDansk: capitalise(danishDate(input.today)),
-    uge: input.isoWeek,
+    today: input.today,
+    todayDanish: capitalise(danishDate(input.today)),
+    isoWeek: input.isoWeek,
     topline,
-    born: input.family.children.map((c, i) => ({
-      navn: c.firstName,
-      farve: `c${i + 1}`,
+    children: input.family.children.map((c, i) => ({
+      firstName: c.firstName,
+      colour: `c${i + 1}`,
       institution: c.institution,
-      klasse: c.className,
-      planlagtIdag: c.presence
+      className: c.className,
+      plannedToday: c.presence
         ? `${(c.presence.plannedEntry ?? '').slice(0, 5)}–${(c.presence.plannedExit ?? '').slice(0, 5)}`
         : null,
       status: c.presence?.statusDanish ?? null,
-      resume: summaries[c.firstName] ?? null,
+      summary: summaries[c.firstName] ?? null,
     })),
-    kraeverHandling: brief.signals.filter((s) => s.tier === 'act').map(signal),
-    kommende: brief.signals.filter((s) => s.tier === 'week').map(signal),
-    baggrund: brief.signals.filter((s) => s.tier === 'context').map(signal),
-    skjult: brief.signals
+    // Keyed by the same words as `Tier`, so a section in the payload and the
+    // tier it came from are visibly the same concept.
+    act: brief.signals.filter((s) => s.tier === 'act').map(signal),
+    week: brief.signals.filter((s) => s.tier === 'week').map(signal),
+    context: brief.signals.filter((s) => s.tier === 'context').map(signal),
+    hidden: brief.signals
       .filter((s) => s.tier === 'hidden')
-      .map((s) => ({ titel: s.title, kilde: s.source.title, grupper: s.source.groups })),
-    ubrugteKilder: brief.unusedSources.map((item) => ({
+      .map((s) => ({ title: s.title, source: s.source.title, groups: s.source.groups })),
+    unusedSources: brief.unusedSources.map((item) => ({
       sourceId: item.key,
-      titel: item.title,
-      afsender: item.author,
-      skrevet: item.at,
-      raekkevidde: item.audience,
+      title: item.title,
+      author: item.author,
+      writtenAt: item.at,
+      audience: item.audience,
     })),
     albums: input.albums,
-    datastatus: input.health,
-    noter: brief.degraded,
-    billeder: input.newMediaCount,
+    dataStatus: input.health,
+    notes: brief.degraded,
+    newMediaCount: input.newMediaCount,
   };
 }
 
@@ -176,26 +180,28 @@ Input er JSON på stdin med FÆRDIGT VALIDEREDE fakta. Du må omarrangere, omfor
 Svar KUN med ét JSON-objekt. Ingen kodeblok. Ingen forklaring:
 {
   "topline": "Én-to sætninger: dagens vigtigste konklusion først.",
-  "handling": [{"signalId": "…", "titel": "kortere omskrivning (valgfri)", "hvorfor": "én konkret sætning (valgfri)"}],
-  "kommende": [{"signalId": "…", "titel": "…", "hvorfor": "…"}],
-  "tomHandling": "Rolig sætning til når 'handling' er tom (valgfri)"
+  "act": [{"signalId": "…", "title": "kortere omskrivning (valgfri)", "why": "én konkret sætning (valgfri)"}],
+  "week": [{"signalId": "…", "title": "…", "why": "…"}],
+  "emptyAct": "Rolig sætning til når 'act' er tom (valgfri)"
 }
 
+Feltnavnene er engelske; alt indhold du skriver, er dansk.
+
 Regler:
-1. "handling" og "kommende" er signalId'er fra inputtets "kraeverHandling" og "kommende" — vigtigst først; din rækkefølge ER prioriteringen. "relevans" er familiens egen vægtning af kilden ("high" før "normal" før "low"), og den vejer tungere end din. Alt du udelader, vises alligevel nederst i sin sektion, så udeladelse er nedprioritering, aldrig sletning. Et punkt fra "baggrund" må promoveres, hvis det reelt beder om noget.
+1. "act" og "week" er signalId'er fra inputtets "act" og "week" — vigtigst først; din rækkefølge ER prioriteringen. "relevance" er familiens egen vægtning af kilden ("high" før "normal" før "low"), og den vejer tungere end din. Alt du udelader, vises alligevel nederst i sin sektion, så udeladelse er nedprioritering, aldrig sletning. Et punkt fra "context" må promoveres, hvis det reelt beder om noget.
 2. "topline": behold eller skærp den givne topline. Konklusionen først, detaljen bagefter.
-3. "titel"/"hvorfor" udelades hvor inputtets formulering allerede er god; omskriv kun for at gøre det kortere, mere konkret eller imperativt.
+3. "title"/"why" udelades hvor inputtets formulering allerede er god; omskriv kun for at gøre det kortere, mere konkret eller imperativt.
 4. Skriv alt på dansk. Hold det skimbart på 20 sekunder.`;
 
 type ComposeResult = { html: string; problems: string[] };
 
-type PlanEntry = { signalId: string; titel?: string; hvorfor?: string };
+type PlanEntry = { signalId: string; title?: string; why?: string };
 
 export type ComposePlan = {
   topline?: string;
-  handling: PlanEntry[];
-  kommende: PlanEntry[];
-  tomHandling?: string;
+  act: PlanEntry[];
+  week: PlanEntry[];
+  emptyAct?: string;
 };
 
 /**
@@ -246,29 +252,29 @@ export function parsePlan(raw: unknown, brief: RankedBrief): { plan: ComposePlan
       }
       if (placed.has(id)) continue;
       placed.add(id);
-      const titel = grounded(text(row.titel), `${field} (${id}) titel`, signal);
-      const hvorfor = grounded(text(row.hvorfor), `${field} (${id}) hvorfor`, signal);
-      out.push({ signalId: id, ...(titel ? { titel } : {}), ...(hvorfor ? { hvorfor } : {}) });
+      const title = grounded(text(row.title), `${field} (${id}) title`, signal);
+      const why = grounded(text(row.why), `${field} (${id}) why`, signal);
+      out.push({ signalId: id, ...(title ? { title } : {}), ...(why ? { why } : {}) });
     }
     return out;
   };
 
   const obj = isRecord(raw) ? raw : {};
   const topline = grounded(text(obj.topline), 'topline');
-  const tomHandling = grounded(text(obj.tomHandling), 'tomHandling');
+  const emptyAct = grounded(text(obj.emptyAct), 'emptyAct');
   return {
     plan: {
       ...(topline ? { topline } : {}),
-      handling: entries(obj.handling, 'handling'),
-      kommende: entries(obj.kommende, 'kommende'),
-      ...(tomHandling ? { tomHandling } : {}),
+      act: entries(obj.act, 'act'),
+      week: entries(obj.week, 'week'),
+      ...(emptyAct ? { emptyAct } : {}),
     },
     problems,
   };
 }
 
 /** A signal on its way onto the page, with the plan's rewording if any. */
-type CardSpec = { signal: RankedSignal; titel?: string; hvorfor?: string };
+type CardSpec = { signal: RankedSignal; title?: string; why?: string };
 
 type PageOptions = {
   topline?: string | null;
@@ -299,25 +305,25 @@ export function renderPlan(
     if (!signal) throw new Error(`Plan references unknown signal ${entry.signalId}`);
     return {
       signal,
-      ...(entry.titel ? { titel: entry.titel } : {}),
-      ...(entry.hvorfor ? { hvorfor: entry.hvorfor } : {}),
+      ...(entry.title ? { title: entry.title } : {}),
+      ...(entry.why ? { why: entry.why } : {}),
     };
   };
-  const planned = new Set([...plan.handling, ...plan.kommende].map((e) => e.signalId));
+  const planned = new Set([...plan.act, ...plan.week].map((e) => e.signalId));
   // An omission in the plan is a deprioritisation, never a deletion: whatever
   // the ranker put in a visible tier still renders, after the planned cards.
   const restAct = brief.signals.filter((s) => s.tier === 'act' && !planned.has(s.id));
   const restWeek = brief.signals.filter((s) => s.tier === 'week' && !planned.has(s.id));
   return buildPage(
     brief,
-    [...plan.handling.map(spec), ...restAct.map((signal) => ({ signal }))],
-    [...plan.kommende.map(spec), ...restWeek.map((signal) => ({ signal }))],
+    [...plan.act.map(spec), ...restAct.map((signal) => ({ signal }))],
+    [...plan.week.map(spec), ...restWeek.map((signal) => ({ signal }))],
     {
       topline: plan.topline ?? opts.topline ?? null,
       summaries: opts.summaries ?? {},
       conversations: opts.conversations ?? {},
       ...(opts.isNew ? { isNew: opts.isNew } : {}),
-      ...(plan.tomHandling ? { emptyAct: plan.tomHandling } : {}),
+      ...(plan.emptyAct ? { emptyAct: plan.emptyAct } : {}),
       planned,
     },
   );
@@ -386,8 +392,8 @@ export function fallbackPage(
 function buildPage(brief: RankedBrief, act: CardSpec[], week: CardSpec[], opts: PageOptions): string {
   const { input } = brief;
   const colour = new Map(input.family.children.map((c, i) => [c.firstName, `c${i + 1}`]));
-  const card = ({ signal: s, titel, hvorfor }: CardSpec) => {
-    const why = hvorfor ?? s.why;
+  const card = ({ signal: s, title, why: reworded }: CardSpec) => {
+    const why = reworded ?? s.why;
     // What a six-message exchange is *about*, so the card is not a single quote
     // the reader has to reconstruct a conversation from. Only threads long
     // enough to need one have it — see `CONVERSATION_MIN_MESSAGES`.
@@ -399,11 +405,11 @@ function buildPage(brief: RankedBrief, act: CardSpec[], week: CardSpec[], opts: 
         ${opts.isNew?.(s.sourceKey) ? '<span class="chip new">Ny</span>' : ''}
         ${s.child ? `<span class="who"><span class="dot ${colour.get(s.child) ?? 'c1'}"></span>${escapeHtml(s.child)}</span>` : ''}
       </div>
-      <p class="title">${escapeHtml(titel ?? s.title)}</p>
+      <p class="title">${escapeHtml(title ?? s.title)}</p>
       ${why ? `<p class="why">${escapeHtml(why)}</p>` : ''}
       ${s.quote ? `<blockquote>«${escapeHtml(s.quote)}»</blockquote>` : ''}
       ${gist ? `<p class="gist">${escapeHtml(gist)}</p>` : ''}
-      ${moreBlock(s.source, [titel ?? s.title, why, s.quote, gist].filter(Boolean).join(' '))}
+      ${moreBlock(s.source, [title ?? s.title, why, s.quote, gist].filter(Boolean).join(' '))}
       <div class="src">${escapeHtml(s.source.title)}${s.source.author ? ` · ${escapeHtml(s.source.author)}` : ''}${s.source.url ? ` · <a href="${escapeHtml(s.source.url)}">åbn i Aula</a>` : ''}</div>
       <button class="tick" type="button" aria-pressed="false" aria-label="Markér som klaret"></button>
     </div>`;
@@ -443,10 +449,10 @@ function buildPage(brief: RankedBrief, act: CardSpec[], week: CardSpec[], opts: 
   <section data-section="act"><h2>Kræver handling <span class="count" data-count>${act.length}</span></h2>
     ${act.map(card).join('')}
     <div class="panel" data-empty${act.length ? ' hidden' : ''}>${escapeHtml(opts.emptyAct ?? 'Intet kræver handling lige nu.')}</div>
-    <button class="klaret" type="button" aria-expanded="false" data-klaret hidden></button>
+    <button class="done-toggle" type="button" aria-expanded="false" data-done-toggle hidden></button>
   </section>
 
-  ${week.length ? `<section data-section="week"><h2>Kommende <span class="count" data-count>${week.length}</span></h2>${week.map(card).join('')}<button class="klaret" type="button" aria-expanded="false" data-klaret hidden></button></section>` : ''}
+  ${week.length ? `<section data-section="week"><h2>Kommende <span class="count" data-count>${week.length}</span></h2>${week.map(card).join('')}<button class="done-toggle" type="button" aria-expanded="false" data-done-toggle hidden></button></section>` : ''}
 
   <section><h2>Per barn</h2><div class="grid">
     ${input.family.children

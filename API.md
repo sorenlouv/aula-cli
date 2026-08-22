@@ -294,7 +294,7 @@ server-side and returns a path for that reason.
   retried once with a fresh token.
 - **`sessionId` means two different things.** MinUddannelse and EasyIQ want the
   Aula guardian `userId`. Meebook (`sessionuuid` header), Systematic
-  (`sessionId` query) and SkolePortal's ugeplan (`x-login` header) want the
+  (`sessionId` query) and SkolePortal's Ugeplan widget (`x-login` header) want the
   **MitID username**, which exists nowhere in the API because it is what you
   type into MitID. `login` records it on the stored token record; if it is
   missing, log in again — until then those vendors fall back to the guardian id

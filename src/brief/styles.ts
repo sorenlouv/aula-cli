@@ -96,7 +96,7 @@ blockquote{margin:0;padding:9px 14px;background:var(--quote);border-radius:8px;f
 .gist{margin:10px 0 0;padding-left:11px;border-left:2px solid var(--line);
   font-size:14px;color:var(--ink-2)}
 
-/* "Læs mere" — the original, one tap under the summary of it. Deliberately
+/* The more-block — the original, one tap under the summary of it. Deliberately
    quiet: on most days it is not needed, and a card that shouts about its own
    footnote is a card that reads slower. */
 .more{margin-top:10px;background:transparent;border:0;border-radius:0;box-shadow:none}
@@ -137,13 +137,13 @@ blockquote{margin:0;padding:9px 14px;background:var(--quote);border-radius:8px;f
 .card.is-done{display:none}
 section.reveal .card.is-done{display:block;opacity:.55}
 section.reveal .card.is-done .title{text-decoration:line-through}
-/* "Intet kræver handling" under two visible cards reads as a contradiction,
+/* The empty-state line under two visible cards reads as a contradiction,
    however true the count is. While they are on show, the toggle says it. */
 section.reveal [data-empty]{display:none}
-.klaret{display:block;width:100%;margin:2px 0 0;padding:9px 13px;text-align:left;
+.done-toggle{display:block;width:100%;margin:2px 0 0;padding:9px 13px;text-align:left;
   border:1px dashed var(--line);border-radius:10px;background:transparent;
   color:var(--ink-3);font:inherit;font-size:12.5px;cursor:pointer}
-.klaret:hover{color:var(--ink-2);border-color:var(--ink-3)}
+.done-toggle:hover{color:var(--ink-2);border-color:var(--ink-3)}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(272px,1fr));gap:12px}
 .cc{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow)}
@@ -159,7 +159,7 @@ summary{cursor:pointer;padding:15px 18px;font-size:14.5px;font-weight:600;list-s
   display:flex;justify-content:space-between;align-items:center}
 summary::-webkit-details-marker{display:none}
 summary::after{content:"⌄";color:var(--ink-3);font-size:17px;line-height:1}
-/* Direct child, not descendant: a "læs mere" sits *inside* Godt at vide, and a
+/* Direct child, not descendant: a more-block sits *inside* the context section, and a
    descendant selector points its chevron up while it is still shut — the outer
    section's open state deciding the inner one's arrow. */
 details[open]>summary::after{content:"⌃"}
@@ -201,7 +201,7 @@ footer{margin-top:26px;text-align:center;color:var(--ink-3);font-size:12px}
   .more{display:none}
   .card{padding-right:20px}
   section.reveal .card.is-done{display:none}
-  .klaret{border-style:solid;cursor:auto}
+  .done-toggle{border-style:solid;cursor:auto}
 }
 @media (max-width:680px){
   .wrap{padding:26px 16px 60px}

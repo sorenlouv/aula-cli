@@ -12,7 +12,7 @@ import type { Capability, Provider } from '../widgets.ts';
 import { isIsoWeek } from '../validation.ts';
 
 export type IntegrationContext = {
-  /** ISO week, e.g. `2026-W33`. Every ugeplan provider is week-oriented. */
+  /** ISO week, e.g. `2026-W33`. Every weekly-plan provider is week-oriented. */
   isoWeek: string;
   /**
    * The guardian's `userId` from `profiles.getProfileContext`. MinUddannelse
@@ -21,7 +21,7 @@ export type IntegrationContext = {
   guardianId: string;
   /**
    * The MitID username. Meebook (`sessionuuid` header), Systematic
-   * (`sessionId` query) and SkolePortal's ugeplan (`x-login` header) want
+   * (`sessionId` query) and SkolePortal's Ugeplan widget (`x-login` header) want
    * *this*, not the Aula user id — the one place the two id spaces differ.
    *
    * It is not derivable from the API: it is what the user types into MitID,
@@ -76,7 +76,7 @@ export type WeekPlanItem = {
   title?: string;
   /** Plain text; vendor HTML is flattened through htmlToText. */
   content?: string;
-  /** `comment` | `task` | `assignment` | `ugebrev` | `lektier` | … */
+  /** `comment` | `task` | `assignment` | `weekly-letter` | `assignments` | … */
   kind?: string;
   url?: string;
 };

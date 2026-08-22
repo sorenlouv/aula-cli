@@ -130,21 +130,21 @@ Sections render only when they have content, but never change order.
 **1 · Topline** — date, and one Danish sentence covering the state of the
 family. The part that works when read in four seconds on a phone.
 
-**2 · Kræver handling** — the only tier with deadlines. Hard cap of **five
-items**; overflow drops to *Kommende*. Each row: what to do, which child, by
-when (`om 3 dage`, `i dag`, `overskredet`), and the verbatim source phrase it
-came from.
+**2 · Kræver handling** — the `act` tier, the only one with deadlines. Hard
+cap of **five items**; overflow drops to the `week` tier. Each row: what to do,
+which child, by when (`om 3 dage`, `i dag`, `overskredet`), and the verbatim
+source phrase it came from.
 
-**3 · Kommende** — dated things that ask nothing yet: events, weekly-plan
-entries, deadlines further out. Where *husk badetøj på torsdag* lives once
-Thursday is more than a glance away.
+**3 · Kommende** — the `week` tier: dated things that ask nothing yet — events,
+weekly-plan entries, deadlines further out. Where *husk badetøj på torsdag*
+lives once Thursday is more than a glance away.
 
 **4 · Per barn** — one card each for Alma, Viggo and Ida: today's
 check-in state and planned pickup, what is new about them, their week. Cards
 ordered by how much is going on, so a quiet child stops taking up space.
 
-**5 · Godt at vide** — collapsed. The daily narrative posts, one line each,
-expandable.
+**5 · Godt at vide** — the `context` tier, collapsed. The daily narrative
+posts, one line each, expandable.
 
 **6 · Billeder** — the `NewMedia` flood turned into `12 nye billeder fra
 Myretuen`, linked, at the bottom where it belongs.
@@ -195,7 +195,7 @@ one link away in Aula.
 These are the whole point, and each becomes a test:
 
 - **Nothing is ever silently dropped.** Anything not promoted still appears in
-  *Godt at vide*. The brief may reorder; it may not hide.
+  the `context` tier. The brief may reorder; it may not hide.
 - **A missing section and a failed fetch look different.** Today's EasyIQ 500
   must read as *"ugeplan for Viggo og Ida kunne ikke hentes"*, never as a
   quiet empty week. Confusing the two is how a brief starts lying. The same
@@ -282,7 +282,7 @@ The model calls run on the `claude` CLI's default model unless overridden:
 alike. Extract is where "what needs attention" gets decided, so a stronger
 model buys real judgment — but the pipeline must stay safe on whatever model
 the user has. The benchmarked failure of mid-tier models was under-reading a
-vigtig-marked mandatory sign-up into the fold, so `rank` carries a
+important-marked mandatory sign-up into the fold, so `rank` carries a
 deterministic floor: an Aula-important item is never tiered below `week`,
 and one that no signal covered at all gets a plain rule-made signal. The
 model can promote it further; it cannot sink it. The family's own `high`
@@ -398,8 +398,8 @@ is it something we may opt into? The tell is who is addressed —
 That single field does the real work:
 
 - School-wide **and** concerns the child → normal ranking. *Tilmeld Alma til
-  skolefoto* reaches *Kræver handling*.
-- School-wide **and** an offer → folded into *Godt at vide*.
+  skolefoto* reaches the `act` tier.
+- School-wide **and** an offer → folded into the `context` tier.
 - Municipality-wide **and** an offer → the muted line at the foot.
 - Municipality-wide **but** concerns the child → shown. Every school being shut
   on Friday still shuts ours.
@@ -450,19 +450,19 @@ briefs. What each word does is fixed:
 
 - `hide` → the hidden tier, listed only in the muted foot. This is how *"aldrig
   relevante for os"* takes a municipal offer off the page. It yields to two
-  things: Aula's own `vigtig` flag, and `concernsChild` — something that asks us
-  for something about our own child is demoted to *Godt at vide* rather than
+  things: Aula's own `important` flag, and `concernsChild` — something that asks us
+  for something about our own child is demoted to the `context` tier rather than
   hidden, so the worst a wrong `hide` costs is a fold. A closure that shuts our
   school stays findable however broadly it was addressed.
-- `low` → at most *Godt at vide*, never a card — a verdict the model got wrong
+- `low` → at most the `context` tier, never a card — a verdict the model got wrong
   costs a fold, not the item.
 - `normal` → content and breadth decide.
-- `high` → never below *Kommende*, and on the page even when the model
+- `high` → never below the `week` tier, and on the page even when the model
   extracted nothing concrete from it. This is how *"sig altid til når John
   skriver"* is kept on the day the model skims his message: a `high` source no
   signal covered gets a plain rule-made signal, like an Aula-important one.
 
-Aula's own `vigtig` flag beats `hide` and `low`. No verdict — the rules-only
+Aula's own `important` flag beats `hide` and `low`. No verdict — the rules-only
 path, or a source the model skipped — means `normal`, so a brief built without
 the model ranks on breadth and content alone and hides nothing.
 

@@ -198,7 +198,7 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
     client.getNotifications().catch(() => []),
     client.getDailyPresence(children.map((c) => c.id)).catch(() => []),
     // The vendors are third parties and go down independently of Aula. A dead
-    // ugeplan API must not cost the user their messages and calendar, so the
+    // weekly-plan API must not cost the user their messages and calendar, so the
     // digest degrades to a warning rather than failing.
     readManyPlans(client, family, [...CAPABILITIES], {
       isoWeek: opts.isoWeek,
