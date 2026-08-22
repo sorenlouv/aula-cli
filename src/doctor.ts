@@ -7,12 +7,12 @@
  * The point is the one thing `bun test src/` structurally cannot tell you: the
  * suite stubs `fetch`, so it proves the client is internally consistent and
  * says nothing about whether Aula still behaves. Nearly every trap in
- * AGENTS.md returns a *successful-looking* response, so this reports counts
+ * API.md returns a *successful-looking* response, so this reports counts
  * rather than just "PASS" — an empty posts feed is indistinguishable from a
  * broken id set unless somebody prints the number.
  *
  * That is also why there is a `warn` status. A check that succeeded but
- * returned something that AGENTS.md says is a known symptom — no posts, no
+ * returned something that API.md says is a known symptom — no posts, no
  * step-up, a child with no `userId` — is not a pass, and pretending otherwise
  * is exactly the failure this command exists to catch. Warnings do not fail the
  * run; only a thrown error does.
@@ -383,7 +383,7 @@ function renderDoctor(report: DoctorReport): string {
       `in ${(report.summary.totalMs / 1000).toFixed(1)}s`,
   ];
   if (report.summary.warned > 0) {
-    lines.push(fmt.dim('Warnings are successful calls that returned a known symptom — see AGENTS.md.'));
+    lines.push(fmt.dim('Warnings are successful calls that returned a known symptom — see API.md.'));
   }
   return lines.join('\n');
 }

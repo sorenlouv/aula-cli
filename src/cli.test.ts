@@ -512,7 +512,7 @@ test('doctor never answers from the cache', () => {
   assert.ok(box.requests().length > 10, 'doctor must make every call for real');
 });
 
-// AGENTS.md's central point: the dangerous responses are the successful-looking
+// API.md's central point: the dangerous responses are the successful-looking
 // ones. A check that returns a known symptom is a warning, not a pass — and not
 // a failure either, because nothing errored.
 test('doctor warns on the responses that look successful but are not', () => {
