@@ -203,30 +203,51 @@ not understand and `updateConfig` merges; the test is named for the bug.
 
 ```
 aula calendars                   # every calendar, with the read ones marked
-aula calendars add <n> [<n> ...]     # start reading them
-aula calendars remove <n> [<n> ...]  # stop reading them
+aula calendars set <n> [<n> ...]     # read exactly these, and no others
+aula calendars set none              # read none of them
 ```
 
 Where the connector is available there is no setup at all — the list is names,
 never ids, and the user picks numbers off it.
 
-**One list, not two.** The calendars being read and the ones merely available
-were briefly separate listings behind separate commands, each numbered from 1,
-so "2" meant a different calendar depending on which you had last looked at.
-They are one list now, marked, and the selected ones come first — which is what
-lets `remove <n>` keep working on a morning the connector does not answer,
-since positions 1..k are always the configured ones.
+**One list, and one declarative command.** The calendars being read and the ones
+merely available were briefly separate listings behind separate commands, each
+numbered from 1, so "2" meant a different calendar depending on which you had
+last looked at. They are one list now, marked, and the selected ones come first.
+
+`set` replaced `add` and `remove` because the caller is usually an agent, and
+add-and-remove makes it compute a diff: read the list, compare against what is
+already selected, work out which way each one has to move, then issue two
+commands whose numbering shifts between them. That diff is work, it depends on
+state that may already be stale, and it is where the mistakes were going to come
+from. Stating the end state has none of it — idempotent, one command for any
+target state, nothing to compare against.
+
+`set` rather than `select` or `update`: assignment is the prior a reader already
+has for the word, and assignment is the semantics. `update` was rejected for
+reading as *refresh these calendars* — a real and different operation, and one
+an agent could call expecting a sync while rewriting the configuration instead.
+
+The cost is that it is destructive by omission, so the answer names what it
+started *and* stopped reading; a calendar disappearing quietly is exactly the
+failure this shape invites. And because the marked calendars are always 1..k of
+the one list, narrowing a selection resolves from the configuration alone and
+needs no connector — dropping a calendar still works on a morning it does not
+answer, which is when you are most likely to want to.
 
 Adding then proves itself, per calendar, because one silent empty calendar is
 exactly what a single combined total would hide:
 
 ```
-Added "Privat" and "Familien".
+Now reading "Privat" and "Familien".
   Privat: 4 appointment(s) in the next 14 days
   Familien: 17 appointment(s) in the next 14 days
   · 2026-08-25  Fødselsdag hos naboen
   · 2026-08-26 10:00  Tandlæge
 ```
+
+Only the newly set calendars are read back: re-reading one that already answers
+every morning proves nothing and costs a round trip.
 
 "Calendar added" would prove nothing. The count proves the whole chain —
 connector, credentials, window, parsing — while the user is still paying

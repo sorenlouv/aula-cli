@@ -104,7 +104,7 @@ const POSITIONALS: Partial<Record<CliCommand, { min: number; max?: number; usage
   cache: { min: 0, max: 1, usage: 'cache [status|clear]' },
   open: { min: 0, max: 0, usage: 'open [--web]' },
   publish: { min: 0, max: 0, usage: 'publish [--off]' },
-  calendars: { min: 0, usage: 'calendars [add <n> ... | remove <n> ...]' },
+  calendars: { min: 0, usage: 'calendars [set <n> ... | set none]' },
   remember: { min: 1, usage: 'remember "<ønske>"' },
   preferences: { min: 0, max: 1, usage: 'preferences [reset]' },
   forget: { min: 1, max: 1, usage: 'forget <n>' },

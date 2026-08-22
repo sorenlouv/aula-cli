@@ -163,8 +163,8 @@ so they can see for themselves whether a day works.
 
 ```bash
 bun src/cli.ts calendars                 # every calendar Claude can see; the ones being read are marked
-bun src/cli.ts calendars add 2 4         # start reading them — several at once
-bun src/cli.ts calendars remove 1        # stop reading one
+bun src/cli.ts calendars set 2 4         # read exactly these two, and no others
+bun src/cli.ts calendars set none        # read none of them
 ```
 
 Needs Google Calendar connected in Claude. That is the only supported route —
@@ -172,9 +172,11 @@ there is no API key or calendar-link alternative, and `calendars` prints the few
 clicks when the connector is missing.
 
 **Show the list and let the user pick.** Never guess which calendars matter and
-never add one unasked: this writes to `~/.aula/config.json`, outside the
-repository. Adding reports how many appointments each calendar holds in the next
-fortnight — pass that back, and say so if one comes back empty when they
+never set one unasked: this writes to `~/.aula/config.json`, outside the
+repository. `set` states the whole answer — it reads exactly what you name and
+stops reading the rest — so pass every calendar that should be read, not only a
+new one. It reports how many appointments each newly set calendar holds in the
+next fortnight; pass that back, and say so if one comes back empty when they
 expected otherwise.
 
 Nothing is read until a calendar is named here, and this can be done at any
