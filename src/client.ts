@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { type Auth, loginInstructions, resolveAuth } from './auth.ts';
+import { type Auth, loginInstructions, refreshSupersededToken, resolveAuth } from './auth.ts';
 import { type CacheSettings, ResponseCache, openCache } from './cache.ts';
 import { type Remedy, formatRemedy } from './errors.ts';
 import type {
@@ -115,14 +115,25 @@ export function assertReadOnly(
 
 /**
  * Aula's own status codes, which travel in the JSON envelope and do not line up
- * with the HTTP status. Observed against the live API:
+ * with the HTTP status. Re-verified against the live API on 2026-08-22:
+ *
  *   0   ok
- *   10  retired API version, or unknown method
+ *   10  three unrelated things, told apart only by the HTTP status:
+ *         410 — retired API version (every method answers this)
+ *         404 — no such method
+ *         403 — session has no activated profile, *or* the call named an id
+ *               this login cannot access
+ *   20  the access token has been superseded by a newer one (subCode 9)
  *   40  bad/missing parameters
- *   403 authenticated, but not allowed to read this
- *   448 not authenticated — session expired or bogus
+ *   403 authenticated, but refused — an over-long calendar window, or an
+ *       institution code the login does not hold
+ *   448 not authenticated — no token, or credentials expired
+ *
+ * Note what is *not* here: a foreign institution-profile id does not produce
+ * code 403, it produces code 10 on an HTTP 403.
  */
-const STATUS_RETIRED_VERSION = 10;
+const STATUS_VERSION_OR_ACCESS = 10;
+const STATUS_TOKEN_SUPERSEDED = 20;
 const STATUS_BAD_PARAMETERS = 40;
 const STATUS_FORBIDDEN = 403;
 const STATUS_NOT_AUTHENTICATED = 448;
@@ -206,6 +217,9 @@ export class AulaClient {
    */
   #versionProbe: Promise<void> | undefined;
   #sessionBootstrap: Promise<void> | undefined;
+  /** In flight only while a superseded token is being swapped out. */
+  #tokenRecovery: Promise<boolean> | undefined;
+  #renewToken: (spent: string) => Promise<string | undefined>;
   /** Memoised answer to "is Aula up?" — see `#serviceReachable`. */
   #healthProbe: Promise<boolean | undefined> | undefined;
   #cache: ResponseCache;
@@ -219,7 +233,21 @@ export class AulaClient {
    * touches the disk, so a test cannot accidentally assert against a response
    * an earlier test left lying around.
    */
-  constructor(opts: { cookie?: string; auth?: Auth; apiVersion?: number; cache?: ResponseCache } = {}) {
+  constructor(
+    opts: {
+      cookie?: string;
+      auth?: Auth;
+      apiVersion?: number;
+      cache?: ResponseCache;
+      /**
+       * How to find a live access token once Aula reports the current one
+       * superseded. Injected only so tests can exercise the recovery without
+       * reaching for the real token store on disk — production always wants the
+       * default.
+       */
+      renewToken?: (spent: string) => Promise<string | undefined>;
+    } = {},
+  ) {
     const auth: Auth | undefined = opts.auth ??
       (opts.cookie !== undefined ? { kind: 'cookie', cookie: opts.cookie } : undefined);
     if (!auth) {
@@ -234,6 +262,7 @@ export class AulaClient {
     }
     this.#version = version;
     this.#cache = opts.cache ?? ResponseCache.disabled();
+    this.#renewToken = opts.renewToken ?? refreshSupersededToken;
   }
 
   /** Builds a client from the stored MitID login — the only credential there is. */
@@ -362,11 +391,54 @@ export class AulaClient {
     return [...merged].map(([k, v]) => `${k}=${v}`).join('; ');
   }
 
+  /**
+   * Swaps a superseded access token for a live one, in place.
+   *
+   * Memoised while it runs so a fan-out of concurrent reads performs one
+   * recovery and all of them wait for it, rather than each buying its own token
+   * and invalidating the others' — the same reason `#ensureSession` is memoised.
+   * The memo is dropped once settled, so a second, genuinely new supersede later
+   * in the run can still recover; the retry budget in `#send` is what bounds it.
+   *
+   * @returns whether the token actually changed. False means retrying is
+   *   pointless, so the caller should surface the failure.
+   */
+  #recoverSupersededToken(): Promise<boolean> {
+    const current = this.#auth;
+    // Cookie auth has no token to renew; there is nothing to recover from.
+    if (current.kind !== 'token') return Promise.resolve(false);
+    // Joining the in-flight recovery is the point of the memo: several requests
+    // failing at once must not each buy a token, or they invalidate each other.
+    if (this.#tokenRecovery) return this.#tokenRecovery;
+
+    const spent = current.accessToken;
+    const recovery = (async () => {
+      const next = await this.#renewToken(spent);
+      if (next === undefined || next === spent) return false;
+      // Only the token moves. The Aula session is keyed on PHPSESSID and stays
+      // activated across the swap — verified against the live API — so the
+      // cookie jar, the CSRF token and the bootstrap all carry over untouched.
+      this.#auth = { ...current, accessToken: next };
+      return true;
+    })();
+    this.#tokenRecovery = recovery;
+    void recovery.catch(() => undefined).finally(() => {
+      if (this.#tokenRecovery === recovery) this.#tokenRecovery = undefined;
+    });
+    return recovery;
+  }
+
+  /**
+   * @param mayRecover whether a superseded token (code 20) may be swapped out
+   *   and the request replayed. False on the replay itself, which is what keeps
+   *   the recovery to a single attempt.
+   */
   async #send(
     method: string,
     httpMethod: 'GET' | 'POST',
     opts: { query?: Record<string, QueryValue | undefined>; body?: unknown },
     version: number,
+    mayRecover = true,
   ): Promise<unknown> {
     const url = new URL(`${BASE}/v${version}/`);
     url.searchParams.set('method', method);
@@ -444,9 +516,12 @@ export class AulaClient {
     }
     const envelope = parseEnvelope(method, parsed);
 
-    // Aula answers HTTP 403 for both "your session is dead" and "you may not
-    // read that", and only the envelope code tells them apart. Trusting the
-    // HTTP status alone makes every id mistake look like a login problem.
+    // HTTP 403 covers four different problems here — dead credentials (448),
+    // a superseded token (20), an unactivated session or unreachable id (10),
+    // and a genuine refusal (403) — and only the envelope code separates them.
+    // Trusting the HTTP status alone makes every id mistake look like a login
+    // problem; trusting the envelope code alone cannot split code 10's three
+    // meanings. Both are needed, which is why `res.status` is read below.
     const code = envelope.status?.code ?? -1;
     if (code === 0) return envelope.data;
 
@@ -458,14 +533,76 @@ export class AulaClient {
           `The stored MitID login is no longer valid.`,
       });
     }
+    // Aula rotates an access token out the moment a `refresh_token` grant issues
+    // a newer one, so a token nowhere near its `exp` stops working as soon as
+    // anything else refreshes the same login — two `aula` processes overlapping,
+    // or a manual command during the scheduled brief's retry window. The stored
+    // login is fine; the fix is another refresh, not another MitID login, and
+    // saying "run doctor" here sends the reader off diagnosing the wrong thing.
+    if (code === STATUS_TOKEN_SUPERSEDED) {
+      // Recoverable without troubling anyone: pick up whatever token is current
+      // and replay. `mayRecover` is false on the replay, so this happens once.
+      if (mayRecover && (await this.#recoverSupersededToken())) {
+        return this.#send(method, httpMethod, opts, version, false);
+      }
+      throw new AulaApiError(method, code, {
+        headline: 'That access token has already been replaced by a newer one.',
+        detail:
+          `Aula answered ${method} with status code ${code}. This is not an expired ` +
+          `login: something else refreshed the same login — most likely another ` +
+          `aula command running at the same time — which retires the token in hand ` +
+          `immediately, whatever its expiry says.`,
+        action: 'Run the command again; the next run picks up the current token.',
+        fallback: 'If it keeps happening on every run, the stored login is genuinely stale: `bun run login`.',
+      });
+    }
+
+    // Code 10 is three unrelated failures wearing one number, and only the HTTP
+    // status separates them. Collapsing them into one message is how a mistyped
+    // method name ends up looking like an outage.
+    if (code === STATUS_VERSION_OR_ACCESS) {
+      if (res.status === 404) {
+        throw new AulaApiError(method, code, {
+          headline: `Aula has no method called "${method}".`,
+          detail:
+            `The name is wrong, not the parameters — Aula answers an unknown method ` +
+            `with HTTP 404 and status code ${code}.`,
+          fallback:
+            'AGENTS.md, "Finding an unwrapped endpoint", reads the real method names ' +
+            "out of Aula's own frontend bundle rather than guessing them.",
+        });
+      }
+      if (res.status === 403) {
+        throw new AulaApiError(method, code, {
+          headline: `Aula would not let this session read ${method}.`,
+          detail:
+            `HTTP 403 with status code ${code} means either the session never activated ` +
+            `a profile, or the call named an institution-profile id this login cannot ` +
+            `access — one wrong id fails the whole call, it is not filtered out.`,
+          action: 'Check which ids this login actually has:',
+          commands: ['bun run aula whoami'],
+          fallback: 'API.md, "The three id spaces", explains which id belongs where.',
+        });
+      }
+      // HTTP 410 — every method answers this once a version retires. The probe in
+      // #probeApiVersion normally catches it first and moves to a live version.
+      throw new AulaApiError(method, code, {
+        headline: `Aula API v${version} is retired.`,
+        detail: `${method} answered HTTP ${res.status} with status code ${code}, which every method returns on a dead version.`,
+        fallback: 'Unset AULA_API_VERSION to let aula-cli probe for the live one.',
+      });
+    }
+
     if (code === STATUS_FORBIDDEN) {
       throw new AulaApiError(method, code, {
         headline: `Aula would not let you read ${method} (code 403).`,
         detail:
-          `The session itself is fine, so this is almost always the wrong ` +
-          `institution-profile id set. calendar and presence accept children ids ` +
-          `only; posts needs guardian ids *and* children ids.`,
-        action: 'Check which ids this login actually has:',
+          `The session itself is fine. Aula uses this for a request it understands ` +
+          `but refuses: an institution code this login does not hold, or a calendar ` +
+          `window longer than ${CALENDAR_MAX_SPAN_DAYS} days. A wrong ` +
+          `institution-profile id is *not* this — that comes back as code ` +
+          `${STATUS_VERSION_OR_ACCESS}.`,
+        action: 'Check which ids and institutions this login actually has:',
         commands: ['bun run aula whoami'],
         fallback: 'API.md, "The three id spaces", explains which id belongs where.',
       });
@@ -478,11 +615,17 @@ export class AulaClient {
           'wide, or an id that belongs to a different id space, are the usual causes.',
       });
     }
+    // A code this client has never seen. Aula's envelope leaves `message` empty
+    // far more often than not, so the HTTP status is usually the only clue there
+    // is — print it rather than making the reader reproduce the call to find it.
     throw new AulaApiError(method, code, {
-      headline: `Aula rejected ${method} with status code ${code}.`,
-      ...(envelope.status?.message ? { detail: `Aula said: ${envelope.status.message}` } : {}),
+      headline: `Aula rejected ${method} with status code ${code} (HTTP ${res.status}).`,
+      detail: envelope.status?.message
+        ? `Aula said: ${envelope.status.message}`
+        : 'Aula sent no message with it, and this is not a status code aula-cli knows about.',
       action: 'See which endpoints are working:',
       commands: ['bun run aula doctor --text'],
+      fallback: 'If this is reproducible, API.md\'s status-code table needs a new row.',
     });
   }
 
@@ -576,7 +719,7 @@ export class AulaClient {
       return;
     } catch (err) {
       if (err instanceof AulaAuthError) throw err;
-      if (!(err instanceof AulaApiError) || err.code !== STATUS_RETIRED_VERSION) throw err;
+      if (!(err instanceof AulaApiError) || err.code !== STATUS_VERSION_OR_ACCESS) throw err;
     }
 
     const ceiling = Math.min(MAX_API_VERSION, this.#version + API_VERSION_PROBE_SPAN);
@@ -595,7 +738,7 @@ export class AulaClient {
         continue;
       }
     }
-    throw new AulaApiError('profiles.getProfilesByLogin', STATUS_RETIRED_VERSION, {
+    throw new AulaApiError('profiles.getProfilesByLogin', STATUS_VERSION_OR_ACCESS, {
       headline: 'Aula has retired every API version aula-cli knows about.',
       detail:
         `Versions ${ceiling} down to 15 all answered "retired". ` +
@@ -698,8 +841,10 @@ export class AulaClient {
   }
 
   /**
-   * @param childInstitutionProfileIds children only. Including the guardian's
-   *   own institution-profile ids makes Aula answer 403.
+   * @param childInstitutionProfileIds children only — the guardian's own
+   *   institution-profile ids are accepted but contribute nothing, so passing
+   *   them just widens the blast radius of a wrong id. An id this login cannot
+   *   reach fails the whole call with code 10; it is not filtered out.
    */
   async getCalendarEvents(opts: {
     childInstitutionProfileIds: number[];
@@ -707,9 +852,9 @@ export class AulaClient {
     end: Date;
   }): Promise<CalendarEvent[]> {
     // Aula caps the window server-side and rejects anything longer with a bare
-    // 403 — the same status it uses for a wrong id set, and with no hint which
-    // it meant. Measured against the live API: 50 days passes, 51 does not.
-    // Catching it here turns a misleading "wrong ids" message into the truth.
+    // 403 carrying no hint of what it objected to. Measured against the live
+    // API: 50 days passes, 51 does not. Catching it here means the message can
+    // name the window instead of leaving the reader to guess at the ids.
     const spanDays = (opts.end.getTime() - opts.start.getTime()) / 86_400_000;
     if (spanDays > CALENDAR_MAX_SPAN_DAYS) {
       throw new AulaApiError(
@@ -741,8 +886,8 @@ export class AulaClient {
   }
 
   /**
-   * The recurring komme/gå schedule, as opposed to `getDailyPresence`, which
-   * is today's actual check-in/check-out.
+   * The recurring presence schedule — Aula's "Komme/gå" module — as opposed
+   * to `getDailyPresence`, which is today's actual check-in/check-out.
    *
    * Note the parameter name: this endpoint calls the child ids
    * `filterInstitutionProfileIds[]`, not `childIds[]`. Same ids, different
@@ -808,7 +953,7 @@ export class AulaClient {
 
   /**
    * A short-lived bearer token scoped to one third-party widget. This is the
-   * hinge the whole ugeplan/lektier world hangs off: Aula issues the token,
+   * hinge the whole weekly-plan/homework world hangs off: Aula issues the token,
    * the vendor's own API accepts it. See src/widgets.ts.
    */
   async getWidgetToken(widgetId: string): Promise<string> {
@@ -828,13 +973,14 @@ export class AulaClient {
   }
 
   /**
-   * "Fælles Filer" — the shared-file shelf, filtered by institution *code*
-   * rather than by any of the profile ids.
+   * The shared-file shelf ("Fælles Filer" in Aula's own UI), filtered by
+   * institution *code* rather than by any of the profile ids.
    *
-   * `orderField` is mandatory and the accepted set is narrow: `title` works,
-   * and the obvious guesses (`created`, `name`, `fileName`) are all rejected
-   * with status 40. Omitting it, or `orderDirection`, fails the same way — with
-   * no indication of which parameter was at fault.
+   * `orderField` is optional, but `title` is the only value it will accept: the
+   * obvious guesses (`created`, `name`, `createdAt`, `fileName`) are each
+   * rejected with status 40 and an empty `errorInformation`, so there is no way
+   * to sort by date server-side. Omitting the parameter succeeds and returns a
+   * different default order. `limit` is capped at 50 — 51 already fails.
    */
   async getCommonFiles(opts: {
     institutionCodes: string[];

@@ -6,7 +6,7 @@
  *
  * Both take `Authorization: Bearer <widget token>` and identify the family
  * entirely through the query string. `sessionUUID` is the Aula guardian id,
- * not the MitID username that Meebook, Systematic and SkolePortal's ugeplan
+ * not the MitID username that Meebook, Systematic and SkolePortal's Ugeplan widget
  * key on.
  */
 
@@ -21,52 +21,58 @@ import {
 import { type WidgetTokens, widgetFetch } from '../widgets.ts';
 import type { IntegrationContext, WeekPlan, WeekPlanItem } from './types.ts';
 
-const OPGAVER_URL = 'https://api.minuddannelse.net/aula/opgaveliste';
-const UGEBREV_URL = 'https://api.minuddannelse.net/aula/ugebrev';
+const TASKS_URL = 'https://api.minuddannelse.net/aula/opgaveliste';
+const WEEKLY_LETTER_URL = 'https://api.minuddannelse.net/aula/ugebrev';
 
-type MuNamed = { name?: string | null };
-type MuForloeb = { navn?: string | null };
+/**
+ * MinUddannelse's `HoldDto` (a class/team) and `ForloebDto` (a course). Both
+ * carry the name as `navn` — verified against the vendor's own published
+ * schema at `api.minuddannelse.net/csv/metadata?op=OpgavelisteRequest`, which
+ * lists `HoldDto` as `Id`, `Navn`, `FagId`, `FagNavn`.
+ */
+type MuTeam = { navn?: string | null };
+type MuCourse = { navn?: string | null };
 
-type MuOpgave = {
+type MuTask = {
   /** The child the task belongs to — MinUddannelse calls this "kuvertnavn". */
   kuvertnavn?: string | null;
   title?: string | null;
   /** Danish weekday label. */
   ugedag?: string | null;
   opgaveType?: string | null;
-  hold?: MuNamed[] | null;
-  forloeb?: MuForloeb | null;
+  hold?: MuTeam[] | null;
+  forloeb?: MuCourse | null;
 };
 
 type MuLetter = { indhold?: string | null };
 type MuInstitution = { ugebreve?: MuLetter[] | null };
 type MuPerson = { navn?: string | null; institutioner?: MuInstitution[] | null };
 
-type MuUgebrev = { personer?: MuPerson[] | null };
+type MuWeeklyLetterResponse = { personer?: MuPerson[] | null };
 
-type MuOpgaverResponse = { opgaver?: MuOpgave[] | null };
+type MuTasksResponse = { opgaver?: MuTask[] | null };
 
-function isNamed(value: unknown): value is MuNamed {
-  return isRecord(value) && isOptional(value.name, isString);
+function isTeam(value: unknown): value is MuTeam {
+  return isRecord(value) && isOptional(value.navn, isString);
 }
 
-function isMuOpgave(value: unknown): value is MuOpgave {
+function isMuTask(value: unknown): value is MuTask {
   return isRecord(value) &&
     isOptional(value.kuvertnavn, isString) &&
     isOptional(value.title, isString) &&
     isOptional(value.ugedag, isString) &&
     isOptional(value.opgaveType, isString) &&
-    isOptional(value.hold, (groups): groups is MuNamed[] => isArrayOf(groups, isNamed)) &&
-    isOptional(value.forloeb, (course): course is MuForloeb =>
+    isOptional(value.hold, (teams): teams is MuTeam[] => isArrayOf(teams, isTeam)) &&
+    isOptional(value.forloeb, (course): course is MuCourse =>
       isRecord(course) && isOptional(course.navn, isString));
 }
 
-function isMuOpgaverResponse(value: unknown): value is MuOpgaverResponse {
+function isMuTasksResponse(value: unknown): value is MuTasksResponse {
   return isRecord(value) &&
-    isOptional(value.opgaver, (tasks): tasks is MuOpgave[] => isArrayOf(tasks, isMuOpgave));
+    isOptional(value.opgaver, (tasks): tasks is MuTask[] => isArrayOf(tasks, isMuTask));
 }
 
-function isMuUgebrev(value: unknown): value is MuUgebrev {
+function isMuWeeklyLetterResponse(value: unknown): value is MuWeeklyLetterResponse {
   const isLetter = (candidate: unknown): candidate is MuLetter =>
     isRecord(candidate) && isOptional(candidate.indhold, isString);
   const isInstitution = (candidate: unknown): candidate is MuInstitution =>
@@ -108,48 +114,48 @@ async function fetchMu<T>(
   });
 }
 
-export async function getOpgaver(
+export async function getTasks(
   ctx: IntegrationContext,
   tokens: WidgetTokens,
   widgetId: string,
 ): Promise<WeekPlan> {
-  const data = await fetchMu(OPGAVER_URL, ctx, widgetId, tokens, (value) =>
-    expectOptionalType(value, isMuOpgaverResponse, 'a MinUddannelse assignment response', {}));
+  const data = await fetchMu(TASKS_URL, ctx, widgetId, tokens, (value) =>
+    expectOptionalType(value, isMuTasksResponse, 'a MinUddannelse assignment response', {}));
   const items: WeekPlanItem[] = [];
-  for (const opgave of data?.opgaver ?? []) {
-    const subjects = (opgave.hold ?? []).map((h) => h.name).filter(Boolean);
+  for (const task of data?.opgaver ?? []) {
+    const subjects = (task.hold ?? []).map((team) => team.navn).filter(Boolean);
     items.push({
-      kind: opgave.opgaveType ?? 'opgave',
-      ...(opgave.kuvertnavn ? { childName: opgave.kuvertnavn } : {}),
-      ...(opgave.ugedag ? { date: opgave.ugedag } : {}),
+      kind: task.opgaveType ?? 'task',
+      ...(task.kuvertnavn ? { childName: task.kuvertnavn } : {}),
+      ...(task.ugedag ? { date: task.ugedag } : {}),
       ...(subjects.length ? { subject: subjects.join(', ') } : {}),
-      ...(opgave.title ? { title: opgave.title } : {}),
-      ...(opgave.forloeb?.navn ? { content: opgave.forloeb.navn } : {}),
+      ...(task.title ? { title: task.title } : {}),
+      ...(task.forloeb?.navn ? { content: task.forloeb.navn } : {}),
     });
   }
   return {
     provider: 'minuddannelse',
-    capability: 'opgaver',
+    capability: 'tasks',
     widgetId,
     isoWeek: ctx.isoWeek,
     items,
   };
 }
 
-export async function getUgebrev(
+export async function getWeeklyLetter(
   ctx: IntegrationContext,
   tokens: WidgetTokens,
   widgetId: string,
 ): Promise<WeekPlan> {
-  const data = await fetchMu(UGEBREV_URL, ctx, widgetId, tokens, (value) =>
-    expectOptionalType(value, isMuUgebrev, 'a MinUddannelse weekly letter response', {}));
+  const data = await fetchMu(WEEKLY_LETTER_URL, ctx, widgetId, tokens, (value) =>
+    expectOptionalType(value, isMuWeeklyLetterResponse, 'a MinUddannelse weekly letter response', {}));
   const items: WeekPlanItem[] = [];
   for (const person of data?.personer ?? []) {
     for (const institution of person.institutioner ?? []) {
       for (const letter of institution.ugebreve ?? []) {
         if (!letter.indhold) continue;
         items.push({
-          kind: 'ugebrev',
+          kind: 'weekly-letter',
           ...(person.navn ? { childName: person.navn } : {}),
           // The letter is an HTML document, and the whole point of it is the
           // prose, so it is flattened rather than passed through.
@@ -160,7 +166,7 @@ export async function getUgebrev(
   }
   return {
     provider: 'minuddannelse',
-    capability: 'ugebrev',
+    capability: 'weekly-letter',
     widgetId,
     isoWeek: ctx.isoWeek,
     items,

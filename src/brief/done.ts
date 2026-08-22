@@ -59,7 +59,7 @@ import type { RankedSignal } from './types.ts';
  *
  * The cost, stated plainly: two *distinct* obligations from one source on one
  * date share a key, so ticking one hides both. Rare, and recoverable — a ticked
- * card is hidden behind the section's "klaret" toggle, never dropped.
+ * card is hidden behind the section's done-toggle, never dropped.
  *
  * The keys go onto the card space-separated, which is safe because a source key
  * cannot contain one: they are built in `collect.ts` from numeric ids, ISO
@@ -76,7 +76,7 @@ export function doneKeys(signal: RankedSignal): string[] {
  * Written as a plain script rather than as markup, because `compose.ts` is the
  * one place page markup is written and that rule is worth more than the
  * convenience of building the ticks here. Everything this touches — the tick
- * buttons, the "klaret" toggle, the empty-state panel — is rendered by the
+ * buttons, the done-toggle, the empty-state panel — is rendered by the
  * composer and simply wired up here.
  *
  * `var` and `function` throughout, and no template literals: this string is
@@ -142,7 +142,7 @@ export const DONE_SCRIPT = `
     if (empty) empty.hidden = live > 0;
 
     if (done === 0) section.classList.remove('reveal');
-    var toggle = section.querySelector('[data-klaret]');
+    var toggle = section.querySelector('[data-done-toggle]');
     if (toggle) {
       var open = section.classList.contains('reveal');
       toggle.hidden = done === 0;
@@ -162,7 +162,7 @@ export const DONE_SCRIPT = `
       });
     });
 
-    var toggle = section.querySelector('[data-klaret]');
+    var toggle = section.querySelector('[data-done-toggle]');
     if (toggle) {
       toggle.addEventListener('click', function () {
         section.classList.toggle('reveal');

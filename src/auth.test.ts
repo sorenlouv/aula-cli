@@ -199,3 +199,76 @@ test('the token seeder still works where the tests point it', () => {
   box.storeTokens();
   assert.ok(existsSync(box.tokenPath), 'a sandboxed $AULA_DIR is exactly what it is for');
 });
+
+/**
+ * The recovery from a superseded access token (Aula status code 20).
+ *
+ * Worth a sandboxed subprocess rather than a stubbed function, because the part
+ * that matters is the *order*: re-read the store first, and only buy a new
+ * token when nobody else already has. Two runs that both refreshed would rotate
+ * each other's tokens indefinitely, so "no grant fired" in the first case below
+ * is the assertion that keeps that from creeping back in.
+ *
+ * `$AULA_DIR` points at a temp store throughout. This suite must never read the
+ * developer's real `~/.aula` — the repo is public, and a `bun test` that rotated
+ * a stranger's token would also invalidate any `aula` run happening alongside it.
+ */
+function recoveryScript(spent: string): string {
+  return `
+const { refreshSupersededToken, tokenStore } = await import(${JSON.stringify(join(ROOT, 'src/auth.ts'))});
+let grants = 0;
+globalThis.fetch = (async (input, init) => {
+  if ((init?.method ?? 'GET') === 'POST') {
+    grants++;
+    return new Response(JSON.stringify({
+      access_token: 'token-from-a-fresh-grant',
+      refresh_token: 'test-refresh-token',
+      token_type: 'Bearer',
+      expires_in: 3600,
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
+  throw new Error('unexpected non-POST request: ' + String(input));
+});
+const returned = await refreshSupersededToken(${JSON.stringify(spent)});
+const stored = (await tokenStore().load()).tokens.access_token;
+console.log(JSON.stringify({ grants, returned, stored }));
+`;
+}
+
+function runRecovery(box: ReturnType<typeof sandbox>, spent: string) {
+  const script = join(box.dir, 'recovery.ts');
+  writeFileSync(script, recoveryScript(spent));
+  const r = Bun.spawnSync({ cmd: ['bun', script], env: { ...process.env, ...box.env } });
+  assert.equal(r.exitCode, 0, `recovery script failed: ${r.stderr.toString()}`);
+  return JSON.parse(r.stdout.toString().trim()) as {
+    grants: number;
+    returned: string | null;
+    stored: string;
+  };
+}
+
+test('a superseded token adopts the stored one rather than buying another', () => {
+  const box = sandbox();
+  box.storeTokens();
+
+  // Another run already refreshed and saved: the store holds a token this one
+  // has never seen. Taking it costs nothing and ends the race.
+  const out = runRecovery(box, 'a-token-some-other-run-already-retired');
+
+  assert.equal(out.grants, 0, 'must not spend a grant when the store already has a live token');
+  assert.equal(out.returned, ACCESS_TOKEN, 'should hand back the stored token');
+  assert.equal(out.stored, ACCESS_TOKEN, 'and leave the store alone');
+});
+
+test('a superseded token is replaced when the store holds the dead one too', () => {
+  const box = sandbox();
+  box.storeTokens();
+
+  // Nobody else has refreshed — the store's own token is the one that just
+  // failed — so this run is the one that has to buy a replacement.
+  const out = runRecovery(box, ACCESS_TOKEN);
+
+  assert.equal(out.grants, 1, 'exactly one refresh grant');
+  assert.equal(out.returned, 'token-from-a-fresh-grant');
+  assert.equal(out.stored, 'token-from-a-fresh-grant', 'the new token is published for the next run');
+});

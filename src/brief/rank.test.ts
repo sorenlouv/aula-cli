@@ -85,7 +85,7 @@ describe('rank', () => {
     // The exact case that was wrong in the first mockup: the deadline is
     // genuine, and it must not buy the item a place at the top. With no
     // verdict from the model — the rules-only path — breadth alone keeps it
-    // under "Godt at vide": shown, not promoted, not hidden.
+    // in the context tier: shown, not promoted, not hidden.
     const items = [municipalOffer()];
     const brief = rank(input(items), signalsFromRules(input(items), TODAY));
     expect(brief.signals).toHaveLength(1);
@@ -211,7 +211,7 @@ describe('rank', () => {
   test('an item Aula flagged important is never merged away into one it did not', () => {
     // The loser of a cross-source merge survives only as a bare key in
     // `mergedSourceKeys`, which counts as covered everywhere downstream: no
-    // card, no "Godt at vide", no muted foot, and not even `unusedSources`.
+    // card, no context tier, no muted foot, and not even `unusedSources`.
     // The vigtig floor only ever inspects the winner, so once the flagged item
     // has lost there is nothing left to rescue it. The class-level copy
     // outscores it here — breadth beats the +12 — which is exactly when the
@@ -392,7 +392,7 @@ describe("the family's list, as the model read it", () => {
   });
 
   test('high never manufactures an action', () => {
-    // A wish makes something wanted, not something to do: "Kræver handling"
+    // A wish makes something wanted, not something to do: the act tier
     // stays for actionable kinds.
     const brief = rank(input([johnsThread()]), [backgroundNote], { 'thread:7': 'high' });
     expect(brief.signals[0]?.tier).not.toBe('act');
@@ -420,7 +420,7 @@ describe("the family's list, as the model read it", () => {
 
   test('low keeps it off the cards, not off the page', () => {
     // A class-level sign-up the family said they care less about: still under
-    // "Godt at vide", never a card — so a verdict the model got wrong costs a
+    // the context tier, never a card — so a verdict the model got wrong costs a
     // fold, not the item.
     const items = [
       item({ key: 'post:40', title: 'Forældrenetværk', text: 'Tilmeld jer forældrenetværket senest mandag d. 17/8.', audience: 'class' }),
@@ -444,7 +444,7 @@ describe("the family's list, as the model read it", () => {
     }
   });
 
-  test('a hide source no signal covered is accounted for in the hidden tier, not under Godt at vide', () => {
+  test('a hide source no signal covered is accounted for in the hidden tier, not the context tier', () => {
     // Listed in the muted foot with the rest of what was hidden; surfacing it
     // as an "unused source" would be the opposite of what the family asked.
     const items = [item({ key: 'post:31', title: 'Nyt fra forvaltningen', text: 'Kære forældre.', audience: 'municipal' })];
@@ -489,7 +489,7 @@ describe("the family's list, as the model read it", () => {
     // Merging keeps the higher scorer and reduces the loser to a count, which
     // is right for two tellings of one story and wrong the moment the family
     // weighs them differently. The merged-away source is `covered` everywhere
-    // downstream, so it would land in no card, no "Godt at vide" and no muted
+    // downstream, so it would land in no card, no context tier and no muted
     // foot: the one way a source can leave the page without being counted.
     const sameOfferTwice = () => [
       item({

@@ -8,6 +8,7 @@
  */
 
 export { AulaLoginClient, AulaSilentSsoFailedError } from './aula-login-client.ts';
+export { DEFAULT_OAUTH_CONFIG, refreshAccessToken } from './aula-oauth.ts';
 export type { IdentityOption } from './aula-saml-flow.ts';
 export { AulaCookieJar } from './cookies.ts';
 export { AulaAuthFlowError } from './errors.ts';

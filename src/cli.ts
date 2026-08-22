@@ -125,8 +125,8 @@ type them:
   attachment <threadId> [n]    Download attachment n of a thread (default 0)
   commonfiles / commonfile <x> "Fælles Filer" — the shared shelf / download one
   widgets                      Which vendor widgets these schools expose
-  ugeplan / ugebrev            Weekly plan / weekly letter, whichever vendor
-  opgaver / lektier / huskelisten / homework
+  weekly-plan / weekly-letter  Weekly plan / weekly letter, whichever vendor
+  tasks / assignments / reminders / homework
                                Homework, per vendor and combined
   refresh-stepup               Restore step-up so sensitive threads read again
   doctor                       Call every endpoint and report status + timing
@@ -154,7 +154,7 @@ Examples:
   aula open --web
   aula digest --days 14 --text
   aula messages --limit 30 --full --since 30d
-  aula ugeplan --next --text
+  aula weekly-plan --next --text
 `.trim();
 
 // ---------------------------------------------------------------- entrypoint
@@ -492,11 +492,11 @@ async function main(): Promise<number> {
       );
     }
 
-    case 'ugeplan':
-    case 'ugebrev':
-    case 'opgaver':
-    case 'lektier':
-    case 'huskelisten': {
+    case 'weekly-plan':
+    case 'weekly-letter':
+    case 'tasks':
+    case 'assignments':
+    case 'reminders': {
       const family = await resolveFamily(client);
       const capability: Capability = command;
       const plans = await readPlans(client, family, {
@@ -512,7 +512,7 @@ async function main(): Promise<number> {
 
     case 'homework': {
       const family = await resolveFamily(client);
-      const plans = await readManyPlans(client, family, ['opgaver', 'lektier', 'huskelisten'], {
+      const plans = await readManyPlans(client, family, ['tasks', 'assignments', 'reminders'], {
         isoWeek: week,
         ...(values.child ? { child: values.child } : {}),
         ...(fromDate ? { fromDate } : {}),
@@ -1059,7 +1059,7 @@ function renderSchedule(schedule: ReturnType<typeof normaliseSchedule>): string 
   return schedule.days
     .map((d) => {
       const times = [d.entryTime, d.exitTime].filter(Boolean).join(' – ') || 'no times';
-      const extra = [d.henteform, d.exitWith && `with ${d.exitWith}`, d.comment]
+      const extra = [d.pickupType, d.exitWith && `with ${d.exitWith}`, d.comment]
         .filter(Boolean)
         .join(' · ');
       return `${d.date ?? 'unknown date'}  ${d.child ?? 'unknown child'}: ${times}${extra ? `  (${extra})` : ''}`;
@@ -1192,7 +1192,7 @@ function emit<T>(value: T, asText: boolean, render: (value: T) => string): numbe
 }
 
 /**
- * Fælles Filer filters on institution *codes*, not on any of the profile ids —
+ * Common files filter on institution *codes*, not on any of the profile ids —
  * a fourth addressing scheme on top of the three in API.md.
  */
 async function collectCommonFiles(

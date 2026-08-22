@@ -87,62 +87,62 @@ describe('parsePlan', () => {
     const { plan, problems } = parsePlan(
       {
         topline: '  Fotodag i morgen.  ',
-        handling: [{ signalId: MUST_SHOW.id, titel: '  Pak badeting  ' }],
-        kommende: [{ signalId: UPCOMING.id }],
+        act: [{ signalId: MUST_SHOW.id, title: '  Pak badeting  ' }],
+        week: [{ signalId: UPCOMING.id }],
       },
       BRIEF,
     );
     expect(problems).toEqual([]);
     expect(plan.topline).toBe('Fotodag i morgen.');
-    expect(plan.handling).toEqual([{ signalId: MUST_SHOW.id, titel: 'Pak badeting' }]);
-    expect(plan.kommende).toEqual([{ signalId: UPCOMING.id }]);
+    expect(plan.act).toEqual([{ signalId: MUST_SHOW.id, title: 'Pak badeting' }]);
+    expect(plan.week).toEqual([{ signalId: UPCOMING.id }]);
   });
 
   test('drops an invented signalId and reports it', () => {
-    const { plan, problems } = parsePlan({ handling: [{ signalId: 'digtet:op#0' }] }, BRIEF);
-    expect(plan.handling).toEqual([]);
+    const { plan, problems } = parsePlan({ act: [{ signalId: 'digtet:op#0' }] }, BRIEF);
+    expect(plan.act).toEqual([]);
     expect(problems.some((p) => p.includes('digtet:op#0'))).toBe(true);
   });
 
   test('refuses to let the plan reopen the noise gate', () => {
-    const { plan, problems } = parsePlan({ handling: [{ signalId: HIDDEN.id }] }, BRIEF);
-    expect(plan.handling).toEqual([]);
+    const { plan, problems } = parsePlan({ act: [{ signalId: HIDDEN.id }] }, BRIEF);
+    expect(plan.act).toEqual([]);
     expect(problems.some((p) => p.includes(HIDDEN.id))).toBe(true);
   });
 
   test('first placement wins when the model lists an id twice', () => {
     const { plan } = parsePlan(
-      { handling: [{ signalId: MUST_SHOW.id }], kommende: [{ signalId: MUST_SHOW.id }] },
+      { act: [{ signalId: MUST_SHOW.id }], week: [{ signalId: MUST_SHOW.id }] },
       BRIEF,
     );
-    expect(plan.handling).toHaveLength(1);
-    expect(plan.kommende).toHaveLength(0);
+    expect(plan.act).toHaveLength(1);
+    expect(plan.week).toHaveLength(0);
   });
 
   test('tolerates garbage without throwing', () => {
-    const { plan, problems } = parsePlan({ handling: 'alt muligt', kommende: [null, 42] }, BRIEF);
-    expect(plan.handling).toEqual([]);
-    expect(plan.kommende).toEqual([]);
+    const { plan, problems } = parsePlan({ act: 'alt muligt', week: [null, 42] }, BRIEF);
+    expect(plan.act).toEqual([]);
+    expect(plan.week).toEqual([]);
     expect(problems.length).toBeGreaterThan(0);
   });
 
   test('strips a rewording that asserts a date no source supports', () => {
     const { plan, problems } = parsePlan(
-      { handling: [{ signalId: MUST_SHOW.id, titel: 'Aflever sedlen inden søndag' }] },
+      { act: [{ signalId: MUST_SHOW.id, title: 'Aflever sedlen inden søndag' }] },
       BRIEF,
     );
-    expect(plan.handling).toEqual([{ signalId: MUST_SHOW.id }]); // rewording gone, card stays
+    expect(plan.act).toEqual([{ signalId: MUST_SHOW.id }]); // rewording gone, card stays
     expect(problems.some((p) => p.includes('dato uden kilde') && p.includes('søndag'))).toBe(true);
   });
 
   test('a rewording may echo the signal’s own date', () => {
     // MUST_SHOW.dueAt 2026-08-13 is a Thursday.
     const { plan, problems } = parsePlan(
-      { handling: [{ signalId: MUST_SHOW.id, titel: 'Badeting med torsdag' }] },
+      { act: [{ signalId: MUST_SHOW.id, title: 'Badeting med torsdag' }] },
       BRIEF,
     );
     expect(problems).toEqual([]);
-    expect(plan.handling[0]?.titel).toBe('Badeting med torsdag');
+    expect(plan.act[0]?.title).toBe('Badeting med torsdag');
   });
 
   test('drops a plan topline with an invented date, keeping the fallback', () => {
@@ -155,14 +155,14 @@ describe('parsePlan', () => {
 describe('renderPlan', () => {
   test('a planned page satisfies every invariant', () => {
     const { plan } = parsePlan(
-      { topline: 'Én ting i dag.', handling: [{ signalId: MUST_SHOW.id, hvorfor: 'Idræt i dag.' }] },
+      { topline: 'Én ting i dag.', act: [{ signalId: MUST_SHOW.id, why: 'Idræt i dag.' }] },
       BRIEF,
     );
     expect(validatePage(renderPlan(BRIEF, plan), BRIEF)).toEqual([]);
   });
 
   test('an omission in the plan deprioritises, never deletes', () => {
-    const { plan } = parsePlan({ handling: [], kommende: [] }, BRIEF);
+    const { plan } = parsePlan({ act: [], week: [] }, BRIEF);
     const html = renderPlan(BRIEF, plan);
     expect(html).toContain(`data-signal-id="${MUST_SHOW.id}"`);
     expect(html).toContain(`data-signal-id="${UPCOMING.id}"`);
@@ -177,7 +177,7 @@ describe('renderPlan', () => {
     };
     const brief: RankedBrief = { ...BRIEF, signals: [MUST_SHOW, second, UPCOMING, HIDDEN] };
     const { plan } = parsePlan(
-      { handling: [{ signalId: second.id }, { signalId: MUST_SHOW.id }] },
+      { act: [{ signalId: second.id }, { signalId: MUST_SHOW.id }] },
       brief,
     );
     const html = renderPlan(brief, plan);
@@ -188,7 +188,7 @@ describe('renderPlan', () => {
 
   test('rewording is escaped before it reaches the page', () => {
     const { plan } = parsePlan(
-      { handling: [{ signalId: MUST_SHOW.id, titel: '<script>alert(1)</script>' }] },
+      { act: [{ signalId: MUST_SHOW.id, title: '<script>alert(1)</script>' }] },
       BRIEF,
     );
     const html = renderPlan(BRIEF, plan);
@@ -197,11 +197,11 @@ describe('renderPlan', () => {
   });
 
   test('quotes come verbatim from the signal, whatever the plan says', () => {
-    const { plan } = parsePlan({ handling: [{ signalId: MUST_SHOW.id, titel: 'Kort' }] }, BRIEF);
+    const { plan } = parsePlan({ act: [{ signalId: MUST_SHOW.id, title: 'Kort' }] }, BRIEF);
     expect(renderPlan(BRIEF, plan)).toContain('«Husk skiftetøj og badeting til efter timen.»');
   });
 
-  test('a promoted context signal does not repeat under Godt at vide', () => {
+  test('a promoted context signal does not repeat in the context section', () => {
     const context: RankedSignal = {
       ...UPCOMING,
       id: 'post:8#0',
@@ -211,7 +211,7 @@ describe('renderPlan', () => {
       source: { ...SOURCE, key: 'post:8', title: 'Velkommen' },
     };
     const brief: RankedBrief = { ...BRIEF, signals: [MUST_SHOW, UPCOMING, context, HIDDEN] };
-    const { plan, problems } = parsePlan({ kommende: [{ signalId: context.id }] }, brief);
+    const { plan, problems } = parsePlan({ week: [{ signalId: context.id }] }, brief);
     expect(problems).toEqual([]);
     const html = renderPlan(brief, plan);
     expect(html).toContain(`data-signal-id="${context.id}"`);
@@ -219,7 +219,7 @@ describe('renderPlan', () => {
   });
 
   test('the new-chip comes from isNew, not from the model', () => {
-    const { plan } = parsePlan({ handling: [{ signalId: MUST_SHOW.id }] }, BRIEF);
+    const { plan } = parsePlan({ act: [{ signalId: MUST_SHOW.id }] }, BRIEF);
     const html = renderPlan(BRIEF, plan, { isNew: (key) => key === MUST_SHOW.sourceKey });
     expect(html).toContain('<span class="chip new">Ny</span>');
   });
@@ -227,7 +227,7 @@ describe('renderPlan', () => {
 
 // The reader's escape hatch: a card is a summary, and a summary is only worth
 // trusting if the thing it summarises is one tap away.
-describe('læs mere', () => {
+describe('more-block', () => {
   const conversation = (count: number, extra: Partial<{ total: number; truncated: boolean }> = {}) => ({
     messages: Array.from({ length: count }, (_, i) => ({
       from: i % 2 === 0 ? 'Yrsa Storm' : 'Søren',
@@ -341,7 +341,7 @@ describe('læs mere', () => {
     expect(validatePage(html, brief)).toEqual([]);
   });
 
-  test('Godt at vide carries it too — that is where the unexplained things live', () => {
+  test('the context section carries it too — that is where the unexplained things live', () => {
     const item = sourceItem({
       key: 'thread:12',
       kind: 'thread',
@@ -423,11 +423,11 @@ describe('data shapes', () => {
       const eager = parsePlan(
         {
           topline: 'Simuleret topline.',
-          tomHandling: 'Helt roligt i dag.',
-          handling: [...brief.signals.filter((s) => s.tier === 'act')]
+          emptyAct: 'Helt roligt i dag.',
+          act: [...brief.signals.filter((s) => s.tier === 'act')]
             .reverse()
-            .map((s) => ({ signalId: s.id, titel: `Omskrevet: ${s.title}`, hvorfor: 'Simuleret begrundelse.' })),
-          kommende: brief.signals.filter((s) => s.tier === 'week').map((s) => ({ signalId: s.id })),
+            .map((s) => ({ signalId: s.id, title: `Omskrevet: ${s.title}`, why: 'Simuleret begrundelse.' })),
+          week: brief.signals.filter((s) => s.tier === 'week').map((s) => ({ signalId: s.id })),
         },
         brief,
       ).plan;

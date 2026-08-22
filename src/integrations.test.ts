@@ -153,9 +153,9 @@ test('a missing MitID username is warned about rather than failing silently', as
       // 0142 is the one to guard: it shares a file with the flagged 0128 and
       // differs only in sending the guardian id as `x-login`, so it is what a
       // maintainer would wrongly flag while editing its sibling.
-      const lektier = await readWidget('0142', { ...CTX, sessionIdIsFallback: true }, tokens);
+      const assignments = await readWidget('0142', { ...CTX, sessionIdIsFallback: true }, tokens);
       assert.doesNotMatch(
-        lektier.warnings?.join('\n') ?? '',
+        assignments.warnings?.join('\n') ?? '',
         /MitID username/,
         'Lektier keys x-login on the guardian id, so it must not carry the warning',
       );
@@ -220,13 +220,13 @@ test('MinUddannelse takes numeric child ids and the Aula guardian id', async () 
           title: 'Aflever novelle',
           ugedag: 'Torsdag',
           opgaveType: 'aflevering',
-          hold: [{ name: '5A' }, { name: '5B' }],
+          hold: [{ navn: '5A' }, { navn: '5B' }],
           forloeb: { navn: 'Noveller' },
         },
       ],
     }),
     async (calls, tokens) => {
-      const plan = await minUddannelse.getOpgaver(CTX, tokens, '0030');
+      const plan = await minUddannelse.getTasks(CTX, tokens, '0030');
       const params = query(calls[0]?.url ?? '');
 
       assert.equal(params.get('childFilter'), '4242,4343', 'numeric ids, comma separated');
@@ -275,9 +275,9 @@ test('a null-valued optional field empties that field rather than the whole plan
 
 test('a null-valued optional field is tolerated by every vendor adapter', async () => {
   await withVendor(
-    () => ({ opgaver: [{ title: 'Læs side 12', ugedag: 'mandag', forloeb: null, hold: [{ name: null }] }] }),
+    () => ({ opgaver: [{ title: 'Læs side 12', ugedag: 'mandag', forloeb: null, hold: [{ navn: null }] }] }),
     async (_calls, tokens) => {
-      const plan = await minUddannelse.getOpgaver(CTX, tokens, '0030');
+      const plan = await minUddannelse.getTasks(CTX, tokens, '0030');
       assert.equal(plan.items.length, 1);
       assert.equal(plan.items[0]?.title, 'Læs side 12');
     },
@@ -319,7 +319,7 @@ test('a null body is an empty week, not a vendor failure', async () => {
   await withVendor(
     () => null,
     async (_calls, tokens) => {
-      assert.deepEqual((await minUddannelse.getOpgaver(CTX, tokens, '0030')).items, []);
+      assert.deepEqual((await minUddannelse.getTasks(CTX, tokens, '0030')).items, []);
     },
   );
 });
@@ -329,7 +329,7 @@ test('a null body is an empty week, not a vendor failure', async () => {
  * to a child anyway, and taking the whole response down with it would cost the
  * siblings their homework too.
  */
-test('an unusable roster row costs only that child their lektier', async () => {
+test('an unusable roster row costs only that child their assignments', async () => {
   await withVendor(
     (url) => {
       if (url.includes('/Aula/GetChildren')) {
@@ -339,7 +339,7 @@ test('an unusable roster row costs only that child their lektier', async () => {
       return [{ StartTimeISO: '2026-08-24T08:00:00', ChapterTitle: 'Matematik', Description: null }];
     },
     async (_calls, tokens) => {
-      const plan = await skoleportal.getLektier(CTX, tokens, '0142');
+      const plan = await skoleportal.getAssignments(CTX, tokens, '0142');
       assert.equal(plan.items.length, 1, 'the child with a usable row still gets their homework');
       assert.match(plan.warnings?.join('\n') ?? '', /Viggo.*not listed by SkolePortal/);
     },
@@ -356,7 +356,7 @@ test('a malformed roster row is reported without taking down valid siblings', as
       return [{ StartTimeISO: '2026-08-24T08:00:00', ChapterTitle: 'Matematik' }];
     },
     async (_calls, tokens) => {
-      const plan = await skoleportal.getLektier(CTX, tokens, '0142');
+      const plan = await skoleportal.getAssignments(CTX, tokens, '0142');
       assert.equal(plan.items.length, 1);
       assert.match(plan.warnings?.join('\n') ?? '', /roster row 2 had an unexpected shape/);
       assert.match(plan.warnings?.join('\n') ?? '', /Viggo.*not listed by SkolePortal/);
@@ -369,7 +369,7 @@ test('a malformed vendor success response fails instead of looking like an empty
     () => ({ opgaver: [{ title: 42 }] }),
     async (_calls, tokens) => {
       await assert.rejects(
-        () => minUddannelse.getOpgaver(CTX, tokens, '0030'),
+        () => minUddannelse.getTasks(CTX, tokens, '0030'),
         (error: unknown) => {
           assert.ok(error instanceof WidgetError);
           assert.match(error.message, /unexpected JSON shape/i);
@@ -393,8 +393,8 @@ test('a MinUddannelse ugebrev is flattened from HTML to text', async () => {
       ],
     }),
     async (_calls, tokens) => {
-      const plan = await minUddannelse.getUgebrev(CTX, tokens, '0029');
-      assert.equal(plan.capability, 'ugebrev');
+      const plan = await minUddannelse.getWeeklyLetter(CTX, tokens, '0029');
+      assert.equal(plan.capability, 'weekly-letter');
       assert.equal(plan.items[0]?.content, 'Kære forældre\n\nHusk gummistøvler.');
       assert.equal(plan.items[0]?.childName, 'Viggo Eksempelsen');
     },
@@ -495,12 +495,12 @@ test('Lektier enumerates children and maps them by UniLogin', async () => {
       return [{ StartTimeISO: '2026-08-12T00:00:00', ChapterTitle: 'Matematik', Description: 'Side 4' }];
     },
     async (calls, tokens) => {
-      const plan = await skoleportal.getLektier(CTX, tokens, '0142');
+      const plan = await skoleportal.getAssignments(CTX, tokens, '0142');
 
       const auth = calls.find((c) => c.url.includes('AuthenticateAulaUser'));
       assert.match(String(auth?.headers.referer), /LektierWidget$/);
       assert.equal(auth?.headers['x-requested-with'], 'Fetch');
-      // Lektier signs in with the Aula guardian id, unlike the ugeplan widget.
+      // Lektier signs in with the Aula guardian id, unlike the Ugeplan widget.
       assert.equal(auth?.headers['x-login'], '99887');
       assert.equal(auth?.headers['x-childfilter'], 'alma1234,vigg5678');
 
@@ -508,7 +508,7 @@ test('Lektier enumerates children and maps them by UniLogin', async () => {
       assert.equal(query(events?.url ?? '').get('loginId'), '11');
 
       assert.equal(plan.items.length, 1);
-      assert.equal(plan.items[0]?.kind, 'lektier');
+      assert.equal(plan.items[0]?.kind, 'assignments');
       assert.match(plan.warnings?.join('\n') ?? '', /Viggo.*GetChildren/s);
     },
   );
@@ -564,7 +564,7 @@ const MEEBOOK_WIDGET: DetectedWidget = {
   widgetId: '0004',
   name: 'Meebook',
   provider: 'meebook',
-  capability: 'ugeplan',
+  capability: 'weekly-plan',
 };
 
 test('a capability with no widget names the widgets that would have served it', async () => {
@@ -572,7 +572,7 @@ test('a capability with no widget names the widgets that would have served it', 
     () => [],
     async (_calls, tokens) => {
       await assert.rejects(
-        () => readCapability('huskelisten', [MEEBOOK_WIDGET], CTX, tokens),
+        () => readCapability('reminders', [MEEBOOK_WIDGET], CTX, tokens),
         (err: unknown) => {
           assert.ok(err instanceof NoProviderError);
           assert.match(err.message, /0062/);
@@ -584,15 +584,15 @@ test('a capability with no widget names the widgets that would have served it', 
   );
 });
 
-test('two schools on two ugeplan providers are both read', async () => {
+test('two schools on two weekly-plan providers are both read', async () => {
   await withVendor(
     (url) => (url.includes('meebook') ? [] : { Events: [] }),
     async (_calls, tokens) => {
       const plans = await readCapability(
-        'ugeplan',
+        'weekly-plan',
         [
           MEEBOOK_WIDGET,
-          { widgetId: '0001', name: 'EasyIQ', provider: 'easyiq', capability: 'ugeplan' },
+          { widgetId: '0001', name: 'EasyIQ', provider: 'easyiq', capability: 'weekly-plan' },
         ],
         CTX,
         tokens,
@@ -610,10 +610,10 @@ test("MinUddannelse's two opgave widget ids are not read twice", async () => {
     () => ({ opgaver: [] }),
     async (calls, tokens) => {
       const plans = await readCapability(
-        'opgaver',
+        'tasks',
         [
-          { widgetId: '0030', name: 'MU', provider: 'minuddannelse', capability: 'opgaver' },
-          { widgetId: '0023', name: 'MU (old)', provider: 'minuddannelse', capability: 'opgaver' },
+          { widgetId: '0030', name: 'MU', provider: 'minuddannelse', capability: 'tasks' },
+          { widgetId: '0023', name: 'MU (old)', provider: 'minuddannelse', capability: 'tasks' },
         ],
         CTX,
         tokens,
@@ -636,8 +636,8 @@ test('readCapability keeps daycare children away from the vendors', async () => 
         ],
       };
       const plans = await readCapability(
-        'ugeplan',
-        [{ widgetId: '0004', name: 'Meebook', provider: 'meebook', capability: 'ugeplan' }],
+        'weekly-plan',
+        [{ widgetId: '0004', name: 'Meebook', provider: 'meebook', capability: 'weekly-plan' }],
         ctx,
         tokens,
       );

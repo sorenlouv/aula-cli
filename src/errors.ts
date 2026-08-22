@@ -38,9 +38,11 @@ export type Remedy = {
   /** Why it happened — only when knowing why changes what to do next. */
   detail?: string;
   /**
-   * The line introducing {@link commands}, ending in a colon. Sits directly on
-   * top of them with no blank line between, because "Log in again:" and the
-   * command are one thought and reading them as two costs the reader a beat.
+   * What to do next. Usually the line introducing {@link commands}, ending in a
+   * colon, and then it sits directly on top of them with no blank line between,
+   * because "Log in again:" and the command are one thought and reading them as
+   * two costs the reader a beat. It stands alone when the fix is not a command
+   * to run — "try again", "approve the prompt on your phone".
    */
   action?: string;
   /** Shell commands to try, in order. */
@@ -60,6 +62,12 @@ export function formatRemedy(remedy: Remedy): string {
   if (remedy.commands?.length) {
     const lines = remedy.commands.map((c) => `  ${c}`);
     blocks.push((remedy.action ? [remedy.action, ...lines] : lines).join('\n'));
+  } else if (remedy.action) {
+    // An action with nothing to run is still the thing the reader came for.
+    // Dropping it silently — which this did until a code-20 remedy hit it —
+    // leaves a failure whose whole point was "just try again" saying only that
+    // something went wrong.
+    blocks.push(wrap(remedy.action));
   }
   if (remedy.fallback) blocks.push(wrap(remedy.fallback));
   return blocks.join('\n\n');

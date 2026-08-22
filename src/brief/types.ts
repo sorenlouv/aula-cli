@@ -76,7 +76,7 @@ export type SourceItem = {
   /** Aula's own `isImportant`. Almost always false, but load-bearing when set. */
   important: boolean;
   url: string | null;
-  /** Threads only. What "læs hele samtalen" opens. */
+  /** Threads only. What the more-block expands to on a thread. */
   conversation?: Conversation;
 };
 
@@ -152,14 +152,14 @@ export type BriefInput = {
  * - `hide` — the list says this kind of thing is never wanted. Off the page,
  *   listed only in the muted foot — unless something worth extracting was found
  *   in it *and* that asks us for something about our own child, in which case
- *   it is demoted to "Godt at vide" instead. A wish to be spared municipal
+ *   it is demoted to the `context` tier instead. A wish to be spared municipal
  *   broadcasts is fair; applying it to "alle skoler er lukket på mandag" is
  *   not, and one verdict is one model's reading on one morning.
- * - `low` — the list says it matters less. At most "Godt at vide", never a
- *   card.
+ * - `low` — the list says it matters less. At most the `context` tier, never
+ *   a card.
  * - `normal` — the list is silent; content and breadth decide.
  * - `high` — the list says this matters to them (a named sender, a topic they
- *   asked for). Never below "Kommende", and on the page even when nothing
+ *   asked for). Never below the `week` tier, and on the page even when nothing
  *   concrete could be extracted from it.
  *
  * Aula's own `important` flag beats `hide` and `low`: the school shouting is

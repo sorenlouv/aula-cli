@@ -32,23 +32,23 @@ type Fetcher = (
 const FETCHERS: Readonly<Record<string, Fetcher>> = Object.freeze({
   '0001': easyiq.getWeekPlan,
   '0004': meebook.getWeekPlan,
-  '0023': minUddannelse.getOpgaver,
-  '0029': minUddannelse.getUgebrev,
-  '0030': minUddannelse.getOpgaver,
+  '0023': minUddannelse.getTasks,
+  '0029': minUddannelse.getWeeklyLetter,
+  '0030': minUddannelse.getTasks,
   '0062': systematic.getReminders,
   '0128': skoleportal.getWeekPlan,
-  '0142': skoleportal.getLektier,
+  '0142': skoleportal.getAssignments,
 });
 
 export const SUPPORTED_WIDGET_IDS = Object.keys(FETCHERS);
 
 /** Every capability this project can serve, in the order `homework` reads them. */
 export const CAPABILITIES: readonly Capability[] = [
-  'ugeplan',
-  'ugebrev',
-  'opgaver',
-  'lektier',
-  'huskelisten',
+  'weekly-plan',
+  'weekly-letter',
+  'tasks',
+  'assignments',
+  'reminders',
 ];
 
 export class NoProviderError extends Error {
@@ -88,7 +88,7 @@ function schoolChildren(ctx: IntegrationContext): IntegrationContext['children']
  * Read one capability from every detected widget that serves it.
  *
  * Plural because it genuinely can be: a family with a child at a Meebook
- * school and a child at an EasyIQ school has two ugeplan providers, and
+ * school and a child at an EasyIQ school has two weekly-plan providers, and
  * picking one would silently drop a child.
  */
 export async function readCapability(
@@ -145,7 +145,7 @@ export async function readWidget(
     const info = WIDGETS[widgetId];
     return {
       provider: info?.provider ?? 'unavailable',
-      capability: info?.capability ?? 'ugeplan',
+      capability: info?.capability ?? 'weekly-plan',
       widgetId,
       isoWeek: ctx.isoWeek,
       items: [],
@@ -195,7 +195,7 @@ async function cached(
   // week — and cache.ts's rule is that nothing which failed gets pinned for the
   // TTL. Storing it would throw away the retry that leaving widget tokens
   // uncached exists to buy: the vendor recovers seconds later and every digest,
-  // ugeplan and brief for the next ten minutes still answers "nothing
+  // weekly-plan and brief for the next ten minutes still answers "nothing
   // published" without contacting it. A partial read is kept, because the
   // warnings there are usually structural (a child whose institution has no
   // such widget at all) and the items are real.
@@ -207,7 +207,7 @@ async function cached(
 }
 
 /**
- * Meebook, Systematic and SkolePortal's ugeplan key their session on the MitID
+ * Meebook, Systematic and SkolePortal's Ugeplan widget key their session on the MitID
  * username, and a login stored without one falls back to the guardian id those
  * vendors may reject. The warning is appended here — on the dispatcher, keyed
  * off the registry's `needsMitidUsername` — so no adapter can quietly skip it:
