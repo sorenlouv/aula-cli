@@ -12,6 +12,3 @@ your agent; the agent runs it. See [GOALS.md](GOALS.md).
 You need the MitID app on your phone and about ten minutes. Ask your agent:
 
 > Clone https://github.com/sorenlouv/aula-cli to ~/aula-cli and follow its SETUP.md.
-
-Everything it stores stays on your machine unless you turn on the hosted copy
-yourself.

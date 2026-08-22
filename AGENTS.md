@@ -16,8 +16,9 @@ install runbook.
 - **Never perform a MitID approval.** That is the user's phone and identity.
 - **Real family data never enters tracked files.** Fixtures and docs use the
   fictional Eksempelsen family; anything real goes in the gitignored `data/`.
-- **Prose is the model's to read.** No regex or keyword heuristics over text a
-  parent or teacher wrote; the model returns a typed verdict and code acts on it.
+- **Preferences are the model's to read.** The model interprets the prose in
+  `preferences.md` and returns a typed relevance verdict; ranking code acts on
+  that verdict. Do not parse preference wording in code.
 - **Tests never touch `~/.aula`.** `bun test src/` stays credential-free: this
   repo is public, and a test that refreshed a stranger's token would also break
   any `aula` run beside it. `src/testing/seed-tokens.ts` refuses to run without
@@ -34,9 +35,8 @@ sentinel values, comments and test names are English.
   boundary; `min-uddannelse.ts` is the pattern. MinUddannelse really does send
   `kuvertnavn`, `ugebreve` and `hold: [{ navn }]`, and its schema is public at
   `https://api.minuddannelse.net/csv/metadata?op=OpgavelisteRequest` (no token;
-  some other `op=` values 403). Check it before typing a payload — `hold` typed
-  as `{ name }` once emptied every subject in silence, and the test passed
-  because the fixture had been written to match our code rather than the wire.
+  some other `op=` values 403). Check it before typing a payload; a fixture
+  written from our own type can make a wrong field name look correct.
 - **Aula's API is English even though its UI is Danish.** The wire says
   `activityType`, `commonFiles`, `institutionProfileId` where the screen says
   "Henteform", "Fælles Filer". Name code after the wire; mention the Danish
@@ -84,10 +84,7 @@ fallback sources.
 ## Verifying
 
 `bun test src/` stubs `fetch`; `cli.test.ts` and `auth.test.ts` run the CLI as a
-process against a stubbed Aula. No stub can tell you the live API still behaves,
-because its failures look like success — `bun src/cli.ts doctor --text` is that
-check: every endpoint, uncached, with `WARN` for a call that succeeded while
-returning a known symptom.
+process against a stubbed Aula.
 
 The login page can only really be judged by whether a phone reads it. Drive it
 by hand rather than holding a live MitID session open; it builds its payloads

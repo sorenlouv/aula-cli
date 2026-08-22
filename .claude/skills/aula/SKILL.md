@@ -226,8 +226,8 @@ page in `~/.aula/brief/` — and opens it (`--no-open` to skip). It calls
 `claude` itself for extraction and layout; `--no-llm` produces a rules-only
 page. `bun src/cli.ts open` shows the newest page without regenerating, and
 `open --web` opens the hosted copy where one is configured — `bun src/cli.ts
-publish` sets that up (it publishes the newest page as a private artifact and
-saves the URL in `~/.aula/config.json`; `publish --off` stops it). A
+publish` sets that up (it publishes the newest page and saves the URL in
+`~/.aula/config.json`; `publish --off` stops it). A
 weekday-morning schedule is installed with `bun src/cli.ts schedule` (06:30 by
 default, `--at HH:MM` to change, `--remove` to stop; launchd on macOS, Task
 Scheduler on Windows; it retries through the morning if the Mac was asleep).
@@ -248,12 +248,10 @@ Other exit codes: `3` = API error (the message says what went wrong), `1` = bug.
 
 ## Notes and limits
 
-- **Sensitive threads** (`sensitive: true`) are readable only while the session
-  is stepped up, and Aula drops step-up long before the login expires. `whoami`
-  reports `isSteppedUp`. These are typically the most important threads —
-  meetings about one specific child — and they read as *empty* rather than
-  erroring, so a non-stepped-up session quietly under-reports. If it is
-  `false`, say so and suggest `bun src/cli.ts refresh-stepup`.
+- **Sensitive threads** (`sensitive: true`) require a stepped-up session, which
+  may expire before the login does. `whoami` reports `isSteppedUp`. When it is
+  `false`, threads may be masked or missing; say so and suggest
+  `bun src/cli.ts refresh-stepup` before treating a quiet result as complete.
 - Message bodies in `messages` (without `--full`) are truncated by Aula itself.
   Use `--full` or `thread <id>` before quoting or summarising in detail.
 - The data is personal and about children — keep it in the conversation. Never

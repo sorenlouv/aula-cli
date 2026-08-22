@@ -1,8 +1,7 @@
 # The Aula API
 
 Reverse-engineered; observed behaviour, not contract. Re-checked against the
-live API on 2026-08-22 — `doctor` is how to re-check. Project rules are in
-[AGENTS.md](AGENTS.md).
+live API on 2026-08-22. Project rules are in [AGENTS.md](AGENTS.md).
 
 Base URL `https://www.aula.dk/api/v{N}/`, currently **v24**. Every response is
 wrapped `{ "status": { "code", "message", "subCode", "errorInformation" },

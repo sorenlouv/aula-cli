@@ -8,17 +8,15 @@ produces HTML only. The hosted copy is off unless `aula publish` configures it.
 The goal is not "Aula, but nicer" — it is that not opening Aula stops costing
 anything. See [GOALS.md](GOALS.md).
 
-**Every obligation in a real week lives in free-text Danish**, not in a
-structured field: a meeting in a message subject, gear for Thursday inside a
-weekly-plan item, a new recurring commitment announced once in prose. Aula's own
-`important` / `unread` / `responseRequired` flags are routinely all empty on a
-day with four real obligations. That single fact is why a model is load-bearing
-rather than decorative.
+Many obligations live only in free-text Danish: a meeting in a message subject,
+gear for Thursday inside a weekly-plan item, or a recurring commitment announced
+in prose. Aula's `important`, `unread` and `responseRequired` flags are useful
+inputs but not a sufficient ranking. The model is therefore load-bearing.
 
 ## The seam: two model calls, and only the first sees source data
 
-The model plans the page; a local renderer builds it. Having the model emit
-~27 KB of HTML was half the runtime and bought no judgment.
+The model plans the page; a local renderer builds it. The model decides priority
+and wording while the renderer owns markup and invariants.
 
 1. **Extract** reads the Aula payload and returns validated `Signal[]` — facts,
    with every quote checked as a literal substring of its source and every date
@@ -286,11 +284,9 @@ model day and a bad one produce structurally different briefs:
   nothing concrete, so *"sig altid til når John skriver"* survives the day the
   model skims his message.
 
-No verdict means `normal`, so a rules-only brief hides nothing. An earlier
-version had `rank.ts` regex the prose itself and it got the canonical case
-backwards — a wish about *John (Hjaltes far)* floored every message from a
-teacher called Hjalte. Prose is the model's to read; a rule compares the verdict
-to structured fields and nothing else.
+No verdict means `normal`, so a rules-only brief hides nothing. `rank.ts`
+consumes the model's typed verdict and structured fields; it does not interpret
+the wording in `preferences.md`.
 
 ## Delivery
 
@@ -298,13 +294,10 @@ Written to `~/.aula/brief/`, dated, plus `latest.html` so a missed day is
 recoverable. An interactive `aula new` opens the page; `aula open` shows the
 newest without regenerating.
 
-`--pdf` renders via headless Chrome (already installed, so no new dependency)
-and is the format to use if forwarding ever becomes a requirement — **do not
-send the HTML as an email body**, since Gmail and Outlook mangle CSS grid,
-custom properties and `<details>`, and a collapsed section in an email client is
-a section that silently disappears. That is why the invariants force `<details>`
-open in print. Sending stays manual: the run produces files and never
-transmits anything on its own.
+`--pdf` renders via headless Chrome and is the format to use for forwarding.
+Do not use the HTML as an email body: Gmail and Outlook mangle CSS grid, custom
+properties and `<details>`. The print stylesheet opens brief content so it
+cannot disappear in the PDF.
 
 ### The hosted copy
 
@@ -312,13 +305,10 @@ Local files do not answer "what do I need to know" on a phone, and a `file://`
 link cannot be sent. Where a URL is configured the run also redeploys
 `artifact.html` to it, so the shared link always shows today's brief.
 
-**Off unless asked for.** Nothing leaves the machine until `aula publish` writes
-a URL to `~/.aula/config.json` — per installation and outside the repository, so
-a clone inherits no URL and nobody else can redeploy someone's artifact. The
-page can carry health information about a child, which is why this is a
-deliberate act of configuration.
+`aula publish` writes the target URL to `~/.aula/config.json`; `publish --off`
+removes it. Later brief runs redeploy to the configured URL.
 
-Four things about this leg are not obvious:
+Three things about this leg are not obvious:
 
 - **It has to go through `claude -p`.** The Artifact publisher is a Claude tool,
   not an HTTP endpoint; a launchd job can only spawn `claude` and let it call.
@@ -326,17 +316,9 @@ Four things about this leg are not obvious:
   always works, this needs network, a model and claude.ai credentials, and must
   degrade to a note rather than fail the run.
 - **The tool is offered only to a session announcing
-  `CLAUDE_CODE_ENTRYPOINT=claude-desktop`.** Measured, not assumed. It cost a
-  full scheduled run to find, because the interactive test that "verified" the
-  approach was a child of a desktop session and had inherited the marker.
-  `deploy.ts` sets it on that one subprocess. This is an undocumented lever and
-  may stop working on any `claude` update; the failure is loud and harmless.
-- **No Aula text reaches that subprocess, and it may read one file.** If any of
-  the page's text were interpolated into the prompt, a sentence in a school post
-  could steer what gets published. The prompt carries only a path and a URL this
-  project produced, and a test asserts it contains no Danish outside the
-  interpolated values. The agent gets `Read` for exactly the artifact path,
-  because the Artifact tool refuses to publish a file the model has not read.
+  `CLAUDE_CODE_ENTRYPOINT=claude-desktop`.** `deploy.ts` sets it on that
+  subprocess. This is undocumented and may stop working after a `claude`
+  update; failure leaves the local brief intact and adds a note to the run.
 - **It publishes with `force`.** Every run is a fresh session that has by
   definition never seen the version it replaces, so without `force` the deploy
   would fail every day rather than occasionally. The brief is generated whole
@@ -347,15 +329,12 @@ only if the target URL comes back with no error beside it. The exit code gets no
 veto, because `claude` runs plugin hooks after the turn and a hook that cannot
 start kills the process long after the publish landed.
 
-### The Mac is asleep at 06:30
+### Sleeping Macs
 
-Two mornings of `claude -p exited 143` had nothing to do with `claude`: the
-laptop was in Deep Idle, waking for 180-second Power Nap windows, with launchd
-starting the job inside one. The Aula reads finished; the model request did not,
-and the Mac slept on it. `schedule.ts` answers with `caffeinate -i -s` and a
-retry every `RETRY_EVERY_MINUTES` (15) for `RETRY_FOR_MINUTES` (180), every
-trigger passing `--catch-up`; `state.json`'s `lastRun.complete` is what lets a
-retry know whether anything is left to do.
+`schedule.ts` uses `caffeinate -i -s` and retries every
+`RETRY_EVERY_MINUTES` (15) for `RETRY_FOR_MINUTES` (180). Every trigger passes
+`--catch-up`; `state.json`'s `lastRun.complete` stops retries after a complete
+run.
 
 ## Risks
 

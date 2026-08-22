@@ -41,10 +41,9 @@ fails saying so. Instead:
 4. Watch for `Login successful`, or a failure with its reason.
 
 `--no-browser` keeps it in the terminal for a machine with no desktop;
-`--method CODE_TOKEN` for a kodeviser; `--debug` writes a sanitised wire
-transcript to `~/.aula/login-trace.jsonl`. Never ask for or type their MitID
-password; the default method has none. Tokens are encrypted in
-`~/.aula/tokens.json` and refresh themselves.
+`--method CODE_TOKEN` for a kodeviser; `--debug` writes a diagnostic trace to
+`~/.aula/login-trace.jsonl`. Never ask for or type their MitID
+password; the default method has none. The login refreshes automatically.
 
 A *parallel session* error (CAP008) means an earlier attempt is still live on
 MitID's side: reject any pending approval in the app, close aula.dk tabs, wait a
@@ -58,38 +57,27 @@ Verify: `bun src/cli.ts status --text`.
 bun src/cli.ts doctor --text
 ```
 
-`WARN` is a call that succeeded but returned a known symptom. Act on two:
-`not stepped up` (sensitive threads read as empty — `bun src/cli.ts
-refresh-stepup`), and a Meebook warning asking to open the widget in aula.dk
-once, which the user does in a browser.
+Read every `WARN` or `FAIL` line. Fix it when the output gives a command;
+otherwise report it before continuing.
 
 ## 4. Install the skill
 
-`.claude/skills/aula/SKILL.md` already works when Claude is opened in this
-folder. For every Claude session, install it at user level with the path filled
-in (re-running overwrites; new sessions pick it up, the current one does not):
+Install the skill for the agent the parent uses. Re-running overwrites it; open
+a new session afterwards.
+
+Claude:
 
 ```bash
 mkdir -p ~/.claude/skills/aula
 sed "s|{{AULA_CLI_DIR}}|$(pwd)|" .claude/skills/aula/SKILL.md > ~/.claude/skills/aula/SKILL.md
 ```
 
-Codex has no skills; put this in `~/.codex/AGENTS.md` instead:
+Codex:
 
-```markdown
-## Aula (school and daycare)
-
-For anything about the user's children at school or daycare — messages, posts,
-weekly plans, calendar, photos, check-in/check-out — use the read-only CLI:
-
-    cd ~/aula-cli && bun src/cli.ts digest --days 14
-
-Read ~/aula-cli/.claude/skills/aula/SKILL.md first: it lists every command and
-how to read what comes back. The tool cannot write to Aula, by design.
+```bash
+mkdir -p ~/.agents/skills/aula
+sed "s|{{AULA_CLI_DIR}}|$(pwd)|" .claude/skills/aula/SKILL.md > ~/.agents/skills/aula/SKILL.md
 ```
-
-(This repository's own `AGENTS.md` is notes for working *on* the CLI, not a
-usage guide.)
 
 ## Offer these three
 
@@ -123,14 +111,10 @@ shows the newest overview.
 **C. A hosted copy, readable on a phone.**
 
 ```bash
-bun src/cli.ts publish      # private artifact on the user's claude.ai account; URL kept in ~/.aula/config.json; --off to stop
+bun src/cli.ts publish      # URL kept in ~/.aula/config.json; --off to stop
 ```
 
-Every later run redeploys to the same URL; `open --web` opens it. **This is the
-only part of the tool that sends anything off the machine, and the page is
-whatever the school wrote about their children — for some families that
-includes health information.** Quote that to the user and get an explicit yes
-first. It stays private to their claude.ai account until they share the link.
+Every later run redeploys to the same URL; `open --web` opens it.
 
 ## 5. Hand over
 
@@ -145,7 +129,7 @@ highlight are recorded with `aula remember`; the skill covers when and how.
   prompt. Pass `--username` (step 2).
 - **Sensitive threads missing** — `bun src/cli.ts refresh-stepup`.
 - **A weekly plan says COULD NOT BE READ** — the school's vendor failed; not an
-  empty week. `doctor --text` names the vendor.
+  empty week. The warning names the vendor.
 - **Scheduled brief misbehaves** — read `~/.aula/brief/launchd.log`. `timed
   out`: the Mac slept mid-run; the retries redo the morning. `Not logged in`:
   `claude` has no credentials outside a terminal — run `claude` once and log in.
@@ -156,8 +140,7 @@ highlight are recorded with `aula remember`; the skill covers when and how.
 ## Uninstall
 
 ```bash
-bun src/cli.ts schedule --remove && rm -rf ~/.claude/skills/aula ~/.local/bin/aula ~/.aula
+bun src/cli.ts schedule --remove && rm -rf ~/.claude/skills/aula ~/.agents/skills/aula ~/.local/bin/aula ~/.aula
 ```
 
-Then delete the folder, and the Aula block from `~/.codex/AGENTS.md` if added.
-`~/.aula` holds everything the tool ever stored.
+Then delete the folder. `~/.aula` holds everything the tool ever stored.
