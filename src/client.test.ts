@@ -51,6 +51,8 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 const OK_PROFILES = { status: { code: 0 }, data: { profiles: [] } };
+/** Distinguishable from OK_PROFILES, so a replayed request proves it carried data. */
+const ONE_PROFILE = { status: { code: 0 }, data: { profiles: [{ profileId: 1, institutionProfiles: [] }] } };
 
 test('API versions must be finite integers in the supported range', () => {
   assert.throws(() => new AulaClient({ cookie: COOKIE, apiVersion: 0 }), /integer from 1 to 99/);
@@ -384,7 +386,7 @@ test('status 448 is reported as expired credentials, not a permission problem', 
   );
 });
 
-test('status 403 is reported as an id-set problem, and does not claim the session expired', async () => {
+test('status 403 is reported as a refusal, and does not claim the session expired', async () => {
   let call = 0;
   await withFetch(
     async () => {
@@ -399,10 +401,221 @@ test('status 403 is reported as an id-set problem, and does not claim the sessio
         (err: unknown) => {
           assert.ok(err instanceof AulaApiError, 'should be an API error, not an auth error');
           assert.ok(!(err instanceof AulaAuthError));
-          assert.match(err.message, /institution-profile id set/i);
+          assert.match(err.message, /institution code|calendar window/i);
+          // Measured against the live API: a foreign institution-profile id comes
+          // back as code 10, not code 403, so this message must not send the
+          // reader off checking profile ids as if that were the cause.
+          assert.match(err.message, /code 10/);
           return true;
         },
       );
+    },
+  );
+});
+
+// Aula reuses HTTP 403 for four unrelated failures and status code 10 for three,
+// so these four cases are the ones that used to collapse into one unhelpful
+// "run doctor" message. Each pairing below was reproduced against the live API.
+test('status 10 is split by HTTP status rather than collapsed', async () => {
+  const cases: Array<{ http: number; expect: RegExp; not?: RegExp }> = [
+    // A mistyped or guessed method name — the `raw` escape hatch's usual failure.
+    { http: 404, expect: /has no method called/i, not: /doctor/ },
+    // An unactivated session, or an id this login cannot reach.
+    { http: 403, expect: /would not let this session read/i },
+    // Every method answers this once a version retires.
+    { http: 410, expect: /retired/i },
+  ];
+  for (const { http, expect, not } of cases) {
+    let call = 0;
+    await withFetch(
+      async () => {
+        call++;
+        return call === 1 ? jsonResponse(OK_PROFILES) : jsonResponse({ status: { code: 10 }, data: null }, http);
+      },
+      async () => {
+        const client = new AulaClient({ cookie: COOKIE });
+        await assert.rejects(() => client.getThreads(), (err: unknown) => {
+          assert.ok(err instanceof AulaApiError, `HTTP ${http} should be an API error`);
+          assert.equal(err.code, 10);
+          assert.match(err.message, expect);
+          if (not) assert.doesNotMatch(err.message, not);
+          return true;
+        });
+      },
+    );
+  }
+});
+
+test('status 20 says the token was superseded, not that the login died', async () => {
+  let call = 0;
+  await withFetch(
+    async () => {
+      call++;
+      return call === 1
+        ? jsonResponse(OK_PROFILES)
+        : jsonResponse({ status: { code: 20, subCode: 9 }, data: null }, 403);
+    },
+    async () => {
+      const client = new AulaClient({ cookie: COOKIE });
+      await assert.rejects(() => client.getThreads(), (err: unknown) => {
+        // An OAuth refresh retires the previous access token immediately, so this
+        // resolves itself on the next run. Reporting it as an auth error would
+        // send the user to MitID for something a retry fixes.
+        assert.ok(err instanceof AulaApiError, 'should not be an auth error');
+        assert.ok(!(err instanceof AulaAuthError));
+        assert.match(err.message, /replaced by a newer one/i);
+        assert.match(err.message, /again/i);
+        return true;
+      });
+    },
+  );
+});
+
+// Overlapping runs are routine here — the scheduled brief retries all morning,
+// and a manual command lands in the middle of that window. Each of these is a
+// step the recovery has to get right for that to stay invisible.
+test('a superseded token is swapped out and the request replayed', async () => {
+  const sent: Array<string | null> = [];
+  let call = 0;
+  await withFetch(
+    async (input: string | Request | URL) => {
+      call++;
+      sent.push(new URL(String(input)).searchParams.get('access_token'));
+      if (call === 1) return jsonResponse(OK_PROFILES); // version probe
+      if (call === 2) return jsonResponse({ status: { code: 20, subCode: 9 }, data: null }, 403);
+      return jsonResponse(ONE_PROFILE);
+    },
+    async () => {
+      const client = new AulaClient({
+        auth: { kind: 'token', accessToken: 'stale', username: 'u' },
+        renewToken: async () => 'fresh',
+      });
+      const profiles = await client.getProfiles();
+      assert.equal(profiles.length, 1, 'the replay should return the real payload');
+      assert.deepEqual(sent.slice(1), ['stale', 'fresh'], 'the replay must carry the new token');
+    },
+  );
+});
+
+test('a superseded token is not retried forever', async () => {
+  let call = 0;
+  let renewals = 0;
+  await withFetch(
+    async () => {
+      call++;
+      return call === 1
+        ? jsonResponse(OK_PROFILES)
+        : jsonResponse({ status: { code: 20 }, data: null }, 403);
+    },
+    async () => {
+      const client = new AulaClient({
+        auth: { kind: 'token', accessToken: 'stale', username: 'u' },
+        renewToken: async () => {
+          renewals++;
+          return 'fresh';
+        },
+      });
+      // Aula rejects the replacement too, so the failure has to surface rather
+      // than the client renewing its way around in circles.
+      await assert.rejects(() => client.getProfiles(), (err: unknown) => {
+        assert.match((err as Error).message, /replaced by a newer one/i);
+        return true;
+      });
+      assert.equal(renewals, 1, 'exactly one recovery attempt per request');
+    },
+  );
+});
+
+test('a token that cannot be renewed surfaces the failure instead of replaying', async () => {
+  let call = 0;
+  await withFetch(
+    async () => {
+      call++;
+      return call === 1
+        ? jsonResponse(OK_PROFILES)
+        : jsonResponse({ status: { code: 20 }, data: null }, 403);
+    },
+    async () => {
+      const client = new AulaClient({
+        auth: { kind: 'token', accessToken: 'stale', username: 'u' },
+        // No login on disk, or the store still holds the dead token.
+        renewToken: async () => undefined,
+      });
+      await assert.rejects(() => client.getProfiles(), (err: unknown) => {
+        assert.match((err as Error).message, /replaced by a newer one/i);
+        return true;
+      });
+      assert.equal(call, 2, 'no replay when there is no better token to replay with');
+    },
+  );
+});
+
+test('concurrent requests share one token recovery', async () => {
+  // The whole point of memoising it: three requests failing together must not
+  // buy three tokens, because each grant would invalidate the one before it.
+  let renewals = 0;
+  let call = 0;
+  await withFetch(
+    async (input: string | Request | URL) => {
+      call++;
+      if (call === 1) return jsonResponse(OK_PROFILES); // version probe
+      const token = new URL(String(input)).searchParams.get('access_token');
+      return token === 'stale'
+        ? jsonResponse({ status: { code: 20 }, data: null }, 403)
+        : jsonResponse(ONE_PROFILE);
+    },
+    async () => {
+      const client = new AulaClient({
+        auth: { kind: 'token', accessToken: 'stale', username: 'u' },
+        renewToken: async () => {
+          renewals++;
+          await new Promise((r) => setTimeout(r, 5));
+          return 'fresh';
+        },
+      });
+      const all = await Promise.all([client.getProfiles(), client.getProfiles(), client.getProfiles()]);
+      assert.equal(all.length, 3);
+      for (const profiles of all) assert.equal(profiles.length, 1, 'every caller gets the replayed payload');
+      assert.equal(renewals, 1, 'one renewal shared by all three');
+    },
+  );
+});
+
+test('cookie auth has no token to recover, so code 20 surfaces immediately', async () => {
+  let call = 0;
+  await withFetch(
+    async () => {
+      call++;
+      return call === 1
+        ? jsonResponse(OK_PROFILES)
+        : jsonResponse({ status: { code: 20 }, data: null }, 403);
+    },
+    async () => {
+      const client = new AulaClient({ cookie: COOKIE });
+      await assert.rejects(() => client.getProfiles(), (err: unknown) => {
+        assert.match((err as Error).message, /replaced by a newer one/i);
+        return true;
+      });
+      assert.equal(call, 2, 'nothing to renew, so nothing replayed');
+    },
+  );
+});
+
+test('an unknown status code reports the HTTP status it arrived with', async () => {
+  let call = 0;
+  await withFetch(
+    async () => {
+      call++;
+      // Aula leaves `message` empty far more often than not, so when a code this
+      // client has never seen turns up, the HTTP status is the only clue there is.
+      return call === 1 ? jsonResponse(OK_PROFILES) : jsonResponse({ status: { code: 77, message: '' } }, 418);
+    },
+    async () => {
+      const client = new AulaClient({ cookie: COOKIE });
+      await assert.rejects(() => client.getThreads(), (err: unknown) => {
+        assert.match((err as Error).message, /status code 77 \(HTTP 418\)/);
+        return true;
+      });
     },
   );
 });
@@ -901,7 +1114,7 @@ test('attachment filenames cannot escape the download directory', () => {
  * A request arriving without `PHPSESSID` gets a fresh PHP session. That session
  * can read the two profile endpoints and nothing else: every module endpoint
  * answers HTTP 403 + status code 10 until `getProfileContext` has run *inside
- * that same session* and activated a profile. See AGENTS.md.
+ * that same session* and activated a profile. See API.md.
  */
 function sessionEnforcingAula(): { handler: FetchStub; sessions: number } & { sent: string[] } {
   const activated = new Set<string>();

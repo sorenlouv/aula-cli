@@ -15,7 +15,12 @@ import { dirname, join } from 'node:path';
 import { AulaSessionError } from './errors.ts';
 import { AulaCookieJar, AulaHttpClient, EncryptedFileTokenStore } from './vendor/aula-auth/index.ts';
 import type { StoredTokenRecord } from './vendor/aula-auth/index.ts';
-import { TokenStoreError, withFreshTokens } from './vendor/aula-auth/index.ts';
+import {
+  DEFAULT_OAUTH_CONFIG,
+  TokenStoreError,
+  refreshAccessToken,
+  withFreshTokens,
+} from './vendor/aula-auth/index.ts';
 
 export const AULA_DIR = process.env.AULA_DIR ?? join(homedir(), '.aula');
 export const COOKIE_JAR_PATH = join(AULA_DIR, 'cookies.json');
@@ -121,6 +126,49 @@ export async function loadFreshTokens(): Promise<StoredTokenRecord | undefined> 
   }
   if (!existing) return undefined;
   return withFreshTokens({ store, http: new AulaHttpClient() });
+}
+
+/**
+ * Finds a usable access token after Aula has reported the current one
+ * superseded (status code 20).
+ *
+ * Aula retires an access token the instant a refresh grant issues a newer one,
+ * however far off its `exp` is. So two `aula` runs that overlap — a manual
+ * command during the scheduled brief's retry window, say — will kill each
+ * other's token: both start from the same stored pair, whichever refreshes
+ * first wins, and the other's next request fails.
+ *
+ * `withFreshTokens` is no help, because it refreshes on *clock* expiry and a
+ * superseded token still looks perfectly fresh.
+ *
+ * The order below is the whole point. Re-reading the store first means the run
+ * that lost the race simply adopts the winner's token and the two converge. If
+ * both forced a refresh instead they would rotate each other's tokens
+ * indefinitely, each one's grant invalidating the token the other had just
+ * fetched — the failure this is supposed to end, in a faster loop. Only when
+ * the store still holds the dead token has nobody else refreshed, and buying a
+ * new one is then both safe and the only option.
+ *
+ * @param spent the access token that came back as superseded
+ * @returns a different, usable access token, or undefined if there is no login
+ *   on disk. Throws {@link OAuthError} when the refresh token itself is dead,
+ *   because that genuinely does need MitID again.
+ */
+export async function refreshSupersededToken(spent: string): Promise<string | undefined> {
+  const store = tokenStore();
+  const record = await store.load();
+  if (!record) return undefined;
+  if (record.tokens.access_token !== spent) return record.tokens.access_token;
+
+  const refreshed = await refreshAccessToken(
+    new AulaHttpClient(),
+    DEFAULT_OAUTH_CONFIG,
+    record.tokens.refresh_token,
+  );
+  // Published to the store as well as returned, so the *next* run starts from
+  // the live token rather than repeating this recovery.
+  await store.save({ ...record, tokens: refreshed, saved_at: Math.floor(Date.now() / 1000) });
+  return refreshed.access_token;
 }
 
 // ------------------------------------------------------------------- cookies
