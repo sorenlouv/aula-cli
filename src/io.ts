@@ -11,6 +11,7 @@
 
 import { createInterface } from 'node:readline/promises';
 import { stdin, stderr } from 'node:process';
+import { UsageError } from './errors.ts';
 
 const useColour = stderr.isTTY && !process.env.NO_COLOR;
 const paint = (code: string, s: string) => (useColour ? `\x1b[${code}m${s}\x1b[0m` : s);
@@ -36,10 +37,53 @@ export function fail(message: string): void {
   stderr.write(`${fmt.red('✗')} ${message}\n`);
 }
 
-export async function prompt(question: string): Promise<string> {
+/** The per-platform "open this the way the user would" command. */
+export function openCommand(target: string): string[] {
+  if (process.platform === 'darwin') return ['open', target];
+  // `start` is a cmd builtin, not a program, and its first quoted argument is
+  // the window title — omitting the empty one makes it swallow the URL.
+  if (process.platform === 'win32') return ['cmd', '/c', 'start', '', target];
+  return ['xdg-open', target];
+}
+
+/**
+ * Hands a path or URL to the desktop's default handler.
+ *
+ * Fire-and-forget on purpose: whether a browser actually came up is not
+ * something this process can find out, and every caller has already printed
+ * the target so a headless machine still has somewhere to go.
+ */
+export function openInBrowser(target: string): void {
+  Bun.spawn(openCommand(target));
+}
+
+/**
+ * Asks, and gives up rather than waiting forever for an answer that cannot come.
+ *
+ * `rl.question()` on a stdin that is already at EOF never settles — it does not
+ * throw, it does not return empty, it simply waits. That is how an agent
+ * running `login` in a captured shell gets a two-minute silence and a killed
+ * process instead of an error. Piped input is still perfectly good input, so
+ * this cannot key off `isTTY`; it keys off the stream ending, which is the
+ * actual difference between "nobody is there" and "the answer arrived early".
+ *
+ * `hint` is what the caller would have to be told to get past this without a
+ * terminal — it is the whole value of failing here rather than hanging.
+ */
+export async function prompt(question: string, hint?: string): Promise<string> {
   const rl = createInterface({ input: stdin, output: stderr });
+  const noInput = new AbortController();
+  rl.once('close', () => noInput.abort());
   try {
-    return (await rl.question(`${question} `)).trim();
+    return (await rl.question(`${question} `, { signal: noInput.signal })).trim();
+  } catch (err) {
+    if (!noInput.signal.aborted) throw err;
+    throw new UsageError(
+      [
+        `Needed an answer to "${question}" and stdin is empty.`,
+        hint ?? 'Run this in a terminal, or pipe the answer in.',
+      ].join(' '),
+    );
   } finally {
     rl.close();
   }
@@ -54,8 +98,8 @@ export async function prompt(question: string): Promise<string> {
  * cooked mode matters: bailing out mid-prompt otherwise leaves the user's shell
  * with echo disabled.
  */
-export async function promptSecret(question: string): Promise<string> {
-  if (!stdin.isTTY) return prompt(question);
+export async function promptSecret(question: string, hint?: string): Promise<string> {
+  if (!stdin.isTTY) return prompt(question, hint);
 
   stderr.write(`${question} `);
   stdin.setRawMode(true);
@@ -100,7 +144,10 @@ export async function selectFromList(question: string, options: string[]): Promi
   options.forEach((label, i) => info(`  ${fmt.bold(String(i + 1))}) ${label}`));
 
   for (;;) {
-    const answer = await prompt(`Choose 1-${options.length}:`);
+    const answer = await prompt(
+      `Choose 1-${options.length}:`,
+      'This MitID user has more than one identity, and picking one needs a terminal.',
+    );
     const choice = Number(answer);
     if (Number.isInteger(choice) && choice >= 1 && choice <= options.length) return choice;
     warn(`Enter a number between 1 and ${options.length}.`);

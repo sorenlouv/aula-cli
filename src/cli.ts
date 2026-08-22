@@ -51,7 +51,7 @@ import { explain } from './brief/rank.ts';
 import { BRIEF_DIR, loadState, recordDeploy, saveState, todayIsComplete } from './brief/state.ts';
 import { runDoctor } from './doctor.ts';
 import { AulaSessionError, UsageError } from './errors.ts';
-import { fmt } from './io.ts';
+import { fmt, openInBrowser } from './io.ts';
 import { AulaAuthFlowError } from './vendor/aula-auth/index.ts';
 import { resolveFamily, selectChildren, type Family } from './family.ts';
 import { runLogin, runLogout, runRefreshStepUp, runStatus } from './login.ts';
@@ -146,6 +146,7 @@ Login options:
   --username <name>            MitID username
   --method <APP|CODE_TOKEN>    App approval (default) or kodeviser
   --debug                      Write a sanitised wire transcript during login
+  --no-browser                 Never open the approval page; stay in this terminal
 
 Examples:
   aula new
@@ -236,6 +237,7 @@ async function main(): Promise<number> {
       ...(values.username ? { username: values.username } : {}),
       method: parseAuthMethod(values.method),
       debug: values.debug === true,
+      noBrowser: values['no-browser'] === true,
     });
   }
   if (command === 'logout') return runLogout();
@@ -779,10 +781,6 @@ function runForget(raw: string | undefined): number {
   const { removed, preferences } = removePreference(index);
   console.log(`Forgotten: "${removed}"\n${preferences.length} preference(s) left.`);
   return 0;
-}
-
-function openInBrowser(target: string): void {
-  Bun.spawn([process.platform === 'darwin' ? 'open' : 'xdg-open', target]);
 }
 
 function renderCacheStats(stats: CacheStats): string {

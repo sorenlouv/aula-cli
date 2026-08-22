@@ -35,6 +35,7 @@ const OPTION_DEFINITIONS = {
   username: { type: 'string' },
   method: { type: 'string' },
   debug: { type: 'boolean' },
+  'no-browser': { type: 'boolean' },
 } as const;
 
 type OptionName = keyof typeof OPTION_DEFINITIONS;
@@ -49,7 +50,7 @@ const COMMAND_OPTIONS = {
   preferences: [],
   forget: [],
   schedule: ['remove', 'at'],
-  login: ['username', 'method', 'debug'],
+  login: ['username', 'method', 'debug', 'no-browser'],
   logout: [],
   status: [...TEXT],
   'refresh-stepup': [],

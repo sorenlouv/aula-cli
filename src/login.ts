@@ -20,7 +20,18 @@ import {
 } from './auth.ts';
 import { clearCache } from './cache.ts';
 import { UsageError } from './errors.ts';
-import { fail, fmt, info, ok, prompt, promptSecret, selectFromList, warn } from './io.ts';
+import {
+  fail,
+  fmt,
+  info,
+  ok,
+  openInBrowser,
+  prompt,
+  promptSecret,
+  selectFromList,
+  warn,
+} from './io.ts';
+import type { LoginPage } from './login-page.ts';
 import { createQrRenderer } from './qr.ts';
 import { errorMessage } from './validation.ts';
 import {
@@ -38,10 +49,14 @@ export type LoginArgs = {
   username?: string;
   method: 'APP' | 'CODE_TOKEN';
   debug?: boolean;
+  /** Stay in the terminal: no local page, no browser. */
+  noBrowser?: boolean;
 };
 
 export async function runLogin(args: LoginArgs): Promise<number> {
-  const username = args.username ?? (await prompt('MitID username:'));
+  const username =
+    args.username ??
+    (await prompt('MitID username:', 'Pass it as --username <your MitID username> instead.'));
   if (!username) throw new UsageError('A MitID username is required.');
 
   // stderr, never console.*: the CLI's stdout is a data channel (see io.ts),
@@ -58,7 +73,22 @@ export async function runLogin(args: LoginArgs): Promise<number> {
   info(`Starting MitID login for ${fmt.bold(username)} (${args.method})`);
 
   let password: string | undefined;
-  if (args.method === 'CODE_TOKEN') password = await promptSecret('MitID password:');
+  if (args.method === 'CODE_TOKEN') {
+    password = await promptSecret(
+      'MitID password:',
+      'A kodeviser login has to be typed; the default app method does not.',
+    );
+  }
+
+  /**
+   * When stderr is not a terminal, an agent is driving and nobody is looking at
+   * this output. The OTP mode survives that — the agent can repeat six digits
+   * into the chat — but the QR mode cannot: it is two pictures that rotate
+   * every few seconds. So the approval moves to a page the user opens, and the
+   * terminal rendering below is left alone for the case where a human is
+   * actually sitting here. See login-page.ts.
+   */
+  const page = stderr.isTTY || args.noBrowser === true ? undefined : await openLoginPage();
 
   let identityIndex: number | undefined;
   let identityName: string | undefined;
@@ -72,7 +102,10 @@ export async function runLogin(args: LoginArgs): Promise<number> {
       method: args.method,
       ...(password ? { password } : {}),
       ...(args.method === 'CODE_TOKEN'
-        ? { promptForCodeToken: () => prompt('6 digits from your kodeviser:') }
+        ? {
+            promptForCodeToken: () =>
+              prompt('6 digits from your kodeviser:', 'A kodeviser login has to be typed.'),
+          }
         : {}),
       selectIdentity: async (options: IdentityOption[]) => {
         const choice = await selectFromList(
@@ -89,6 +122,7 @@ export async function runLogin(args: LoginArgs): Promise<number> {
         // leaves the other mode sitting silently in the poll loop, looking
         // exactly like a hang.
         onOtp(otp) {
+          page?.update({ kind: 'otp', otp });
           // The same OTP repeats on every poll; printing once keeps the number
           // the user is comparing against stable on screen.
           if (otpShown) return;
@@ -100,9 +134,19 @@ export async function runLogin(args: LoginArgs): Promise<number> {
         onQr(qr) {
           if (qr.updateCount === lastQrUpdate) return;
           lastQrUpdate = qr.updateCount;
+          if (page) {
+            // One or the other, never both. The terminal renderer redraws in
+            // place on a TTY and *appends* everywhere else, so leaving it on
+            // would push a fresh 35-line block of QR into the output on every
+            // rotation — straight into the context of the agent this page
+            // exists to spare.
+            page.update({ kind: 'qr', qr1: qr.qr1Json, qr2: qr.qr2Json, updateCount: qr.updateCount });
+            return;
+          }
           renderQr(qr.qr1Json, qr.qr2Json, qr.updateCount);
         },
         onVerified() {
+          page?.update({ kind: 'verified' });
           info(`${fmt.green('Channel verified')} — now approve the login in your MitID app.`);
         },
         onPoll(result) {
@@ -144,10 +188,12 @@ export async function runLogin(args: LoginArgs): Promise<number> {
 
     const secondsLeft = Math.max(0, tokens.expires_at - Math.floor(Date.now() / 1000));
     info(`Access token valid for ${Math.round(secondsLeft / 60)} min; it refreshes itself after that.`);
+    await page?.finish({ ok: true, message: 'Tokens saved. Aula is ready to read.' });
     return 0;
   } catch (err) {
     const message = errorMessage(err);
     fail(`Login failed: ${message}`);
+    await page?.finish({ ok: false, message });
 
     // By far the most common failure, and the least self-explanatory. MitID
     // exposes no way to tear a session down, so this can only be waited out —
@@ -168,6 +214,32 @@ export async function runLogin(args: LoginArgs): Promise<number> {
       info(`Re-run with ${fmt.dim('--debug')} to capture a sanitised wire transcript.`);
     }
     return 2;
+  }
+}
+
+/**
+ * Starts the page and says where it is, or explains why there is not one.
+ *
+ * The page is a convenience, not the login: a port that cannot be bound is a
+ * reason to fall back to the terminal rendering, not a reason to refuse to log
+ * in. The import is dynamic for the same reason — the QR renderer reaches into
+ * a dependency's internals (see qr-svg.ts), and nothing about that should be
+ * able to keep `login` from running, let alone the rest of the CLI.
+ */
+async function openLoginPage(): Promise<LoginPage | undefined> {
+  try {
+    const { startLoginPage } = await import('./login-page.ts');
+    const page = startLoginPage();
+    info('');
+    info('  Nothing is attached to this terminal, so the MitID approval is on a page:');
+    info(`  ${fmt.bold(page.url)}`);
+    info('');
+    openInBrowser(page.url);
+    return page;
+  } catch (err) {
+    warn(`Could not open the login page: ${errorMessage(err)}`);
+    warn('Any approval code will only be readable in this output.');
+    return undefined;
   }
 }
 
