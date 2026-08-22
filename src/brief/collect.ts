@@ -5,14 +5,8 @@
  */
 
 import type { AulaClient } from './../client.ts';
-import {
-  CalendarNotConnectedError,
-  loadPersonalEvents,
-  type PersonalEvent,
-  resolveCalendars,
-} from '../calendar/index.ts';
+import { loadPersonalEvents, type PersonalEvent } from '../calendar/index.ts';
 import { readConfig } from '../config.ts';
-import { errorMessage } from '../validation.ts';
 import { localIsoDate } from '../integrations/types.ts';
 import {
   buildDigest,
@@ -360,18 +354,7 @@ function summariseWarning(warning: string): string {
 async function collectPersonal(
   ctx: { days: number; now: Date },
 ): Promise<{ items: SourceItem[]; health: HealthNote[] }> {
-  let calendars;
-  try {
-    calendars = await resolveCalendars(readConfig().calendars ?? []);
-  } catch (err) {
-    // No connector is the ordinary state for most installations, and the brief
-    // has nothing to tell them about it. Anything else is worth a line.
-    if (err instanceof CalendarNotConnectedError) return { items: [], health: [] };
-    return {
-      items: [],
-      health: [{ level: 'warn', message: `Egen kalender kunne ikke slås op: ${errorMessage(err)}` }],
-    };
-  }
+  const calendars = readConfig().calendars ?? [];
   if (calendars.length === 0) return { items: [], health: [] };
 
   const from = new Date(ctx.now.getFullYear(), ctx.now.getMonth(), ctx.now.getDate());

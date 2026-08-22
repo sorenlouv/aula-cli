@@ -13,50 +13,12 @@
 
 import { errorMessage } from '../validation.ts';
 import { localIsoDate } from '../integrations/types.ts';
-import { CalendarNotConnectedError, listCalendars, listEvents } from './connector.ts';
+import { CalendarNotConnectedError, listEvents } from './connector.ts';
 import type { CalendarRef, PersonalEvent } from './types.ts';
 
 export { CalendarNotConnectedError, listCalendars } from './connector.ts';
 export type { ConnectorCalendar } from './connector.ts';
 export type { CalendarRef, PersonalEvent } from './types.ts';
-
-/**
- * Feeds that are nobody's diary.
- *
- * Google's generated calendars — public holidays, birthdays pulled from
- * contacts — all live under `v.calendar.google.com`. They are not appointments
- * the family made, and a fortnight of them would be pure padding. Everything
- * else the account can see is somebody's actual calendar and is read.
- */
-const GENERATED_FEED = /@group\.v\.calendar\.google\.com$/i;
-
-/**
- * Which calendars to read: the family's choice if they made one, otherwise all
- * of them.
- *
- * Defaulting to *all* is the point. Asking a parent to pick from a list before
- * the feature does anything is a setup step, and the whole argument for reading
- * the calendar through Claude was that there is no setup step. Where the
- * connector is there, the appointments are there. `aula calendars` stays as the
- * way to narrow it when the default is wrong for somebody — an override, not a
- * prerequisite.
- *
- * Taste is not this function's job either. A family who does not want to see
- * the bin collection says so in their own words, and `preferences.md` carries
- * that into the ranking like every other wish — the mechanism that already
- * exists for exactly this, and a better one than a hardcoded opinion about
- * which of somebody's calendars matter.
- */
-export async function resolveCalendars(
-  configured: CalendarRef[],
-  opts: { timeoutMs?: number } = {},
-): Promise<CalendarRef[]> {
-  if (configured.length > 0) return configured;
-  const available = await listCalendars(opts);
-  return available
-    .filter((calendar) => !GENERATED_FEED.test(calendar.id))
-    .map((calendar) => ({ id: calendar.id, name: calendar.summary }));
-}
 
 export type CalendarLoad = {
   events: PersonalEvent[];
