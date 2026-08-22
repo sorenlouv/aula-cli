@@ -1,30 +1,35 @@
 # Goals
 
-Who the Aula CLI is for and what it is trying to be and accomplish. When considering a trade-off, this is what decides it.
+Who the Aula CLI is for and what it is trying to accomplish. When a trade-off is
+open, this decides it.
 
 ## The user
 
-A parent of children in day care or primary school. The user is not highly technical, never uses the terminal, but has installed an agent harness.
-They reach this tool through an agent harness they already have open — Claude
-Code Desktop, ChatGPT desktop — and ask in Danish or English. The agent runs
-the CLI. Only advanced users (like the author of the tool) runs the CLI directly.
+A parent of children in day care or primary school. Not highly technical, never
+in a terminal, but has an agent harness open — Claude Code Desktop, ChatGPT
+desktop — and asks it in Danish or English. The agent translates the request
+into a CLI command; only advanced users (the author, say) run the CLI directly.
 
-The agent translate the user's request into a cli command, in order to query the Aula API.
-Responses from the agent to the user may not include technical jargon. If something breaks the response should say what
-broke and what the user should do next. Nothing may require editing a file by hand.
+What reaches the parent may not contain technical jargon. If something breaks,
+say what broke and what they should do next. Nothing may require editing a file
+by hand.
 
 ## Primary purpose: a daily brief good enough to skip Aula
 
-Aula buries the things a parent must act on in a confusing interface, where the information the user cares about is difficult to find.
-The information includes message threads between teachers and parents, weekly plans and important actions that parents must take.
-`aula new` generates a single overview a parent reads instead of opening Aula. The brief is the product; everything else supports it.
+Aula buries what a parent must act on — message threads with teachers, weekly
+plans, actions parents must take — in an interface where it is hard to find.
+`aula new` generates one overview a parent reads instead of opening Aula. The
+brief is the product; everything else supports it.
 
 Ranking is the hard part, not fetching. Aula's own `important` and `unread`
-flags are not reliable signals, so a model reads each post and ranks its relevance.
-Important signals are:
+flags are not reliable, so a model reads each item and ranks its relevance on
+two signals:
 
-- audience: information aimed at everyone is often noise; addressed to one class, one child or one parent carries higher signal.
-- subject: while information to everyone is often less relevant to the user, some messages with a broad audience are important to surface to the user. Example: sign-up and payment for yearly school photo. Missing this has consequences for the individual child.
+- **Audience.** Addressed to everyone is usually noise; addressed to one class,
+  one child or one parent is signal.
+- **Subject.** Some broad messages still matter to the individual child —
+  sign-up and payment for the yearly school photo, say. Missing one has
+  consequences for that child.
 
 **The failure that kills this is silent under-reporting.** A parent who trusts
 the brief and misses a deadline is worse off than one who never had it. A
@@ -33,9 +38,10 @@ be a permissions problem must look different from a quiet day.
 
 ## Secondary purpose: ask Aula anything
 
-Any question Aula's APIs can answer should be answerable in natural language. Aula's frontend calls some
-300 methods and this client wraps a dozen, so wrapping another read endpoint is
-on-mission by default; `raw` is the escape hatch until then.
+Any question Aula's APIs can answer should be answerable in natural language.
+Aula's frontend calls some 300 methods and this client wraps a dozen, so
+wrapping another read endpoint is on-mission by default; `raw` is the escape
+hatch until then.
 
 ## Not goals
 

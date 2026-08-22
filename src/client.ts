@@ -581,7 +581,7 @@ export class AulaClient {
             `access — one wrong id fails the whole call, it is not filtered out.`,
           action: 'Check which ids this login actually has:',
           commands: ['bun run aula whoami'],
-          fallback: 'API.md, "The three id spaces", explains which id belongs where.',
+          fallback: 'API.md, "Id spaces", explains which id belongs where.',
         });
       }
       // HTTP 410 — every method answers this once a version retires. The probe in
@@ -604,7 +604,7 @@ export class AulaClient {
           `${STATUS_VERSION_OR_ACCESS}.`,
         action: 'Check which ids and institutions this login actually has:',
         commands: ['bun run aula whoami'],
-        fallback: 'API.md, "The three id spaces", explains which id belongs where.',
+        fallback: 'API.md, "Id spaces", explains which id belongs where.',
       });
     }
     if (code === STATUS_BAD_PARAMETERS) {
