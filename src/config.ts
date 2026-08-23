@@ -3,7 +3,8 @@
  *
  * Everything else under `~/.aula` is state the tool produces — tokens, cache,
  * generated pages. This file is the one place for choices the *user* makes and
- * expects to stick, starting with the URL of the hosted copy of the brief.
+ * expects to stick: the URL of the hosted copy of the brief, and which of their
+ * own calendars the overview may read.
  *
  * It lives under `$AULA_DIR` like every other stored path, which is what keeps
  * it out of the repository: a clone of this project has no `~/.aula`, so it
@@ -11,6 +12,13 @@
  * Each installation configures its own. The file is written `0600` because
  * the URL of a private artifact is a secret in the practical sense: anyone who
  * has it can read the page once it has been shared.
+ *
+ * **Reads keep what they do not understand, and writes merge.** This file now
+ * holds two unrelated things written by two unrelated commands, and the earlier
+ * version rebuilt the whole object from the one field it knew about — so
+ * `aula publish` would have silently deleted the family's calendars, which is
+ * user data lost in a command that has nothing to do with calendars. Anything a
+ * future version adds is carried through untouched for the same reason.
  */
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -20,22 +28,84 @@ import { isRecord } from './validation.ts';
 
 export const CONFIG_PATH = join(AULA_DIR, 'config.json');
 
+/** One calendar the overview may read. See `src/calendar/types.ts`. */
+export type ConfiguredCalendar = {
+  id: string;
+  name: string;
+};
+
 export type AulaConfig = {
   /** Where `aula new` redeploys the brief. Absent means: keep it local. */
   artifactUrl?: string;
+  /** The family's own calendars. Absent or empty means: read none. */
+  calendars?: ConfiguredCalendar[];
+  /** Anything a newer version wrote. Never inspected, never dropped. */
+  [key: string]: unknown;
 };
 
 /** Missing or unreadable both mean "nothing configured"; never an error. */
 export function readConfig(path = CONFIG_PATH): AulaConfig {
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
-    const url = isRecord(parsed) && typeof parsed.artifactUrl === 'string' ? parsed.artifactUrl.trim() : '';
-    return url ? { artifactUrl: url } : {};
+    parsed = JSON.parse(readFileSync(path, 'utf8'));
   } catch {
     return {};
   }
+  if (!isRecord(parsed)) return {};
+
+  // Unknown keys ride along untouched; the known ones are validated, because a
+  // hand-edited file is a supported way to configure this.
+  const config: AulaConfig = { ...parsed };
+
+  const url = typeof parsed.artifactUrl === 'string' ? parsed.artifactUrl.trim() : '';
+  if (url) config.artifactUrl = url;
+  else delete config.artifactUrl;
+
+  const calendars = readCalendars(parsed.calendars);
+  if (calendars.length > 0) config.calendars = calendars;
+  else delete config.calendars;
+
+  return config;
 }
 
+function readCalendars(value: unknown): ConfiguredCalendar[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const calendars: ConfiguredCalendar[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) continue;
+    const id = typeof entry.id === 'string' ? entry.id.trim() : '';
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : id;
+    calendars.push({ id, name });
+  }
+  return calendars;
+}
+
+/**
+ * Merge `changes` onto what is already on disk.
+ *
+ * A field set to `undefined` is removed; a field left out is kept. Two
+ * commands write this file and neither knows what the other stores, so
+ * whole-object writes are not offered at all.
+ *
+ * Typed as a loose record rather than a partial `AulaConfig` on purpose:
+ * `exactOptionalPropertyTypes` makes an optional field and an explicitly
+ * `undefined` one different types, and "set this to undefined to remove it" is
+ * exactly the second one.
+ */
+export function updateConfig(changes: Record<string, unknown>, path = CONFIG_PATH): AulaConfig {
+  const merged: AulaConfig = { ...readConfig(path) };
+  for (const [key, value] of Object.entries(changes)) {
+    if (value === undefined) delete merged[key];
+    else merged[key] = value;
+  }
+  writeConfig(merged, path);
+  return merged;
+}
+
+/** Replaces the file. Prefer {@link updateConfig} unless you mean to drop keys. */
 export function writeConfig(config: AulaConfig, path = CONFIG_PATH): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });

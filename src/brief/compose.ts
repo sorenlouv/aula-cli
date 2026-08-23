@@ -16,7 +16,7 @@ import { isRecord } from '../validation.ts';
 import { buildDateSupport, DA_MONTHS, DA_WEEKDAYS, unsupportedDateClaims } from './dates.ts';
 import { doneKeys } from './done.ts';
 import { parseJsonLoosely, runClaude, withPreferences } from './llm.ts';
-import type { ConversationMessage, RankedBrief, RankedSignal, SourceItem } from './types.ts';
+import type { ConversationMessage, RankedBrief, RankedSignal, SourceItem, SourceKind } from './types.ts';
 
 function danishDate(isoDay: string): string {
   const date = new Date(`${isoDay}T00:00:00`);
@@ -107,6 +107,23 @@ function moreBlock(source: SourceItem, shown: string): string {
   return `<details class="more"><summary>Læs mere</summary><div class="body">${paragraphs(source.text)}</div></details>`;
 }
 
+/**
+ * What each kind of source is called on the page.
+ *
+ * `Egen kalender` earns its own label rather than falling in with `Kalender`:
+ * the reader has to be able to tell "the school put this in Aula" from "we put
+ * this in our own calendar" at a glance, and a private appointment mislabelled
+ * as a school event is a small lie the rest of the page would then inherit.
+ */
+const SOURCE_LABEL: Record<SourceKind, string> = {
+  post: 'Opslag',
+  thread: 'Besked',
+  plan: 'Ugeplan',
+  event: 'Kalender',
+  album: 'Album',
+  personal: 'Egen kalender',
+};
+
 /** What the composer is allowed to know: facts, already checked. */
 function composePayload(brief: RankedBrief, topline: string | null, summaries: Record<string, string>, isNew: (key: string) => boolean) {
   const signal = (s: RankedSignal) => ({
@@ -123,7 +140,7 @@ function composePayload(brief: RankedBrief, topline: string | null, summaries: R
     urgency: s.urgency,
     quote: s.quote,
     why: s.why,
-    source: `${s.source.kind === 'post' ? 'Opslag' : s.source.kind === 'thread' ? 'Besked' : s.source.kind === 'plan' ? 'Ugeplan' : 'Kalender'} «${s.source.title}»`,
+    source: `${SOURCE_LABEL[s.source.kind]} «${s.source.title}»`,
     author: s.source.author,
     link: s.source.url,
     isNew: isNew(s.sourceKey),
@@ -191,7 +208,8 @@ Regler:
 1. "act" og "week" er signalId'er fra inputtets "act" og "week" — vigtigst først; din rækkefølge ER prioriteringen. "relevance" er familiens egen vægtning af kilden ("high" før "normal" før "low"), og den vejer tungere end din. Alt du udelader, vises alligevel nederst i sin sektion, så udeladelse er nedprioritering, aldrig sletning. Et punkt fra "context" må promoveres, hvis det reelt beder om noget.
 2. "topline": behold eller skærp den givne topline. Konklusionen først, detaljen bagefter.
 3. "title"/"why" udelades hvor inputtets formulering allerede er god; omskriv kun for at gøre det kortere, mere konkret eller imperativt.
-4. Skriv alt på dansk. Hold det skimbart på 20 sekunder.`;
+4. En kilde mærket "Egen kalender" er kun en aftale, der skal vises ved siden af skolens egne ting. Sæt den aldrig i "act", og skriv ingen ny "title" eller "why" til den. Beregn ikke sammenstød mellem aftaler og skoledagen, og skriv aldrig, at der ikke er sammenstød.
+5. Skriv alt på dansk. Hold det skimbart på 20 sekunder.`;
 
 type ComposeResult = { html: string; problems: string[] };
 
@@ -250,10 +268,23 @@ export function parsePlan(raw: unknown, brief: RankedBrief): { plan: ComposePlan
         problems.push(`${field}: ${id} er skjult støj og blev ikke vist`);
         continue;
       }
+      if (field === 'act' && signal?.source.kind === 'personal') {
+        problems.push(`${field}: kalenderaftalen ${id} kan ikke blive til en handling`);
+        continue;
+      }
       if (placed.has(id)) continue;
       placed.add(id);
-      const title = grounded(text(row.title), `${field} (${id}) title`, signal);
-      const why = grounded(text(row.why), `${field} (${id}) why`, signal);
+      const proposedTitle = text(row.title);
+      const proposedWhy = text(row.why);
+      if (signal?.source.kind === 'personal' && (proposedTitle || proposedWhy)) {
+        problems.push(`${field}: kalenderaftalen ${id} vises ordret og blev ikke fortolket`);
+      }
+      const title = signal?.source.kind === 'personal'
+        ? undefined
+        : grounded(proposedTitle, `${field} (${id}) title`, signal);
+      const why = signal?.source.kind === 'personal'
+        ? undefined
+        : grounded(proposedWhy, `${field} (${id}) why`, signal);
       out.push({ signalId: id, ...(title ? { title } : {}), ...(why ? { why } : {}) });
     }
     return out;
@@ -410,7 +441,7 @@ function buildPage(brief: RankedBrief, act: CardSpec[], week: CardSpec[], opts: 
       ${s.quote ? `<blockquote>«${escapeHtml(s.quote)}»</blockquote>` : ''}
       ${gist ? `<p class="gist">${escapeHtml(gist)}</p>` : ''}
       ${moreBlock(s.source, [title ?? s.title, why, s.quote, gist].filter(Boolean).join(' '))}
-      <div class="src">${escapeHtml(s.source.title)}${s.source.author ? ` · ${escapeHtml(s.source.author)}` : ''}${s.source.url ? ` · <a href="${escapeHtml(s.source.url)}">åbn i Aula</a>` : ''}</div>
+      <div class="src">${escapeHtml(s.source.title)}${s.source.author ? ` · ${escapeHtml(s.source.author)}` : ''}${s.source.url ? ` · <a href="${escapeHtml(s.source.url)}">${s.source.kind === 'personal' ? 'åbn i kalender' : 'åbn i Aula'}</a>` : ''}</div>
       <button class="tick" type="button" aria-pressed="false" aria-label="Markér som klaret"></button>
     </div>`;
   };

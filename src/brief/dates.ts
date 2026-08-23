@@ -153,6 +153,11 @@ export function buildDateSupport(input: BriefInput): DateSupport {
       per.dates.add(key(at.month, at.day));
       support.weekdays.add(at.weekday);
     }
+    const endsAt = item.endsAt ? isoDate(item.endsAt) : null;
+    if (endsAt) {
+      per.dates.add(key(endsAt.month, endsAt.day));
+      support.weekdays.add(endsAt.weekday);
+    }
     support.perSource.set(item.key, per);
     for (const d of per.weekdays) support.weekdays.add(d);
     for (const d of per.dates) support.dates.add(d);

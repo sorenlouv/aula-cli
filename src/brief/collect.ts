@@ -5,6 +5,13 @@
  */
 
 import type { AulaClient } from './../client.ts';
+import {
+  calendarWindow,
+  loadPersonalEvents,
+  PERSONAL_CALENDAR_DAYS,
+  type PersonalEvent,
+} from '../calendar/index.ts';
+import { readConfig } from '../config.ts';
 import { localIsoDate } from '../integrations/types.ts';
 import {
   buildDigest,
@@ -198,6 +205,7 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
       title: event.title,
       text: [event.title, event.location, event.createdBy].filter(Boolean).join(' · '),
       at: event.start,
+      endsAt: event.end,
       author: event.createdBy,
       groups: [],
       childNames: event.children,
@@ -206,6 +214,11 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
       url: `${AULA_PORTAL}/kalender`,
     });
   }
+
+  // --------------------------------------------------- the family's own diary
+  const personal = await collectPersonal(now);
+  items.push(...personal.items);
+  health.push(...personal.health);
 
   // ------------------------------------------------------------ presence map
   const presenceByChild = new Map<string, PresenceRow>();
@@ -316,4 +329,119 @@ function summariseWarning(warning: string): string {
     return `Ugeplan for ${who} kunne ikke hentes — ${host} svarede HTTP ${status}.`;
   }
   return flattened.length > 160 ? `${flattened.slice(0, 159)}…` : flattened;
+}
+
+/**
+ * The family's own appointments, as sources.
+ *
+ * Opt-in only: a fresh installation has no configured calendars and reads no
+ * appointments. `aula calendars` lists names, and `calendars set` records the
+ * exact calendars the parent chose.
+ *
+ * **They are shown, not analysed.** An appointment becomes a dated item like
+ * any other, and lands among the week's other dated things on the same day as
+ * the school's own events. An earlier version computed clashes here — against
+ * each child's registered komme/gå hours and against Aula's calendar — and it
+ * was removed: this family has no registered hours at all (33 template rows,
+ * none with a date, one with a time) and Aula's own calendar was empty in 7 of
+ * 13 briefs, so it could not fire. It could only misfire, and a false clash
+ * promotes to `act`, where the cap of five would push a real school deadline
+ * off the page. A reader looking at Thursday's dentist beside Thursday's
+ * forældremøde draws the conclusion anyway, and knows things the arithmetic
+ * never could — how far the dentist is, and whether a grandparent can fetch.
+ *
+ * The page also never reports the *absence* of a clash. A reassurance is a
+ * claim, it would be made every quiet week, and it would train the reader to
+ * skim the section that matters on the week it is wrong.
+ *
+ * Everything here degrades. A calendar that cannot be read becomes a warning on
+ * the page, never an exception and never an empty fortnight — the same rule as
+ * a vendor's ugeplan answering 500, and for the same reason: a missing
+ * appointment that looks like a free afternoon is the worst thing this feature
+ * could do.
+ */
+async function collectPersonal(
+  now: Date,
+): Promise<{ items: SourceItem[]; health: HealthNote[] }> {
+  const calendars = readConfig().calendars ?? [];
+  if (calendars.length === 0) return { items: [], health: [] };
+
+  // Aula history may be widened with `new --days`; private calendar data may
+  // not. Every occurrence in this bounded window becomes one model-ranked
+  // source, keeping prompt size and connector pagination predictable.
+  const { from, to } = calendarWindow(now, PERSONAL_CALENDAR_DAYS);
+  const loaded = await loadPersonalEvents(calendars, { from, to });
+
+  const health: HealthNote[] = loaded.warnings.map((message) => ({ level: 'warn', message }));
+  if (loaded.notConnected) {
+    const warning = health[0];
+    if (warning) warning.message += ' Kør `aula calendars` for at komme videre.';
+  } else if (loaded.warnings.length === 0) {
+    // What was read, in the footer that already says what was fetched — about
+    // the fetch, like every other line there, and never about the week.
+    const names = calendars.map((c) => `«${c.name}»`).join(' og ');
+    health.push({
+      level: 'ok',
+      message: `Egen kalender: ${names} blev læst (${loaded.events.length} aftaler i perioden).`,
+    });
+  }
+
+  return { items: loaded.events.map(toPersonalSourceItem), health };
+}
+
+/**
+ * One appointment as a source, so it travels the same road as everything else —
+ * ranked, composed, marked `NY`, tickable — instead of needing a section and a
+ * set of rules of its own.
+ *
+ * The time goes in the title because for a calendar entry the time *is* half of
+ * what it says; "Tandlæge" on its own is not the thing the reader needs.
+ */
+export function toPersonalSourceItem(event: PersonalEvent): SourceItem {
+  const when = personalWhen(event);
+  return {
+    key: event.key,
+    kind: 'personal',
+    title: `${event.title}${when}`,
+    text: [
+      event.title,
+      when.trim().replace(/^·\s*/, ''),
+      event.location,
+      `Fra kalenderen «${event.calendarName}»`,
+    ]
+      .filter(Boolean)
+      .join(' · '),
+    // Local and naive on purpose: the ranker turns this into a Danish calendar
+    // day, and an all-day event has no instant to be faithful to.
+    at: `${event.date}T${event.startTime ?? '00:00'}:00`,
+    endsAt: `${event.endDate}T${event.endTime ?? '23:59'}:00`,
+    author: event.calendarName,
+    groups: [],
+    // Nothing here says which child an appointment is about. Guessing from the
+    // title would be a regex over prose the family wrote — the mistake
+    // `rank.ts` already made once, on a wish about Hjalte's father.
+    childNames: [],
+    audience: 'family',
+    important: false,
+    url: event.url,
+  };
+}
+
+function personalWhen(event: PersonalEvent): string {
+  if (event.allDay) {
+    return event.date === event.endDate
+      ? ' · hele dagen'
+      : ` · hele dagen ${shortDay(event.date)}–${shortDay(event.endDate)}`;
+  }
+  if (event.date === event.endDate) {
+    return event.endTime && event.endTime !== event.startTime
+      ? ` kl. ${event.startTime}–${event.endTime}`
+      : ` kl. ${event.startTime}`;
+  }
+  return ` fra ${shortDay(event.date)} kl. ${event.startTime} til ${shortDay(event.endDate)} kl. ${event.endTime}`;
+}
+
+function shortDay(iso: string): string {
+  const [, month = '', day = ''] = iso.split('-');
+  return `${Number(day)}/${Number(month)}`;
 }

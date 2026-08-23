@@ -80,6 +80,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   // rules-only path, which then hides nothing — see `rank`.
   let relevance: Record<string, Relevance> = {};
   let extractionRan = opts.useModel === false;
+  let extractionStatus: string | null = null;
 
   if (opts.useModel !== false) {
     try {
@@ -89,16 +90,23 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
       conversations = extracted.conversationSummaries;
       modelSignals = extracted.signals;
       relevance = extracted.relevance;
-      extractionRan = true;
+      extractionRan = extracted.problems.length === 0;
+      if (extracted.problems.length > 0) {
+        extractionStatus =
+          `Modellens vurdering var ufuldstændig (${extracted.problems.length} fejl), ` +
+          'så siden bruger de validerede dele og reglerne som reserve.';
+      }
       for (const problem of extracted.problems) {
         notes.push(`Udtræk afvist: ${problem}`);
       }
     } catch (err) {
-      notes.push(`Modellen kunne ikke køre (${errorMessage(err)}) — kun reglerne blev brugt.`);
+      extractionStatus = `Modellen kunne ikke køre (${errorMessage(err)}) — kun reglerne blev brugt.`;
+      notes.push(extractionStatus);
     }
   }
 
   const brief = rank(input, [...modelSignals, ...signalsFromRules(input, now)], relevance);
+  if (extractionStatus) brief.degraded.push(extractionStatus);
 
   // ---------------------------------------------------------------- compose
   const state = loadState();

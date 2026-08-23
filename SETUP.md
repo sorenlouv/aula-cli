@@ -5,10 +5,11 @@ the MitID login. Ask before installing software or writing outside this
 repository. Never perform the MitID approval yourself. Report each step's
 outcome.
 
-Steps 1–4 run without stopping. Then offer the three extras — none is
-discoverable from outside — and run only what the user agrees to. `new` reads a
-fortnight of messages through a model: give it a 10-minute timeout; everything
-else answers in seconds.
+Steps 1–4 run without stopping. **Then offer all four extras** — none of them
+is discoverable from the outside, and they are what makes this a tool the
+family uses rather than one that merely works — and finish with the hand-over.
+Run only what the user agrees to. `new` reads a fortnight of messages through a
+model: give it a 10-minute timeout; everything else answers in seconds.
 
 Needs macOS or Linux (Windows paths exist, untested), git, the MitID app on the
 user's phone, and for the brief the `claude` CLI on PATH.
@@ -79,7 +80,11 @@ mkdir -p ~/.agents/skills/aula
 sed "s|{{AULA_CLI_DIR}}|$(pwd)|" .claude/skills/aula/SKILL.md > ~/.agents/skills/aula/SKILL.md
 ```
 
-## Offer these three
+This repository's own `AGENTS.md` is notes for people working *on* the CLI, not
+a usage guide; Codex loads it when the repo is open, and nothing in it needs
+following to use the tool.
+
+## Offer these four
 
 Say what each does and let the user choose. Each writes outside this
 repository, so deleting the folder does not undo it.
@@ -115,6 +120,40 @@ bun src/cli.ts publish      # URL kept in ~/.aula/config.json; --off to stop
 ```
 
 Every later run redeploys to the same URL; `open --web` opens it.
+
+### D. Their own calendar
+
+The overview knows the school's day, not that the dentist is at 13.30 on
+Thursday. Point it at the user's own calendars and both land on the same page,
+so they can see for themselves whether a day works.
+
+```bash
+bun src/cli.ts calendars                 # every calendar Claude can see; the ones being read are marked
+bun src/cli.ts calendars set "Familie" "Privat"  # read exactly these two, and no others
+bun src/cli.ts calendars set none        # read none of them
+```
+
+Needs Google Calendar connected in Claude. That is the only supported route —
+there is no API key or calendar-link alternative, and `calendars` prints the few
+clicks when the connector is missing.
+
+**Show the list and let the user pick.** Pass exact displayed names (or the id
+shown when two calendars have the same name), never a list position that may
+refer to something else on a later connector read. Never guess which calendars
+matter and never set one unasked: this writes to `~/.aula/config.json`, outside
+the repository. `set` states the whole answer — it reads exactly what you name
+and stops reading the rest — so pass every calendar that should be read, not
+only a new one. It reports how many appointments each newly set calendar holds
+in the next fortnight; pass that back, and say so if one comes back empty when
+they expected otherwise.
+
+Nothing is read until a calendar is named here, and this can be done at any
+time, not only during setup.
+
+The model-enabled daily overview reads a fixed next-fortnight window, sends
+every appointment through the same model relevance verdicts as every Aula
+source, and reports a model or connector failure in *Datastatus*. It never
+computes clashes or claims that a quiet-looking day has none.
 
 ## 5. Hand over
 

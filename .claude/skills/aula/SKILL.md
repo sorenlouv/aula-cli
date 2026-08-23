@@ -69,6 +69,8 @@ ranking what actually matters to this family is your job.
 | `new` | Generate the daily "Aula AI oversigt" and open it |
 | `open [--web]` | Open the newest overview — the local page, or the hosted copy |
 | `publish [--off]` | Keep a hosted copy of the overview (per installation; `--off` stops) |
+| `calendars` | Which of the family's own calendars the overview reads |
+| `calendars set <name> [<name> ...]` | Read exactly these displayed names; `set none` reads none |
 | `remember "<ønske>"` | Record a standing wish about what this family wants highlighted |
 | `preferences` / `forget <n>` | List those wishes / drop number n |
 | `preferences reset` | Back to the list aula-cli ships with (says what it dropped) |
@@ -218,6 +220,34 @@ and the daily brief get their sense of what matters.
   the line they meant. `preferences reset` returns the whole list to the shipped
   defaults; it prints the user's own lines as it drops them, so read those back
   to them rather than letting them scroll off.
+
+## The family's own calendar
+
+The overview can also read the family's own Google calendars, so their
+appointments appear among the week's other dated items, beside the school's
+events for the same day. It shows both and does not judge; the reader draws the
+conclusion.
+
+```bash
+bun src/cli.ts calendars                 # every calendar, read ones marked
+bun src/cli.ts calendars set "Familie" "Privat"  # read exactly these, and no others
+bun src/cli.ts calendars set none        # read none of them
+```
+
+**`set` states the whole answer, not a delta.** Omitting a calendar stops it
+being read, so when the user asks to add one, pass the ones already marked too.
+
+Show the list and let the user choose; never pick for them. Use exact displayed
+names, or the displayed id where names collide — never a numbered position from
+an earlier live listing. Claude's Google Calendar connector is the only route
+there is, so if it is not connected or a read fails, say so rather than reaching
+for an alternative or treating it as an empty fortnight.
+
+In a model-enabled overview, each appointment in the fixed next-14-day window
+is a source in the same model relevance pass as the Aula posts. Missing model
+verdicts are a reported degraded run, not silent defaults. The overview
+deliberately does not compute clashes and must never reassure the user that
+nothing clashed.
 
 ## The daily brief
 

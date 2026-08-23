@@ -26,7 +26,22 @@ import {
   clearCache,
   flushCache,
 } from './cache.ts';
+import {
+  calendarWindow,
+  CalendarNotConnectedError,
+  listCalendars,
+  loadPersonalEvents,
+  PERSONAL_CALENDAR_DAYS,
+} from './calendar/index.ts';
+import {
+  calendarChoices,
+  type CalendarChoice,
+  CalendarSelectionError,
+  resolveCalendarSelection,
+  resolveConfiguredSelection,
+} from './calendar/selection.ts';
 import { AulaApiError, AulaAuthError, AulaClient, CALENDAR_MAX_SPAN_DAYS } from './client.ts';
+import { readConfig, updateConfig } from './config.ts';
 import {
   buildDigest,
   collectAlbums,
@@ -86,6 +101,11 @@ Everyday:
                                the newest page as a private artifact and redeploys
                                to it on every run from then on
   publish --off                Stop updating the hosted copy and forget its URL
+  calendars                    Your own calendars, with the ones the overview
+                               reads marked — appointments from them show up
+                               beside the school's own events
+  calendars set <name> [...]   Read exactly these, by displayed name
+  calendars set none           Read none of them
   schedule [--at HH:MM]        Generate the overview automatically every weekday,
                                retrying through the morning if the Mac was asleep
   schedule --remove            Stop generating it automatically
@@ -214,6 +234,8 @@ async function main(): Promise<number> {
   if (command === 'cache') return runCache(positionals, asText, ttlMs);
   if (command === 'open') return runOpen(values.web === true);
   if (command === 'publish') return runPublish(values.off === true);
+  // No Aula login needed: this reads the user's own calendars, not the school's.
+  if (command === 'calendars') return await runCalendars(positionals);
   if (command === 'remember') return runRemember(positionals);
   if (command === 'preferences') return runPreferences(positionals);
   if (command === 'forget') return runForget(positionals[0]);
@@ -713,6 +735,222 @@ async function runPublish(off: boolean): Promise<number> {
  * undo what was written on their behalf; a memory nobody can inspect is one
  * nobody can trust.
  */
+/**
+ * `calendars` — which of the family's own calendars the overview reads.
+ *
+ * The point of this command is that for most people there is nothing to set
+ * up. Where Google Calendar is connected in Claude, the calendars are already
+ * there to be listed and the only question left is which ones matter; where it
+ * is not, the answer is to connect it rather than to go hunting for a secret
+ * URL in a settings page. Both are one command.
+ *
+ * Nothing is read until a calendar is named here. A clone of this repository
+ * reads nobody's calendar, and the list lives in `~/.aula/config.json` with the
+ * rest of the per-installation preferences.
+ */
+async function runCalendars(positionals: string[]): Promise<number> {
+  const sub = positionals[0];
+  const refs = positionals.slice(1);
+  if (sub !== undefined && sub !== 'set') {
+    throw new UsageError(
+      `Unknown subcommand "${sub}". Usage: aula ${usageFor('calendars')}`,
+    );
+  }
+
+  try {
+    return sub === undefined ? await showCalendars() : await setCalendars(refs);
+  } catch (err) {
+    if (err instanceof UsageError) throw err;
+    if (err instanceof CalendarNotConnectedError) {
+      console.error(
+        [
+          'Google Calendar is not connected in Claude yet.',
+          '',
+          'Connect it once and there is nothing else to set up — it also reads',
+          'calendars other people have shared with you, which a calendar link cannot:',
+          '',
+          '  Claude  →  Settings  →  Connectors  →  Google Calendar  →  Connect',
+          '',
+          'Then run `aula calendars` again.',
+        ].join('\n'),
+      );
+      return 1;
+    }
+    if (err instanceof CalendarSelectionError) {
+      console.error(err.message);
+      return 1;
+    }
+    console.error(`Could not ask Claude for your calendars: ${errorMessage(err)}`);
+    return 1;
+  }
+}
+
+/** One live list, selected first; names and ids are stable across invocations. */
+async function calendarList(): Promise<CalendarChoice[]> {
+  const configured = readConfig().calendars ?? [];
+  return calendarChoices(configured, await listCalendars());
+}
+
+/** Everything available, with the ones being read marked. */
+async function showCalendars(): Promise<number> {
+  const list = await calendarList();
+  if (list.length === 0) {
+    console.log('Google Calendar is connected, but it lists no calendars.');
+    return 0;
+  }
+
+  const chosen = list.filter((c) => c.selected).length;
+  console.log(
+    [
+      chosen > 0
+        ? 'Your calendars — the overview reads the marked ones:'
+        : 'Your calendars — the overview reads none of them yet:',
+      '',
+      ...list.map((calendar) => formatCalendarChoice(calendar, list)),
+      '',
+      '  aula calendars set "Familie" "Privat"   read exactly these names',
+      ...(chosen > 0 ? ['  aula calendars set none            read none of them'] : []),
+    ].join('\n'),
+  );
+  return 0;
+}
+
+function formatCalendarChoice(calendar: CalendarChoice, all: CalendarChoice[]): string {
+  const duplicateName = all.some(
+    (other) => other.id !== calendar.id && other.name === calendar.name,
+  );
+  const identity = duplicateName
+    ? `${JSON.stringify(calendar.name)}  id: ${calendar.id}`
+    : JSON.stringify(calendar.name);
+  return `  ${calendar.selected ? '*' : ' '} ${identity}${relation(calendar.accessRole)}`;
+}
+
+/**
+ * Whose calendar this is, when the connector says.
+ *
+ * It currently does not: `list_calendars` returns id, summary, description and
+ * timeZone, and `accessRole` only comes back from `list_events`. Kept because
+ * the distinction is worth showing the moment it is available — reading a
+ * calendar somebody *else* shared is a large part of why this is the only
+ * supported route: Google issues a feed URL for calendars you own and no
+ * others, so the household's shared calendar is exactly what it cannot reach.
+ */
+function relation(accessRole: string | undefined): string {
+  if (accessRole === 'owner') return '  (your own)';
+  if (accessRole === 'writer') return '  (shared with you, you can edit)';
+  if (accessRole === 'reader' || accessRole === 'freeBusyReader') return '  (shared with you)';
+  return '';
+}
+
+/**
+ * `set` states the whole answer: these calendars, and no others.
+ *
+ * It replaced `add` and `remove`, and the reason is that the caller is usually
+ * an agent. Add-and-remove makes it compute a diff — read the list, compare it
+ * against what is already selected, work out which way each one has to move,
+ * then issue two commands whose numbering shifts between them. That diff is
+ * work, it depends on state that may already be stale, and it is where the
+ * mistakes were going to come from.
+ *
+ * `set` rather than `select` or `update`: assignment is the prior a reader
+ * already has for the word, which is exactly the semantics — the argument list
+ * becomes the whole configuration. `update` was rejected for reading as
+ * "refresh these calendars", a real and different operation.
+ *
+ * Stating the end state has none of that. It is idempotent, any target state is
+ * one command, and there is nothing to compare against — read the list, say
+ * which ones matter.
+ *
+ * The cost is that it is destructive by omission: naming only "Privat" stops
+ * reading "Familie". So the answer is never just "done" — it names what it
+ * started and stopped reading, because a calendar disappearing quietly is
+ * precisely the failure this command's shape invites.
+ */
+async function setCalendars(refs: string[]): Promise<number> {
+  const configured = readConfig().calendars ?? [];
+  if (refs.length === 0) {
+    throw new UsageError(
+      'Usage: aula calendars set <name> [<name> ...] — exact names from `aula calendars`.\n' +
+        'To stop reading all of them: aula calendars set none',
+    );
+  }
+
+  // `none` rather than an empty argument list, because an agent that computes an
+  // empty list by accident should not thereby wipe the configuration. Clearing
+  // has to be said out loud.
+  if (refs.length === 1 && refs[0] === 'none') {
+    if (configured.length === 0) {
+      console.log('The overview already reads none of your calendars.');
+      return 0;
+    }
+    updateConfig({ calendars: undefined });
+    console.log(
+      `Stopped reading ${configured.map((c) => `"${c.name}"`).join(' and ')}. ` +
+        '`aula calendars` lists them again.',
+    );
+    return 0;
+  }
+
+  // Dropping calendars by saved id remains possible while the connector is
+  // unavailable. Names require one live listing because an unselected calendar
+  // may have the same name; selection is resolved against that same snapshot
+  // rather than a second listing whose order may have changed.
+  const chosen =
+    resolveConfiguredSelection(configured, refs) ??
+    resolveCalendarSelection(await calendarList(), refs);
+
+  const wanted = chosen.map((c) => ({ id: c.id, name: c.name }));
+  const before = new Set(configured.map((c) => c.id));
+  const after = new Set(wanted.map((c) => c.id));
+  const started = wanted.filter((c) => !before.has(c.id));
+  const stopped = configured.filter((c) => !after.has(c.id));
+
+  const unchanged =
+    configured.length === wanted.length &&
+    configured.every(
+      (calendar, index) =>
+        calendar.id === wanted[index]?.id && calendar.name === wanted[index]?.name,
+    );
+  if (unchanged) {
+    console.log(
+      `Already reading ${wanted.map((c) => `"${c.name}"`).join(' and ')} — nothing changed.`,
+    );
+    return 0;
+  }
+  updateConfig({ calendars: wanted });
+
+  const said = [`Now reading ${wanted.map((c) => `"${c.name}"`).join(' and ')}.`];
+  if (stopped.length > 0) {
+    said.push(`Stopped reading ${stopped.map((c) => `"${c.name}"`).join(' and ')}.`);
+  }
+  console.log(said.join('\n'));
+
+  // Only the newly started ones are read back. The receipt is there to prove the
+  // chain works for a calendar nobody has seen answer yet; re-reading one that
+  // was already being read every morning proves nothing and costs a round trip.
+  if (started.length === 0) return 0;
+  const load = await loadPersonalEvents(started, calendarWindow(new Date()));
+  for (const warning of load.warnings) console.error(warning);
+  if (load.warnings.length > 0) return 1;
+
+  // Per calendar, not just a total: one silently empty calendar is exactly
+  // what a single combined number would hide.
+  console.log(
+    [
+      ...started.map((c) => {
+        const count = load.events.filter((event) => event.calendarId === c.id).length;
+        return `  ${c.name}: ${count} appointment(s) in the next ${PERSONAL_CALENDAR_DAYS} days`;
+      }),
+      ...load.events.slice(0, 3).map(
+        (event) => `  · ${event.date}${event.startTime ? ` ${event.startTime}` : ''}  ${event.title}`,
+      ),
+      '',
+      'They are in the next overview — `aula new` builds it now.',
+    ].join('\n'),
+  );
+  return 0;
+}
+
 function runRemember(positionals: string[]): number {
   // Unquoted works too: `aula remember beskeder fra John er vigtige`. A wish
   // typed as a sentence is the normal case, not the odd one.
