@@ -239,8 +239,10 @@ parsed `structured_output`. What the schema can state, the prompt does not say:
 
 What a schema cannot know — whether a date stands in the text — is
 `validateExtraction`'s, as described under *The seam*. Failures are fed back for
-exactly one retry, then the page is built from what survived, marked in
-*Datastatus*. Extraction is cached against a hash of the payload **and the
+exactly one retry. The retry replaces the first answer only when it has fewer
+problems without losing valid cards; otherwise the page keeps the first
+answer's survivors and marks the problem in *Datastatus*. Extraction is cached
+against a hash of the payload **and the
 instructions**, so a prompt edit takes effect on the next run rather than being
 masked by an entry the old wording produced.
 

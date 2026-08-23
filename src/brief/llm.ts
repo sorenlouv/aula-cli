@@ -684,8 +684,14 @@ ${result.problems.map((p) => `- ${p}`).join('\n')}`;
       const second = await runClaude(retry, body, call);
       const secondParsed = second.structured ?? parseJsonLoosely(second.text);
       const reparsed = validateExtraction(input, secondParsed);
-      // Keep the retry only if it is genuinely better.
-      if (reparsed.problems.length < result.problems.length) {
+      // A corrective answer may fix the named date and forget every card that
+      // was already valid. Fewer problems is better only when it preserves at
+      // least as many survivors; otherwise the first partial answer is the
+      // more useful one.
+      if (
+        reparsed.problems.length < result.problems.length &&
+        reparsed.cards.length >= result.cards.length
+      ) {
         result = reparsed;
         parsed = secondParsed;
       }

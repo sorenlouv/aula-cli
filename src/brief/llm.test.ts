@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { briefInput, sourceItem } from '../testing/brief-fixtures.ts';
 import { installFakeClaude } from '../testing/fake-claude.ts';
 import {
+  extractCards,
   extractionPayload,
   parseClaudeJson,
   parseJsonLoosely,
@@ -279,7 +280,18 @@ describe('the claude subprocess', () => {
     process.env.FAKE_CLAUDE_MODE = mode;
     process.env.FAKE_CLAUDE_LOG = log;
     if (result !== undefined) process.env.FAKE_CLAUDE_RESULT_JSON = JSON.stringify(result);
-    return { calls: () => readFileSync(log, 'utf8').split('\n').filter(Boolean) };
+    const ownLog = log;
+    return {
+      log: ownLog,
+      calls: () => readFileSync(ownLog, 'utf8').split('\n').filter(Boolean),
+    };
+  }
+
+  function fakeSequence(results: string[]) {
+    const f = fake('ok');
+    const file = `${f.log}.results`;
+    writeFileSync(file, results.map((result) => JSON.stringify(result)).join('\n'));
+    return f;
   }
 
   describe('parseClaudeJson', () => {
@@ -386,6 +398,56 @@ describe('the claude subprocess', () => {
     test('the url the fake echoes back survives the envelope untouched', async () => {
       fake('ok', VALID);
       expect((await runClaude('instr', '{}', { timeoutMs: 5_000 })).text).toBe(VALID);
+    });
+  });
+
+  describe('extractCards corrective retry', () => {
+    const sources = Array.from({ length: 10 }, (_, index) =>
+      sourceItem({ key: `post:${index}`, title: `Opslag ${index}`, text: `Indhold ${index}` }),
+    );
+    const input = briefInput({ items: sources });
+    const modelCard = (index: number) => ({
+      title: `Kort ${index}`,
+      summary: `Indhold ${index}`,
+      children: [],
+      date: null,
+      needsAction: false,
+      reason: 'Relevant.',
+      sourceKeys: [`post:${index}`],
+    });
+    const answer = (cards: unknown[]) => ({
+      topline: 'Kort overblik.',
+      cards,
+      childSummaries: {},
+      hidden: [],
+    });
+
+    test('an empty retry cannot replace nine valid cards', async () => {
+      fakeSequence([
+        JSON.stringify(
+          answer([
+            ...Array.from({ length: 9 }, (_, index) => modelCard(index)),
+            { ...modelCard(9), date: '2026-09-24' },
+          ]),
+        ),
+        JSON.stringify(answer([])),
+      ]);
+
+      const result = await extractCards(input, { useCache: false, timeoutMs: 5_000 });
+
+      expect(result.cards).toHaveLength(9);
+    });
+
+    test('a retry with fewer problems and more valid cards wins', async () => {
+      fakeSequence([
+        JSON.stringify(answer([modelCard(0), { ...modelCard(9), date: '2026-09-24' }])),
+        JSON.stringify(answer([modelCard(0), modelCard(1)])),
+      ]);
+
+      const result = await extractCards(input, { useCache: false, timeoutMs: 5_000 });
+
+      expect(result.cards.map((card) => card.title)).toEqual(['Kort 0', 'Kort 1']);
+      expect(result.problems).toEqual([]);
     });
   });
 });
