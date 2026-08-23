@@ -54,7 +54,7 @@ export const BRIEF_CSS = `
 [hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--ink);
   font:16px/1.55 ui-sans-serif,-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
-  -webkit-font-smoothing:antialiased}
+  -webkit-font-smoothing:antialiased;overflow-wrap:anywhere}
 .wrap{max-width:940px;margin:0 auto;padding:40px 24px 80px}
 header{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap;margin-bottom:28px}
 h1{margin:0;font-size:34px;letter-spacing:-.02em;font-weight:650}
@@ -242,6 +242,9 @@ footer{margin-top:26px;text-align:center;color:var(--ink-3);font-size:12px}
   .wrap{padding:26px 16px 60px}
   h1{font-size:27px}
   .topline{font-size:17.5px}
+  /* As a flex item, the chip row otherwise keeps its max-content width and
+     makes the whole page wider than a narrow phone before its own wrap runs. */
+  .kids{width:100%;min-width:0}
   /* A phone has no room for time, title and source on one line: the source
      drops under the title, indented past the time column, rather than
      floating right on a line of its own. */

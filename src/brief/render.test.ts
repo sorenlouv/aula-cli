@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { briefInput, card, rankedBrief, sourceItem } from '../testing/brief-fixtures.ts';
 import { CARD_CAP } from './rank.ts';
 import { renderPage } from './render.ts';
+import { BRIEF_CSS } from './styles.ts';
 import type { BriefInput, Card, SourceItem } from './types.ts';
 import { validatePage } from './validate.ts';
 
@@ -338,6 +339,11 @@ describe('the family’s calendar', () => {
 });
 
 describe('the rest of the page', () => {
+  test('phone layout lets the child-chip row shrink before it wraps', () => {
+    expect(BRIEF_CSS).toContain('.kids{width:100%;min-width:0}');
+    expect(BRIEF_CSS).toContain('overflow-wrap:anywhere');
+  });
+
   test('per-child lines, album tiles and the kids in the header', () => {
     const { html } = page([SIGNUP], { summaries: { Alma: 'Fotodag tirsdag (fint tøj).' } });
     expect(html).toContain('<span>Fotodag tirsdag (fint tøj).</span>');
