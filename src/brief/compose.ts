@@ -662,7 +662,14 @@ function buildPage(
   // `important` or `high` floor kept on the page after its day went by.
   // Honest either way: the date stays on the chip, and the list the reader
   // scans for what is next is not led by what is over.
-  const calendar = week.filter((c) => isPersonal(c.signal)).map((c) => c.signal);
+  // Every appointment the family has not asked to hide, whatever tier it landed
+  // in. A `low` verdict on an appointment used to send it to the `context`
+  // tier, which put the reader's own dentist visit inside "Godt at vide"
+  // between two school posts — the scattering this fold exists to end. The
+  // tiers rank *Aula* content by prominence; for an appointment the fold is
+  // already the low-prominence home, so `week` and `context` belong in the same
+  // list. `hidden` still is: that is the family saying no, not "less".
+  const calendar = brief.signals.filter((s) => isPersonal(s) && s.tier !== 'hidden');
   const upcoming = week
     .filter((c) => !isPersonal(c.signal))
     .sort((a, b) => (a.signal.dueAt ?? '9999-99-99').localeCompare(b.signal.dueAt ?? '9999-99-99'));
@@ -687,7 +694,9 @@ function buildPage(
     )
     .join('');
 
-  const context = brief.signals.filter((s) => s.tier === 'context' && !opts.planned?.has(s.id));
+  const context = brief.signals.filter(
+    (s) => s.tier === 'context' && !isPersonal(s) && !opts.planned?.has(s.id),
+  );
   const hidden = brief.signals.filter((s) => s.tier === 'hidden');
 
   // A failed fetch must never look like a quiet week, so a day where something
@@ -779,11 +788,6 @@ function buildPage(
       ? `<section><h2>Godt at vide</h2><details><summary>${context.length + brief.unusedSources.length} ting uden noget, du skal gøre</summary>
       ${context
         .map((s) => {
-          // An appointment the family's list rated `low`: its whole content
-          // is the line, so no more-block — that would only repeat it.
-          if (isPersonal(s)) {
-            return `<div class="di" data-source-id="${escapeHtml(s.sourceKey)}"><b>${escapeHtml(s.title)}</b><p>${escapeHtml([s.dueAt ? capitalise(danishDate(s.dueAt)) : null, whenLabel(s.source), s.source.author].filter(Boolean).join(' · '))}</p></div>`;
-          }
           const gist = opts.conversations?.[s.sourceKey];
           return `<div class="di" data-source-id="${escapeHtml(s.sourceKey)}"><b>${escapeHtml(s.title)}</b>${s.quote ? `<p>«${escapeHtml(s.quote)}»</p>` : ''}${gist ? `<p class="gist">${escapeHtml(gist)}</p>` : ''}${moreBlock(s.source, [s.title, s.quote, gist].filter(Boolean).join(' '), input.today)}<div class="src">${escapeHtml([sourceDateline(s.source, input.today), s.source.author].filter(Boolean).join(' · '))}</div></div>`;
         })

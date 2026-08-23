@@ -384,13 +384,25 @@ describe('the family’s calendar', () => {
     expect(fallbackPage(brief)).toContain('<summary>Alle aftaler i perioden</summary>');
   });
 
-  test('a low-rated appointment stays in Godt at vide, with its time and no more-block', () => {
+  test('a low-rated appointment stays in the fold — the tiers rank Aula, not our diary', () => {
+    // `low` used to demote an appointment to the context tier, which rendered
+    // the reader's own dentist visit inside "Godt at vide" between two school
+    // posts. The fold is already the low-prominence home; splitting the diary
+    // across two places is what it exists to prevent.
     const low: RankedSignal = { ...DENTIST, tier: 'context', mustShow: false, relevance: 'low' };
     const html = fallbackPage({ ...BRIEF, signals: [MUST_SHOW, low] });
+    expect(html).toContain('data-section="calendar"');
+    expect(html).toContain(`<div class="cal-row" data-signal-id="${low.id}"`);
+    expect(html).not.toContain(`<div class="di" data-source-id="${low.sourceKey}"`);
+  });
+
+  test('a hidden appointment is still hidden — that is the family saying no', () => {
+    const hidden: RankedSignal = { ...DENTIST, tier: 'hidden', mustShow: false, relevance: 'hide' };
+    const brief: RankedBrief = { ...BRIEF, signals: [MUST_SHOW, hidden] };
+    const html = fallbackPage(brief);
     expect(html).not.toContain('data-section="calendar"');
-    expect(html).toContain(
-      `<div class="di" data-source-id="${low.sourceKey}"><b>Tandlæge</b><p>Torsdag 13. august · kl. 13:30–14:15 · Familien</p></div>`,
-    );
+    expect(html).not.toContain(`data-signal-id="${hidden.id}"`);
+    expect(validatePage(html, brief)).toEqual([]);
   });
 
   test('a ticked row carries the same key shape as a card', () => {

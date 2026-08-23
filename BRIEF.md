@@ -69,7 +69,12 @@ Sections render only when they have content, and never change order.
    by date is not answering its own heading. Undated items — mostly `ACT_CAP`
    overflow — sit last under *Uden fast dato*.
 4. **Egen kalender** — the family's own appointments from the configured
-   calendars, as one-line rows grouped by day inside one collapsed fold. An
+   calendars, as one-line rows grouped by day inside one collapsed fold. Every
+   appointment the family has not asked to `hide` is in it, whatever tier it
+   landed in: the tiers rank *Aula* content by prominence, and for an
+   appointment the collapsed fold already is the low-prominence home. A `low`
+   verdict used to demote one into *Godt at vide*, which put a dentist visit
+   between two school posts — the scattering this fold exists to end. An
    appointment is one line of information and the card shape was six lines of
    chrome around it; twenty of those was most of the page. The fold's summary
    is what makes it useful shut: it names today's appointments, and those on
