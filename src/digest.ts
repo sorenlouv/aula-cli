@@ -166,6 +166,8 @@ export type DigestOptions = {
   family?: Family;
 };
 
+type LimitTracker = { hit: boolean };
+
 export async function buildDigest(client: AulaClient, opts: DigestOptions) {
   const family = opts.family ?? (await resolveFamily(client));
   const now = opts.now ?? new Date();
@@ -173,17 +175,26 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
   // the bug this replaced was one of them quietly not getting it.
   const children = selectChildren(family, opts.child);
   const since = new Date(now.getTime() - opts.days * 86_400_000);
+  // `new` reads a much wider history than the interactive digest originally
+  // did. Forty rows is enough for a fortnight, but it silently clipped a
+  // sixty-day brief. Scale the guard with the requested window; callers that
+  // explicitly pass --limit keep that exact contract.
+  const historyLimit = opts.limit ?? Math.max(40, opts.days * 3);
+  const threadLimit: LimitTracker = { hit: false };
+  const postLimit: LimitTracker = { hit: false };
 
   const [threadSummaries, posts, events, notifications, presence, plans] = await Promise.all([
     collectThreads(client, {
-      limit: opts.limit ?? 40,
+      limit: historyLimit,
+      limitTracker: threadLimit,
       since,
       unreadOnly: false,
       family,
       ...(opts.child ? { child: opts.child } : {}),
     }),
     collectPosts(client, family, {
-      limit: opts.limit ?? 40,
+      limit: historyLimit,
+      limitTracker: postLimit,
       since,
       ...(opts.child ? { child: opts.child } : {}),
     }),
@@ -260,6 +271,10 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
     weeklyPlans: plans,
     presence: presence.map(normalisePresence),
     notificationCount: notifications.length,
+    collectionLimits: {
+      posts: postLimit.hit ? historyLimit : null,
+      threads: threadLimit.hit ? historyLimit : null,
+    },
   };
 }
 
@@ -267,6 +282,7 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
 
 export type ThreadFilter = {
   limit: number;
+  limitTracker?: LimitTracker;
   since?: Date;
   unreadOnly: boolean;
   child?: string;
@@ -302,7 +318,12 @@ export async function collectThreads(
         continue;
       }
       collected.push(thread);
-      if (collected.length >= filter.limit) return collected;
+      // Read one qualifying row past the cap so a caller can distinguish a
+      // genuinely complete N-row window from a silently truncated one.
+      if (collected.length > filter.limit) {
+        if (filter.limitTracker) filter.limitTracker.hit = true;
+        return collected.slice(0, filter.limit);
+      }
     }
 
     if (!moreMessagesExist) break;
@@ -316,7 +337,13 @@ export async function collectThreads(
 export async function collectPosts(
   client: AulaClient,
   family: Family,
-  opts: { limit: number; since?: Date; important?: boolean; child?: string },
+  opts: {
+    limit: number;
+    limitTracker?: LimitTracker;
+    since?: Date;
+    important?: boolean;
+    child?: string;
+  },
 ) {
   const pageSize = 10;
   const collected: Post[] = [];
@@ -341,7 +368,10 @@ export async function collectPosts(
         continue;
       }
       collected.push(post);
-      if (collected.length >= opts.limit) return collected.map(normalisePost);
+      if (collected.length > opts.limit) {
+        if (opts.limitTracker) opts.limitTracker.hit = true;
+        return collected.slice(0, opts.limit).map(normalisePost);
+      }
     }
 
     if (!hasMorePosts) break;

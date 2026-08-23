@@ -127,6 +127,19 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
   const health: HealthNote[] = [];
   const items: SourceItem[] = [];
 
+  if (digest.collectionLimits.posts !== null) {
+    health.push({
+      level: 'warn',
+      message: `Kun de nyeste ${digest.collectionLimits.posts} opslag blev læst.`,
+    });
+  }
+  if (digest.collectionLimits.threads !== null) {
+    health.push({
+      level: 'warn',
+      message: `Kun de nyeste ${digest.collectionLimits.threads} beskedtråde blev læst.`,
+    });
+  }
+
   // ------------------------------------------------------------------ posts
   for (const post of digest.posts) {
     const childNames = childrenForGroups(post.groups, childGroups);
