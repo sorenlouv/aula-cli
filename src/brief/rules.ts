@@ -12,7 +12,14 @@
 
 import { localIsoDate } from '../integrations/types.ts';
 import { isValidCalendarDate } from '../validation.ts';
-import type { SignalKind, Urgency } from './types.ts';
+/**
+ * What a matched sentence asks for. `bring`, `action` and `deadline` are the
+ * kinds that make a rule-made card `needsAction`; the rest are things to know.
+ */
+export type RuleKind = 'action' | 'deadline' | 'event' | 'bring' | 'info' | 'social';
+
+/** How soon, by the date alone — `urgencyFor`. Kept for the rules' own tests. */
+export type Urgency = 'now' | 'week' | 'later' | 'fyi';
 
 /**
  * Full and abbreviated month names. The abbreviations are not optional: the
@@ -66,7 +73,7 @@ const WEEKDAYS: Record<string, number> = {
  * Ordered most-specific first; the first match decides the signal kind, so
  * "husk at aflevere senest fredag" is a `bring`, not a `deadline`.
  */
-const MARKERS: Array<{ re: RegExp; kind: SignalKind; urgency: Urgency }> = [
+const MARKERS: Array<{ re: RegExp; kind: RuleKind; urgency: Urgency }> = [
   // Danish compounds mean a `\b`-anchored keyword misses most real uses:
   // "ansøgningsfristen" contains "frist", "Mødet" contains "møde". So these
   // deliberately match inside words.
@@ -221,7 +228,7 @@ export function extractDates(sentence: string, today: Date): string[] {
 }
 
 export type RuleHit = {
-  kind: SignalKind;
+  kind: RuleKind;
   quote: string;
   dueAt: string | null;
   urgency: Urgency;

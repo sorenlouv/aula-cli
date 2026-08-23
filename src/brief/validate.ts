@@ -1,11 +1,11 @@
 /**
  * The invariants, checked against the generated HTML.
  *
- * Since the plan-based rework, `buildPage` is the only renderer and satisfies
- * these by construction — so today this is a regression net, not a gate the
- * model can fail. It stays because the invariants are the product: a template
- * edit that drops `data-source-id`, or a plan path that lets a hidden signal
- * through, must fail loudly here rather than ship quietly.
+ * `buildPage` is the only renderer and satisfies these by construction — so
+ * this is a regression net, not a gate the model can fail. It stays because
+ * the invariants are the product: a template edit that drops `data-source-id`,
+ * or a path that lets a hidden source through as a card, must fail loudly here
+ * rather than ship quietly.
  *
  * The dangerous failure is not an ugly page. It is a page that looks perfectly
  * fine and silently left out the meeting.
@@ -35,12 +35,12 @@ const EXTERNAL_RESOURCE = /<(?:img|script|link|style|iframe|object|embed|base)\b
 export function validatePage(html: string, brief: RankedBrief): Violation[] {
   const violations: Violation[] = [];
 
-  // 1. Nothing required was dropped.
-  for (const signal of brief.signals.filter((s) => s.mustShow)) {
-    if (!html.includes(`data-signal-id="${signal.id}"`)) {
+  // 1. Nothing required was dropped: every card the ranker kept is on the page.
+  for (const card of brief.cards) {
+    if (!html.includes(`data-signal-id="${card.id}"`)) {
       violations.push({
         rule: 'must-show',
-        detail: `"${signal.title}" (${signal.id}) mangler på siden`,
+        detail: `"${card.title}" (${card.id}) mangler på siden`,
       });
     }
   }
@@ -82,12 +82,14 @@ export function validatePage(html: string, brief: RankedBrief): Violation[] {
     }
   }
 
-  // 4. Noise stays down: nothing the family's list hid may appear as a card.
-  for (const signal of brief.signals.filter((s) => s.tier === 'hidden')) {
-    if (html.includes(`data-signal-id="${signal.id}"`)) {
+  // 4. Noise stays down: nothing the model hid may appear as a card. A card's
+  //    open tag carries its first source; a hidden key there is a leak.
+  const cardTags = [...html.matchAll(/<div class="card[^"]*"[^>]*>/g)].map((m) => m[0]);
+  for (const item of brief.hidden) {
+    if (cardTags.some((tag) => tag.includes(`data-source-id="${item.key}"`))) {
       violations.push({
         rule: 'noise',
-        detail: `skjult "${signal.title}" er vist som et punkt`,
+        detail: `skjult "${item.title}" er vist som et kort`,
       });
     }
   }

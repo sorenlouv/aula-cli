@@ -3,13 +3,13 @@
  *
  * Two ideas carry most of the weight here:
  *
- * `Audience` is how broadly something was addressed, and it is the primary
- * relevance axis — see `rank.ts`. It is computed from group membership, not
- * judged by a model, because "is this about one of my children" turns out to be
- * answerable from `groups[]` alone.
+ * `Audience` is how broadly something was addressed — one of the relevance cues
+ * the model is given. It is computed from group membership, not judged, because
+ * "is this about one of my children" turns out to be answerable from `groups[]`
+ * alone.
  *
- * `Signal` is a single thing worth knowing, always tied back to the
- * `SourceItem` it came from. Nothing reaches the page without a source, which
+ * `Card` is a single thing worth knowing or doing, always tied back to the
+ * `SourceItem`s it came from. Nothing reaches the page without a source, which
  * is what makes a generated summary checkable rather than merely plausible.
  */
 
@@ -21,20 +21,17 @@
  * - `institution` — their actual school or daycare, or a year band inside it
  *   ("Eksempelskolen …", "Indskoling …", "Børnehuset Eksemplet").
  * - `municipal` — across institutions: "Alle forældre alle skoler". Almost
- *   never about one of our children, and sorted low; hidden only when the
- *   family's list says so (see `Relevance`).
+ *   never about one of our children.
  *
  * `institution` is deliberately *not* lumped in with `municipal`. School photo
  * day is addressed to the whole school and matters; a municipal course offer is
  * addressed to the whole school and does not. Breadth alone cannot separate
- * those two — see `concernsChild`, which is what does.
+ * those two; the model is told so in as many words and reads the content.
  *
  * `family` is the one value that does not come from Aula at all: an appointment
  * out of the family's own calendar, addressed to nobody because they wrote it
- * themselves. It sits just under `child` — a school thing about your daughter
- * edges out your own dentist appointment when both are competing for the last
- * slot on the page, but only just — and above `institution`, because something
- * you put in your own calendar is by definition something you meant.
+ * themselves. Those never become cards — the page lists them in a fold of their
+ * own — but the model reads them to understand the week.
  */
 export type Audience = 'child' | 'class' | 'institution' | 'municipal' | 'family';
 
@@ -148,100 +145,68 @@ export type BriefInput = {
 };
 
 /**
- * The model's verdict on one source, read in the light of the family's list.
+ * One thing the reader should know or do — the unit the page is made of.
  *
- * This is how `~/.aula/preferences.md` reaches the ranking. The list is prose
- * — *"beskeder fra John (Hjaltes far) er altid vigtige"*, *"jeg er ligeglad
- * med billeder"* — and prose is the model's to read, not a rule's: an earlier
- * version had `rank.ts` regex-matching sender names and negation words out of
- * the lines, and it floored a teacher called Hjalte on a wish about Hjalte's
- * father. So the model reads the list once per source and answers with one of
- * four words, and `rank.ts` acts on the word.
+ * The model writes these finished: a title, a summary that stands without the
+ * source, the day to sort it by, whether it asks something of the family, and
+ * the sources it rests on. A card may gather several sources that say the same
+ * thing — the July post with the date and the August message with the news
+ * are one card — and the page lists every one of them under *Læs mere*.
  *
- * Four words rather than a number on purpose: a model sorts into labelled
- * buckets far more consistently than it calibrates a 0–100 scale, and a score
- * that wobbles from run to run would make a good model day and a bad one
- * produce structurally different briefs. The fine ordering within a bucket is
- * the arithmetic's job.
- *
- * - `hide` — the list says this kind of thing is never wanted. Off the page,
- *   listed only in the muted foot — unless something worth extracting was found
- *   in it *and* that asks us for something about our own child, in which case
- *   it is demoted to the `context` tier instead. A wish to be spared municipal
- *   broadcasts is fair; applying it to "alle skoler er lukket på mandag" is
- *   not, and one verdict is one model's reading on one morning.
- * - `low` — the list says it matters less. At most the `context` tier, never
- *   a card.
- * - `normal` — the list is silent; content and breadth decide.
- * - `high` — the list says this matters to them (a named sender, a topic they
- *   asked for). Never below the `week` tier, and on the page even when nothing
- *   concrete could be extracted from it.
- *
- * Aula's own `important` flag beats `hide` and `low`: the school shouting is
- * not something a preference can mute.
+ * The rules layer makes the same shape without a model: title from the source,
+ * the matched sentence as the summary. It is the fallback and the floor, never
+ * a peer — where the model has spoken, its cards are the cards.
  */
-export type Relevance = 'hide' | 'low' | 'normal' | 'high';
-
-export type SignalKind = 'action' | 'deadline' | 'event' | 'bring' | 'info' | 'social';
-
-/** How soon it matters. The ranker turns this into placement. */
-export type Urgency = 'now' | 'week' | 'later' | 'fyi';
-
-export type Signal = {
+export type Card = {
   id: string;
-  kind: SignalKind;
-  /** Danish, imperative for actions. */
+  /** Danish. Names the child; imperative when something must be done. */
   title: string;
-  /** First name, or null when it concerns everyone. */
-  child: string | null;
-  /** `YYYY-MM-DD` when there is a deadline or a date it happens. */
-  dueAt: string | null;
-  urgency: Urgency;
   /**
-   * Verbatim from the source. Validated as a literal substring, which is the
-   * cheapest guard against a confidently invented deadline.
+   * One to three sentences that say the thing without the source. A rule-made
+   * card quotes the matched sentence verbatim here; it has nothing else to say.
    */
-  quote: string | null;
-  why: string | null;
-  sourceKey: string;
+  summary: string;
+  /** First names. Empty when it concerns every child, or none in particular. */
+  children: string[];
+  /**
+   * `YYYY-MM-DD` — the deadline when there is one, else the day it happens.
+   * The page sorts on it; a day that has passed lands under *Tidligere*.
+   */
+  date: string | null;
+  /** Something the family must do, not merely know. Drawn with emphasis. */
+  needsAction: boolean;
+  /** Why the card is on the page. Shown under *Læs mere*, never on the card. */
+  reason: string | null;
+  /** Keys into `BriefInput.items`; at least one. */
+  sourceKeys: string[];
   origin: 'rule' | 'model';
-  /**
-   * Does this ask something of us *about our own child*, as opposed to being an
-   * offer we could opt into?
-   *
-   * This is what separates "tilmeld jeres barn til skolefoto" from "tilbud om
-   * forældrekursus" when both are addressed to the whole school. Breadth sets
-   * the ceiling; this decides whether an institution-wide message is allowed to
-   * reach it.
-   */
-  concernsChild: boolean;
 };
 
-export type Tier = 'act' | 'week' | 'context' | 'hidden';
+/**
+ * Where a card sits on the page. Decided by the date alone, in code: the model
+ * chooses the cards and says what they are; it never orders the page.
+ */
+export type Placement = 'upcoming' | 'undated' | 'past';
 
-export type RankedSignal = Signal & {
-  score: number;
-  tier: Tier;
-  /** Must appear in the rendered page; `validate.ts` enforces it. */
-  mustShow: boolean;
-  audience: Audience;
-  /** The model's verdict on the source, `normal` when it gave none. */
-  relevance: Relevance;
-  /** Why it scored what it did — surfaced by `--explain`. */
+export type RankedCard = Card & {
+  placement: Placement;
+  sources: SourceItem[];
+  /** Why it sits where it does — `--explain`. */
   reasons: string[];
-  source: SourceItem;
-  /**
-   * Other sources saying the same thing. The municipality sends its course
-   * offers through every institution at once, and the same meeting arrives as
-   * both an invitation and a reminder, so merging is the normal case.
-   */
-  mergedSourceKeys: string[];
 };
 
 export type RankedBrief = {
   input: BriefInput;
-  signals: RankedSignal[];
-  /** Sources that produced no signal at all, so nothing is silently lost. */
-  unusedSources: SourceItem[];
+  /** The cards, in page order: upcoming by date, then undated, then past. */
+  cards: RankedCard[];
+  /**
+   * Cards over `CARD_CAP`, least pressing first. Listed in the fold with their
+   * title and summary — demoted, never dropped.
+   */
+  folded: RankedCard[];
+  /** Sources no card covers and the model did not hide: the fold. */
+  rest: SourceItem[];
+  /** Sources the model hid — the family's list, or plain irrelevance. Named in the muted foot. */
+  hidden: SourceItem[];
   degraded: string[];
 };

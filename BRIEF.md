@@ -13,44 +13,50 @@ gear for Thursday inside a weekly-plan item, or a recurring commitment announced
 in prose. Aula's `important`, `unread` and `responseRequired` flags are useful
 inputs but not a sufficient ranking. The model is therefore load-bearing.
 
-## The seam: two model calls, and only the first sees source data
+## The seam: one model call writes the cards, the page is built locally
 
-The model plans the page; a local renderer builds it. The model decides priority
-and wording while the renderer owns markup and invariants.
+The model reads every source once and answers in a schema: the cards, finished
+— title, summary, the day to sort by, whether the family must do something, a
+reason, the sources — plus one topline, one line per child, and the sources to
+keep off the page. A local renderer draws that. The model decides **what the
+cards are and which sources matter**; the renderer decides nothing about
+content and the order is by date, in code.
 
-1. **Extract** reads the Aula payload and returns validated `Signal[]` — facts,
-   with every quote checked as a literal substring of its source and every date
-   grounded in the source text (`dates.ts`). Invented small deadlines
-   ("senest søndag", stated nowhere) are the one failure mode every model shows
-   occasionally; grounding turns them into a dropped signal and a retry.
-2. **Compose** receives *only those validated signals* and returns a small JSON
-   plan: what leads, what waits, what to reword. `compose.ts` renders it from
-   tested components.
+There used to be two calls: an extractor returning "signals" with a verbatim
+quote each, a scorer tiering them, and a second call ordering and rewording.
+It went because the first call can write the cards finished and gather several
+sources into one — the July post with the date and the August message with the
+news are one card — and because ordering by date needs no model. The quote was
+a trust device from before the original was one tap away; now every source a
+card rests on is listed under *Læs mere*, and what is checked instead is the
+one thing a reader cannot see at a glance: whether the dates are real.
 
-Because compose never sees the raw payload it cannot invent a deadline or
-misquote a teacher, and because the renderer inserts quotes, dates, sources and
-links from the validated signals, a plan cannot lose them either — an omission
-sinks a card to the bottom of its section, never off the page.
+**Grounding is the guard.** Every date in a card — its `date`, and any day named
+in its title, summary or reason — must be supported by at least one of the
+card's own sources (`dates.ts`); the topline and per-child lines are checked
+against every source. A card that fails is dropped and reported, never kept
+with the date removed, because the date is usually the point. Invented small
+deadlines ("senest søndag", stated nowhere) are the one failure mode every model
+shows occasionally; grounding turns them into a dropped card and one retry.
 
 The renderer builds from `styles.ts` tokens, so the page cannot come out
-grey-on-white, and **the topline and the must-act region keep their place at the
-top**: this is read in twenty seconds over breakfast, and knowing where the
-urgent thing lives beats variety. Order, section, emphasis and wording inside
-that frame are the model's.
+grey-on-white, and **the sections keep their places**: this is read in twenty
+seconds over breakfast, and knowing where things live beats variety.
 
 ### Invariants, machine-checked after rendering
 
-`validate.ts` runs these against the generated HTML, because the fallback path
-and any future renderer must pass the same gate. A failure drops the model's
-plan, renders the same components in the ranker's order, and says so on the page.
+`validate.ts` runs these against the generated HTML. `renderPage` is the only
+renderer and satisfies them by construction, so this is a regression net: a
+template edit that drops `data-source-id`, or a path that lets a hidden source
+through as a card, must fail loudly rather than ship quietly.
 
 | Invariant | Check |
 | --- | --- |
-| Nothing required was dropped | every `must_show` id appears as `data-signal-id` |
-| Every claim is attributable | each claim block has `data-source-id` and a link |
+| Nothing required was dropped | every card the ranker kept appears as `data-signal-id` |
+| Every claim is attributable | each card carries `data-source-id` and its sources are linked |
 | Every card can be ticked off | each card carries `data-done-keys` |
 | Failures are visible | the datastatus block exists and names every failed fetch |
-| Noise stays down | nothing in the `hidden` tier renders as a card |
+| Noise stays down | no hidden source renders as a card |
 | Portable | HTML parses; zero external resource references |
 | Legible | colours from the token set; contrast passes |
 | Print-safe | `<details>` holding brief content forced open; only *Læs mere* source dumps stay collapsed |
@@ -59,101 +65,87 @@ plan, renders the same components in the ranker's order, and says so on the page
 
 Sections render only when they have content, and never change order.
 
-1. **Topline** — date and one Danish sentence on the state of the family.
-2. **Kræver handling** — the `act` tier, the only one with deadlines. Hard cap
-   of five (`ACT_CAP`); overflow drops to `week`. Each row: what to do, which
-   child, by when, and the verbatim source phrase.
-3. **Kommende** — the `week` tier: the school's dated things that ask nothing
-   yet, in date order. The composer rewords them and orders within a day; it
-   does not reorder the list, because an "upcoming" list the reader cannot scan
-   by date is not answering its own heading. Undated items — mostly `ACT_CAP`
-   overflow — sit last under *Uden fast dato*.
-4. **Egen kalender** — the family's own appointments from the configured
+1. **Topline** — date and one Danish sentence, the most important thing first.
+2. **Kommende** — the cards, **one list, by date**. Five to ten on a normal
+   morning. A card that asks something of the family (`needsAction`) is drawn
+   with the warm left edge and a *Skal gøres* badge, so the work stands out in a
+   list that is otherwise chronological; the reader's eye finds it without it
+   having to be first. Two tails under dividers: *Uden fast dato* for cards with
+   no day, *Tidligere* for cards whose day has passed but that still say
+   something (a decision, a new standing arrangement). Each card: date chip
+   (*I dag*, *I morgen*, else the day), the children, title, summary, and
+   *Læs mere* — which opens with *Vist fordi:* the model's reason, then every
+   source the card rests on, each with its title, when it is from, its author,
+   a link, and the original.
+3. **Egen kalender** — the family's own appointments from the configured
    calendars, as one-line rows grouped by day inside one collapsed fold. Every
-   appointment the family has not asked to `hide` is in it, whatever tier it
-   landed in: the tiers rank *Aula* content by prominence, and for an
-   appointment the collapsed fold already is the low-prominence home. A `low`
-   verdict used to demote one into *Godt at vide*, which put a dentist visit
-   between two school posts — the scattering this fold exists to end. An
-   appointment is one line of information and the card shape was six lines of
-   chrome around it; twenty of those was most of the page. The fold's summary
-   is what makes it useful shut: it names today's appointments, and those on
-   any day that also carries a card in *Kræver handling* or *Kommende* — so
-   the gymnastics at 17:10 is named beside the Wednesday of the forældremøde
-   without the page computing a clash or claiming the absence of one. Never
-   cards, never in the composer's payload (see *The family's own calendar*).
-5. **Per barn** — one card per child: check-in state, planned pickup, what is
-   new, their week. Ordered by how much is going on, so a quiet child stops
-   taking up space.
-6. **Godt at vide** — the `context` tier, collapsed.
-7. **Billeder** — the `NewMedia` flood as one line, linked, at the bottom.
-8. **Datastatus** — what was fetched, **what failed**, step-up state. Its
-   place is the exception to "sections never move", and only one thing moves
-   it: a `health` warning, meaning something could not be *fetched*. Then it
-   sits directly under the topline, because a thin section has to be readable
-   as "Aula refused this" rather than "a quiet week". Otherwise it folds shut
-   at the very foot, below even the hidden list, with a summary that says so
-   unopened. A `degraded` note does **not** hoist it: that says the model's
-   answer was partial and the ranking fell back to the rules, which loses
-   nothing *from Aula* — and a status report standing above the week every
-   ordinary morning is how a reader learns to skip the block that matters on
-   the morning a fetch really did fail.
+   appointment the model did not hide is in it. The fold's summary is what makes
+   it useful shut: it names today's appointments, and those on any day that also
+   carries a card — so the gymnastics at 17:10 is named beside the Wednesday of
+   the forældremøde. The model may also say so in a card's summary; nothing
+   forbids it. What the page itself never does is compute a clash or claim the
+   absence of one.
+4. **Per barn** — one card per child: check-in state, planned pickup, and the
+   model's one calendar-like line for the child.
+5. **Galleri** — album tiles.
+6. **Øvrigt fra Aula** — collapsed: every source that did not become a card and
+   was not hidden (title, when, author, *Læs mere*), plus any cards over
+   `CARD_CAP`. The name says what it is; *Godt at vide* did not.
+7. **Skjult** — the muted foot naming the sources the model kept off the page
+   entirely, so a hide is visible as a count, never silent.
+8. **Datastatus** — what was fetched, **what failed**, step-up state. Only a
+   `health` warning — something could not be *fetched* — hoists it under the
+   topline, because a thin list has to be readable as "Aula refused this"
+   rather than "a quiet week". Otherwise it folds shut at the very foot with a
+   summary that says so unopened. A `degraded` note (the model's answer was
+   partial) does **not** hoist it: nothing is missing from Aula because of it.
 
 ### Reading the original
 
 A summary is only trustworthy if the thing it summarises is one tap away, so
-every entry with more to show carries a collapsed **Læs mere**. The toggle is
-skipped where the source is the sentence already quoted above it — a *læs mere*
+every card carries its originals underneath it, collapsed — all of them, when a
+card gathers several. The toggle is skipped where there is nothing left to
+open (a rule-made card whose summary *is* the whole source) — a *læs mere*
 revealing what you just read teaches people to stop pressing things.
 
-**Every entry says when its source is from** — on the attribution line and
-again as a head inside *Læs mere*, where the question is actually asked. A card
-can hold two dates meaning opposite things, so the source's is always labelled
-by what it is: a post was *skrevet*, a thread's stamp is its *seneste besked*, a
-weekly-plan entry is *for* a day. Calendar entries get none, their date being
-the entry itself. Undated, a quote reads as current however old it is.
+A thread opens as the whole exchange, sender and time on each message, oldest
+first; a partial thread says so (*4 af 9 beskeder*), since a fetched page must
+never pass for the whole. Print is the exception to forcing `<details>` open:
+these hold verbatim source material, and expanding them turns two forwardable
+pages into twenty.
 
-A conversation is a different shape from a message: threads of
-`CONVERSATION_MIN_MESSAGES` (3) or more get a summary — what it is about, who
-asked what, whether we still owe a reply — with the exchange underneath, oldest
-first. Shorter threads get none, because reading the message beats reading about
-it. Two guards: a partial thread says so (*4 af 9 beskeder*), since a fetched
-page must never pass for the whole; and the summary, being the one sentence with
-no verbatim quote behind it, is checked for invented dates and dropped rather
-than repaired.
-
-Print is the exception to forcing `<details>` open: these hold verbatim source
-material, and expanding them turns two forwardable pages into twenty.
+**Every source says when it is from** — on the attribution line and again as a
+head inside *Læs mere*. A card can hold two dates meaning opposite things, so
+the source's is always labelled by what it is: a post was *skrevet*, a thread's
+stamp is its *seneste besked*, a weekly-plan entry is *for* a day. Undated, a
+quote reads as current however old it is.
 
 ### The rules that make it trustworthy
 
-- **Nothing is silently dropped.** Anything not promoted still appears in the
-  `context` tier. The brief may reorder; it may not hide.
+- **Nothing is silently dropped.** A source that is not a card is in *Øvrigt
+  fra Aula*; a source the model hid is counted in the foot. The brief may
+  demote; it may not lose.
 - **A missing section and a failed fetch look different.** A vendor 500 must
   read as *"ugeplan for Viggo og Ida kunne ikke hentes"*, never as a quiet week,
   and it takes the panel to the top of the page to say so.
-  Same for a thread whose body Aula refuses: without a warning it renders as a
-  message card with nothing in it.
-- **Every model-derived claim carries its source** — id, link, the exact quote,
-  and the original under *Læs mere* — so a deadline can be believed without
-  opening Aula.
-- **A confident empty state.** When nothing needs action the page says so
-  plainly rather than showing an empty box.
+- **Every date on the page is grounded** in a source the reader can open from
+  the same card — so a deadline can be believed without opening Aula.
+- **A confident empty state.** When there are no cards the page says so plainly
+  rather than showing an empty box.
 - **`NY` markers since the last brief**, so checking twice a week means reading
   the delta.
 
 ### Ticking things off
 
 A brief that keeps asking for something you did last Tuesday is worse than one
-that never asked. Both action sections and the calendar rows are tickable and
-the tick survives the next morning's regeneration.
+that never asked. Cards and calendar rows are tickable and the tick survives the
+next morning's regeneration.
 
 **The store is the browser's.** The page is read on a phone and nothing there
 can write to `~/.aula`, so the record is `localStorage` on the page's origin
-(pruned after `KEEP_DAYS`). `state.json` never learns: the ranker still ranks a
-done item and a model-written topline may still count it — visible as *"To ting
-kræver din opmærksomhed"* above a section reading `0`, and the honest price of
-the reader being the one who knows.
+(pruned after `KEEP_DAYS`). `state.json` never learns: the model still writes
+a done item and may still count it in the topline — the honest price of the
+reader being the one who knows.
 
 Two things make it survive the daily republish:
 
@@ -163,16 +155,13 @@ Two things make it survive the daily republish:
   throw. Storage is keyed by origin, not version, so republishing with `force`
   leaves it untouched. Where storage is unavailable the tick still works and
   forgets on reload, which beats an inert button.
-- **The key is not the signal id.** Model signals are numbered by position, so
+- **The key is not the card id.** Model cards are numbered by position, so
   yesterday's `model:3` is tomorrow's something else. The key is
-  `sourceKey|dueAt` — Aula's own id plus a grounded date. Deliberately excluded:
-  the title, which the composer rewords by design, and the kind, which drifts.
-  Including the date scopes a recurring item correctly: next Monday's *husk
-  løbetøj* is a different date, so it returns. A signal carries one key per
-  source it was merged from, so a merge-winner flip cannot resurrect something
-  already dealt with. The cost: two distinct obligations from one source on one
-  date share a key, so ticking one hides both. Rare, and recoverable behind the
-  *vis* toggle.
+  `sourceKey|date` — Aula's own id plus a grounded date, one per source the card
+  gathers, so a regrouping cannot resurrect something already dealt with.
+  Deliberately excluded: the title and summary, which the model words
+  differently each morning. Including the date scopes a recurring item
+  correctly: next Monday's *husk løbetøj* is a different date, so it returns.
 
 This is not a muting system and must not grow into one. A tick says *I did
 this*; *I never want to see this* is a preference.
@@ -180,26 +169,25 @@ this*; *I never want to see this* is a preference.
 ## Architecture
 
 ```
-aula new [--days 14] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
+aula new [--days 60] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 
-  collect   →  BriefInput    reuse buildDigest + galleries
-  extract   →  Signal[]      deterministic rules ∪ model call #1, validated
-  rank      →  RankedBrief   score → tiers → caps → must_show
-  compose   →  JSON plan     model call #2, rendered locally
-  validate  →  HTML          invariants, fallback layout
+  collect   →  BriefInput    reuse buildDigest + galleries; 60 days, old posts admitted only with a day ahead
+  extract   →  cards         one model call, answered in a schema, dates grounded
+  rank      →  RankedBrief   by date; cap; the `important` floor; rules as fallback
+  render    →  HTML          the page, built locally; invariants checked
   publish   →  files         HTML (+ PDF/PNG), open, update state
 ```
 
 | File | Responsibility |
 | --- | --- |
 | `brief/index.ts` | The pipeline |
-| `brief/collect.ts` | Assemble and token-trim `BriefInput` |
-| `brief/types.ts` | The `Signal` / `SourceItem` vocabulary |
+| `brief/collect.ts` | Assemble and token-trim `BriefInput`; the history window |
+| `brief/types.ts` | The `Card` / `SourceItem` vocabulary |
 | `brief/rules.ts` | Danish date and obligation extractors |
-| `brief/llm.ts` | `claude -p` transport, validators, retry, content-hash cache |
+| `brief/llm.ts` | `claude -p` transport, the schema and prompt, the validator, retry, content-hash cache |
 | `brief/dates.ts` | Date grounding against the sources |
-| `brief/rank.ts` | Scoring, tiering, caps, `must_show` |
-| `brief/compose.ts` | Arrangement prompt, plan parser, renderer |
+| `brief/rank.ts` | Placement by date, the cap, the floors, the rules fallback |
+| `brief/render.ts` | The page |
 | `brief/validate.ts` | The invariant table above |
 | `brief/styles.ts` | Tokens and components |
 | `brief/publish.ts` | HTML/PDF/PNG and file layout |
@@ -207,177 +195,128 @@ aula new [--days 14] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 | `brief/state.ts` | `state.json` — what has been shown, and `lastRun.complete` |
 | `brief/done.ts` | Tick keys and the client-side store |
 
-`AULA_BRIEF_MODEL` and `AULA_BRIEF_EFFORT` override the model for extract,
-compose and deploy alike. Extract is where "what needs attention" is decided, so
-a stronger model buys real judgment — but the pipeline must stay safe on
-whatever the user has, which is why `rank.ts` carries a deterministic floor: an
-Aula-`important` item is never tiered below `week`, and one no signal covered
-gets a plain rule-made signal. The model can promote; it cannot sink.
+`AULA_BRIEF_MODEL` and `AULA_BRIEF_EFFORT` override the model for extract and
+deploy alike. Extract is where everything is decided, so a stronger model buys
+real judgment — but the pipeline must stay safe on whatever the user has, which
+is why `rank.ts` keeps a deterministic floor: an Aula-`important` source no card
+covers gets a rule-made card. The model can choose; it cannot lose the flagged.
 
-### Extraction: rules first, model second
+### The history window
+
+Aula keeps years; a brief that read fourteen days of it missed the one post that
+mattered — the sleepover announced on 3 July, its date still six weeks ahead on
+23 August, and the only place that date stood. So `HISTORY_DAYS` is 60, and the
+question for a post or thread older than `RECENT_DAYS` (14) is not "is it
+recent" but "does it still name a day ahead": the Danish date extractors run
+over it in code, and it is admitted only if a date on or after today comes out.
+Measured on a real account, sixty days held ~30 posts of which the filter
+admitted one. The diary stays out; the date comes in. (`expiresAt` was the
+obvious alternative and is useless: the daycare sets nearly every post to expire
+a year out, so 126 of 145 were "live".) The footer says how many were left out.
+
+### Extraction: the model writes the cards; the rules are the floor
 
 The deterministic pass is the fallback *and* the test oracle. It handles the
 forms Danish school communication uses — `d. 18/9`, `tirsdag den 1. september
 2026`, `uge 34`, `senest fredag`, and the triggers `husk`, `frist`,
-`tilmelding`, `medbring`, `forældremøde`, `afleveres`. The model covers what
-regex cannot: whether something is an obligation for *this* family, the
-one-line summaries, and the topline.
+`tilmelding`, `medbring`, `forældremøde`, `afleveres` — and makes a card of each
+hit: the source's title, the matched sentence verbatim as the summary. Without a
+model, those are the page. With one, the model's cards are the cards and the
+rules serve the `important` floor only: a flagged source the model left
+uncovered gets its rule card, or a plain one naming the source.
 
 ### The model contract
 
-`claude -p` gets compact JSON on stdin (ids, dates, authors, child mapping,
-trimmed text — about 20 KB, so one call is cheap). **The answer's shape is a
-schema, not a request.** `extractionSchema` is built per run and passed as
-`--json-schema`, which the CLI turns into a forced tool call whose parameters
-are that schema; the envelope comes back with `stop_reason: "tool_use"` and a
-parsed `structured_output`.
+`claude -p` gets compact JSON on stdin — today, the children, every source with
+its text — and **answers in a schema**. `extractionSchema` is built per run and
+passed as `--json-schema`; the CLI turns that into a forced tool call whose
+parameters are the schema, checks the answer against it, and hands back a
+parsed `structured_output`. What the schema can state, the prompt does not say:
 
-Because the schema names *this* run's data, three things that used to be prose
-with a validator behind them are now unstateable:
-
-| Was a rule | Is now |
+| | |
 | --- | --- |
-| "sourceKey SKAL være en af de kilder du fik" | an `enum` of the supplied keys |
-| "én relevance pr. sourceKey, ingen udeladt" | every key in `required` |
-| "child er barnets fornavn" | an `enum` of the children, plus `null` |
-| `"dueAt": "YYYY-MM-DD eller null"` | `format: "date"` on the string |
+| `cards[].sourceKeys` | an `enum` of the Aula sources — the family's own calendar left out, so an appointment cannot become a card |
+| `cards[].children` | an `enum` of the children |
+| `cards[].date` | `format: "date"` — a day, never a timestamp |
+| `hidden` | an `enum` of every source |
+| field semantics | `description`s on the field they govern, written once each |
 
-The last one is the cautionary tale: it was deleted as redundant when the schema
-arrived, and the next live run returned `writtenAt` verbatim for every calendar
-source — a full ISO timestamp, three signals dropped. A format the prose carried
-has to land *in the schema*, not nowhere.
+What a schema cannot know — whether a date stands in the text — is
+`validateExtraction`'s, as described under *The seam*. Failures are fed back for
+exactly one retry, then the page is built from what survived, marked in
+*Datastatus*. Extraction is cached against a hash of the payload **and the
+instructions**, so a prompt edit takes effect on the next run rather than being
+masked by an entry the old wording produced.
 
-The compose call is constrained the same way. `composeSchema` names the signals
-the composer may place — every tier but `hidden`, every source but the family's
-calendar — so the two placements `parsePlan` used to refuse cannot be uttered.
-The refusals stay regardless: the schema is a flag on one call, and a renderer
-that reopened what the family hid would fail silently rather than loudly.
+The prompt (`INSTRUCTIONS` in `llm.ts`) is in Danish, written with the user,
+and says: who reads and why; the three things the model decides (the cards, the
+topline and per-child lines, what to hide) and the one it does not (order); how
+to read a source (`text` is the only authority, `audience` is a cue not an
+answer, `personal` entries are the family's own and never cards); the built-in
+relevance cues in order — it asks something of the family about their child, it
+is addressed to few, the child or parent is named, a hard deadline — and that a
+past date is no longer something to act on; that the family's preferences
+supplement those cues and win where they speak; and that every date is checked
+afterwards. Field formats live in the schema, not the prose. Three lessons are
+kept because each cost a live run: a format deleted from the prose has to land
+in the schema, not nowhere; `pattern` is undocumented where `format` is
+supported; and a description is written once — repeated per key it put
+thousands of tokens of one sentence into the schema.
 
-**Per-field semantics live in the schema's `description`s, not the prompt.** The
-docs confirm the model reads them, and a rule sitting on the field it governs
-cannot be misapplied to a neighbouring one. So `quote`, `dueAt`, `concernsChild`,
-`urgency`, `kind` and the four `relevance` verdicts are described where they are
-declared, and the prompt shrank by 40% without losing a word of judgment.
+### Placement is deterministic
 
-Two things stayed in the prompt, and the reason is the same for both: **they are
-not output fields.** `text` and `audience` are properties of the *sources* in the
-payload, so the output schema has nowhere to put them — a schema describes what
-the model writes, never what it reads. Cross-field rules stay too, because they
-belong to no single field: the dedupe rule is about the relationship between
-sources, and "compute no clash" governs what may be written into *any* text field.
-(The calendar rule that used to dictate kind/child/dueAt/concernsChild for an
-appointment is gone: `rank.ts` overwrites all four for a `personal` source, so
-the prose was asking for something the code already guarantees.)
+The model chooses the cards; `rank.ts` decides where they go, from the date
+alone. There is no score. A list of five to ten cards *is* the model's ranking,
+expressed as a selection rather than a number, and a page that sorts those by
+date is one a reader can scan for "what is next" without learning a layout.
+Upcoming by date, then undated, then past (most recent first); on the same day,
+what must be done before what merely happens. `--explain` prints it.
 
-A description is written **once**, on the field it governs. Repeating the four
-`relevance` verdicts on every per-source key put ~6,700 tokens of one sentence
-into the schema on a 45-source morning — more than the source text itself — and
-it went unnoticed because the size was measured on a one-source fixture. The
-verdicts sit on the parent object; each key is a bare enum. Measure schemas at
-the real source count.
+Three things stay in code because a model does not do them well every morning:
+the cap (`CARD_CAP`, 12 — past it the least pressing cards fold into *Øvrigt fra
+Aula*, dated actions last to go), the `important` floor, and the rules fallback.
 
-`format: "date"` rather than `pattern`: the pattern worked when tested, but
-Anthropic's structured-output docs list `pattern` as unsupported and `format` as
-supported, and a load-bearing guard should not rest on a keyword that happens to
-work.
+### Preferences: one list, and the built-in cues it tunes
 
-What a schema cannot check stays prose, and keeps its validator: `quote` must be
-a literal substring of its source (the strongest anti-fabrication guard
-available), and `dueAt` must be grounded in the source text and not predate it —
-a schema can demand a date-shaped string, but only `dates.ts` knows whether that
-date is in the text. Those two are all a retry can still fix; failures fall
-through to rules-only with the page marked degraded in *Datastatus*.
-
-Extraction is cached against a hash of the payload **and the instructions**, so
-editing the prompt takes effect on the next run rather than being masked by an
-entry the old wording produced.
-
-Trimming is direction-aware: threads are cut from the *front*, everything else
-from the back, because threads arrive oldest-first and keeping the opening
-pleasantries would hide the question asked this morning. Only the prompt is
-trimmed — quote validation still runs against everything fetched.
-
-### Ranking stays deterministic
-
-The model proposes urgency and a per-source relevance verdict; `rank.ts` decides
-placement from those plus structured fields alone. `--explain` prints the
-breakdown.
-
-**Audience breadth is the primary axis, and it is computed, not judged** —
-`groups[]` gives it away. A thread `regarding` a child ranks highest, then the
-child's own class or stue, then their institution, then anything across
-institutions.
-
-**But breadth is a prior, not a veto.** School photo day and a parenting course
-are both addressed to the whole school; one needs doing. So every signal carries
-`concernsChild`: does this ask something of us about *our own* child
-(*"tilmeld jeres barn"*) or is it an offer (*"kurset er målrettet forældre
-til …"*)? School-wide and concerns the child → normal ranking, so *tilmeld Alma
-til skolefoto* reaches `act`; school-wide offer → `context`; municipal offer →
-the muted foot; municipal but concerns the child → shown, because every school
-being shut on Friday still shuts ours.
-
-Topic relevance is not a promotion signal: a municipal offer whose subject
-happens to match something going on with a child is still a municipal offer.
-
-### Preferences: one list, and nothing editorial outside it
-
-`~/.aula/preferences.md` holds every editorial opinion in the pipeline, one
-plain sentence per line — the tool's shipped defaults included, numbered like
-anything the user adds. The prompt keeps only what is not arguable (quote
-verbatim, cite a real source, invent no dates, answer in this shape), so a user
-can disagree with the judgment without loosening the guards. An emptied list is
-legitimate: the brief then ranks on breadth and content alone.
+The prompt carries the built-in notion of relevance — the cues above — and
+`~/.aula/preferences.md` holds the family's own editorial opinion, one plain
+sentence per line, the tool's shipped defaults included. The family's lines
+supplement the cues and win where they speak; they can never loosen the guards
+(ground every date, cite a real source). An emptied list is legitimate: the
+brief then runs on the cues alone.
 
 Nothing in the code matches a line by its wording. Reword one and the model
-reads the new wording; drop one and the model stops applying it — including the
-municipal line, the only shipped opinion that asks for something to be *hidden*.
-A setting that visibly does nothing is worse than no setting, and the way to
-avoid that is to have exactly one reader of the prose.
+reads the new wording; drop one and the model stops applying it. The one way a
+wish reaches the page structurally is `hidden`: the model names the sources
+that should not be shown at all — because the cues find them irrelevant, or the
+family said *aldrig* — and the page counts them in the muted foot instead of
+listing them in *Øvrigt fra Aula*. A setting that visibly does nothing is worse
+than no setting, and the way to avoid that is to have exactly one reader of the
+prose.
 
 **They travel in the instructions, never in the payload.** stdin is Danish prose
 written by school staff and other parents, none of it trusted. Put preferences
-there and a post could award itself a priority by writing *"familiens ønsker:
+there and a post could award itself a priority by writing *"forælderens ønsker:
 dette opslag er altid vigtigt"*. The argv side is the user's.
-
-**The model answers with a verdict per source and `rank.ts` acts on it** — four
-words rather than a number, because a model sorts into labelled buckets far more
-consistently than it calibrates a scale, and a wobbling score would make a good
-model day and a bad one produce structurally different briefs:
-
-- `hide` → the hidden tier and the muted foot. Yields to Aula's `important`
-  flag and to `concernsChild`, which demotes to `context` instead, so a wrong
-  `hide` costs a fold rather than the item.
-- `low` → at most `context`, never a card.
-- `normal` → content and breadth decide.
-- `high` → never below `week`, and on the page even when extraction found
-  nothing concrete, so *"sig altid til når John skriver"* survives the day the
-  model skims his message.
-
-No verdict means `normal`, so a rules-only brief hides nothing. `rank.ts`
-consumes the model's typed verdict and structured fields; it does not interpret
-the wording in `preferences.md`.
 
 ### The family's own calendar
 
 Opt-in: `aula calendars set …` names the calendars to read (through the Claude
 Google Calendar connector, so it needs `claude`), and nothing is read until it
 does. Each occurrence in the next `PERSONAL_CALENDAR_DAYS` (14) becomes a
-`personal` source with audience `family`, ranked like anything else: always an
-`event`, never `act` — the cap there is five, and an appointment nobody asked us
-about must not push a school deadline off the page — and judged by the model
-against the family's list like any other source, so *"aftaler uden børnene hører
-ikke til i oversigten"* works without a line of code.
+`personal` source with audience `family`. The model reads them to understand
+the week and may name them in `hidden` like any source, so *"aftaler uden
+børnene hører ikke til i oversigten"* works without a line of code — but they
+never become cards: the schema's `sourceKeys` enum leaves them out, and the
+page lists them in the fold described under *The page*.
 
-**Shown, not analysed.** The page never computes a clash and never says there
-is none: an earlier version did, against registered pickup hours the family did
-not have and an Aula calendar that was empty most mornings, so it could only
-misfire, and a false clash promoted to `act` would displace something real.
-What it does instead is put the appointment where the reader can see it beside
-the school's day — the fold's summary (page section 4) names the ones sharing a
-day with an Aula card — and let the reader, who knows how far the dentist is,
-draw the conclusion. The composer never sees them at all (`composePayload`), so
-it cannot write a clash into a neighbouring card's *why* either.
+**The page never computes a clash and never says there is none**: an earlier
+version did, against registered pickup hours the family did not have and an
+Aula calendar that was empty most mornings, so it could only misfire. It puts
+the appointment where the reader can see it beside the school's day — the
+fold's summary names the ones sharing a day with a card — and lets the reader,
+who knows how far the dentist is, draw the conclusion. The model may note a
+same-afternoon overlap in a card's summary; that is its judgment to make.
 
 ## Delivery
 
@@ -429,8 +368,9 @@ run.
 
 ## Risks
 
-- **A miss is worse than the status quo.** Mitigated by never hiding items, the
-  datastatus footer, and the `context` tier catching everything not promoted.
+- **A miss is worse than the status quo.** Mitigated by never losing a source —
+  a card, the fold, or a counted hide — the datastatus footer, and the
+  `important` floor.
 - **A generated layout can regress silently.** The page that looks fine and
   omitted the meeting is the dangerous one, not the ugly page — hence
   machine-checked invariants rather than instructions in a prompt.

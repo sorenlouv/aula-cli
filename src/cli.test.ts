@@ -798,38 +798,46 @@ test('a remembered wish reaches the model that writes the overview', () => {
   assert.match(calls, /Fællesbeskeder til alle forældre i kommunen/);
 });
 
-test("the model's relevance verdicts reach the ranker — the whole return leg", () => {
+test("the model's cards and hides reach the page — the whole return leg", () => {
   // The companion to the test above: that one proves a wish reaches the model,
   // this one proves the model's answer reaches the page. Between them they
   // cover the round trip, and the return leg is the half with no second
-  // opinion behind it — since the deterministic re-reading of preferences.md
-  // was removed, `extracted.relevance` is the only path from the user's list to
-  // where anything lands. Every piece of that path is unit-tested and the wiring
-  // is not: disconnecting it (index.ts dropping the field, rank() called with
-  // two arguments) leaves every other test in this repo green.
+  // opinion behind it: the model's cards are the cards, and its `hidden` is
+  // the only path from the user's list to something not being shown. Every
+  // piece of that path is unit-tested and the wiring is not: disconnecting it
+  // (index.ts dropping a field, rank() called without `hidden`) leaves every
+  // other test in this repo green.
   const answer = JSON.stringify({
     topline: 'Rolig uge.',
-    signals: [],
+    // thread:5002 is about one child; thread:5003 is the fake school's
+    // "Til alle forældre".
+    cards: [
+      {
+        title: 'Svar Yrsa om mødet',
+        summary: 'Yrsa spørger om en dato.',
+        children: [],
+        date: null,
+        needsAction: true,
+        reason: 'Beskeden er rettet til jer om jeres barn.',
+        sourceKeys: ['thread:5002'],
+      },
+    ],
     childSummaries: {},
-    // thread:5003 is the fake school's "Til alle forældre"; thread:5002 is
-    // about one child. The rules layer finds a signal in both.
-    relevance: { 'thread:5003': 'hide', 'thread:5002': 'high' },
+    hidden: ['thread:5003'],
   });
   const box = sandboxWithClaude('ok', answer);
 
   const result = box.run('new', '--no-deploy', '--no-open', '--text', '--explain');
   assert.equal(result.code, 0, result.stderr);
-  // Rules alone find three signals and hide nothing. The hide verdict is the
-  // only thing that can move this count.
-  assert.match(result.stdout, /2 punkt\(er\) vist, 1 skjult efter jeres ønsker/);
-  // …and the score breakdown names the verdicts that did it, on both sides.
-  assert.match(result.stderr, /relevance:hide/);
-  assert.match(result.stderr, /relevance:high \+25/);
-  // This fixture intentionally ranks only two of several sources. The useful
-  // verdicts still apply, but the omission is never cached or marked complete.
-  assert.match(result.stdout, /Ufuldstændig kørsel/);
+  // The model's card, plus one the `important` floor adds for the fake school's
+  // unread thread that no card covered; one source hidden, as the model said.
+  assert.match(result.stdout, /2 kort, 1 kilde\(r\) skjult — modellen skrev kortene/);
+  assert.match(result.stderr, /2 kort, .* 1 skjult/);
+  assert.match(result.stderr, /rule-made/);
   const page = readFileSync(join(box.dir, 'brief', 'latest.html'), 'utf8');
-  assert.match(page, /Modellens vurdering var ufuldstændig/);
+  assert.match(page, /Svar Yrsa om mødet/);
+  assert.match(page, /<summary>1 skjult<\/summary>/);
+  assert.match(page, /Vist fordi:<\/b> Beskeden er rettet til jer/);
 });
 
 test('preferences reset puts the shipped list back and names the casualties', () => {

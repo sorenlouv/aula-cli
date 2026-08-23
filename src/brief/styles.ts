@@ -1,10 +1,9 @@
 /**
  * The design system the rendered page is built from.
  *
- * The stylesheet is *not* generated. The model decides ordering and wording
- * through its compose plan, but every element and colour on the page comes
- * from here — so a bad model day costs an odd ordering, never an unreadable
- * page.
+ * The stylesheet is *not* generated. The model writes the cards, but every
+ * element and colour on the page comes from here — so a bad model day costs a
+ * dull card, never an unreadable page.
  *
  * Derived from the mockup that was reviewed and approved, including the print
  * rules, which matter more than they look: the PDF is the copy that gets
@@ -76,8 +75,11 @@ h2::after{content:"";flex:1;height:1px;background:var(--line)}
 .card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:14px;
   padding:18px 58px 16px 20px;
   margin-bottom:10px;box-shadow:var(--shadow);border-left:3px solid var(--line)}
-.card.now{border-left-color:var(--now)}
-.card.soon{border-left-color:var(--soon)}
+/* A card that asks something of the family is drawn with the warm edge; the
+   chip beside its date says so in words. Cards to merely know keep the quiet
+   edge, so the reader's eye finds the work in a list that is otherwise by date. */
+.card.act{border-left-color:var(--now)}
+.chip.act{background:var(--now-bg);color:var(--now)}
 .row{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:7px}
 .chip{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;padding:3px 9px;border-radius:6px}
 .chip.now{background:var(--now-bg);color:var(--now)}
@@ -85,16 +87,17 @@ h2::after{content:"";flex:1;height:1px;background:var(--line)}
 .chip.new{background:transparent;color:var(--ink-3);border:1px dashed var(--line)}
 .who{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-2);font-weight:550}
 .title{font-size:17.5px;font-weight:600;letter-spacing:-.01em;margin:0 0 6px}
-.why{color:var(--ink-2);font-size:14.5px;margin:0 0 10px}
-blockquote{margin:0;padding:9px 14px;background:var(--quote);border-radius:8px;font-size:13.5px;
-  color:var(--ink-2);font-style:italic}
+.summary{color:var(--ink-2);font-size:14.5px;margin:0 0 10px}
+/* Why the card is on the page, first thing inside Læs mere. */
+.reason{margin:0 0 10px;font-size:13.5px;color:var(--ink-2)}
+.reason b{font-weight:650;color:var(--ink)}
+/* One source inside a card's fold; a second and later one is set off from the
+   first, so a merged card reads as its parts. */
+.src-block+.src-block{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.src-block>.msg-head{margin-bottom:8px;padding-bottom:7px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.src-block>.msg-head a{margin-left:auto;font-size:11.5px;color:var(--ink-3);text-decoration:underline;text-underline-offset:2px}
 .src{margin-top:9px;font-size:12px;color:var(--ink-3)}
 .src a{color:var(--ink-3);text-decoration:underline;text-underline-offset:2px}
-
-/* The summary of a conversation, above the exchange it summarises. Set apart
-   from .why: that says why this matters to us, this says what was said. */
-.gist{margin:10px 0 0;padding-left:11px;border-left:2px solid var(--line);
-  font-size:14px;color:var(--ink-2)}
 
 /* The more-block — the original, one tap under the summary of it. Deliberately
    quiet: on most days it is not needed, and a card that shouts about its own
@@ -193,9 +196,6 @@ details[open]>summary::after{content:"⌃"}
 .di b{font-size:14px;font-weight:600;display:block}
 .di p{margin:3px 0 0;font-size:13.5px;color:var(--ink-2)}
 .di .src{margin-top:7px}
-/* The dateline head on a source that has no messages of its own — same shape
-   as a thread's, so an original reads the same however it arrived. */
-.more .body>.msg-head{margin-bottom:8px;padding-bottom:7px;border-bottom:1px solid var(--line)}
 .di .more .body p{font-size:14px}
 details.muted{margin-top:30px;background:transparent;border-style:dashed;box-shadow:none;opacity:.62}
 details.muted summary{font-size:12.5px;font-weight:500;color:var(--ink-3);padding:11px 16px}

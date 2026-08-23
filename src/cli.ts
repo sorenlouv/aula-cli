@@ -125,7 +125,8 @@ Everyday:
   status                       Whether you are logged in, and for how much longer
 
 Options for new:
-  --days <n>                   How much history to read (default 14)
+  --days <n>                   How much history to read (default 60; older posts
+                               come along only if they name a date still ahead)
   --no-open                    Do not open the page (a pipe or scheduler never opens)
   --no-llm                     Danish rules only — skip the model calls
   --no-deploy                  Do not update the hosted copy this run
@@ -217,7 +218,8 @@ async function main(): Promise<number> {
   // history for messages and posts.
   const readsOnlyCalendarRange = command === 'calendar' || command === 'doctor';
   const maxDays = readsOnlyCalendarRange ? CALENDAR_MAX_SPAN_DAYS : MAX_HISTORY_DAYS;
-  const days = optionalInteger(values.days, '--days', { min: 1, max: maxDays }) ?? 14;
+  const daysOption = optionalInteger(values.days, '--days', { min: 1, max: maxDays });
+  const days = daysOption ?? 14;
   const page = optionalInteger(values.page, '--page', { min: 0 });
   const groupId = optionalInteger(values.group, '--group', { min: 1 });
   const fromDate = optionalIsoDate(values.from, '--from');
@@ -578,7 +580,10 @@ async function main(): Promise<number> {
 
     case 'new': {
       const run = await runBrief(client, {
-        days,
+        // The brief reads further back than a digest: an old post can be the
+        // only place a date stands. `HISTORY_DAYS` in collect.ts says how far,
+        // and what an old post must carry to be admitted.
+        ...(daysOption !== undefined ? { days: daysOption } : {}),
         isoWeek: week,
         useModel: !values['no-llm'],
         deploy: !values['no-deploy'],
@@ -605,8 +610,8 @@ async function main(): Promise<number> {
           deployed: run.deployment.status === 'ok' ? run.deployment.url : null,
           complete: run.complete,
           topline: run.topline,
-          signals: run.brief.signals.filter((s) => s.tier !== 'hidden').length,
-          hidden: run.brief.signals.filter((s) => s.tier === 'hidden').length,
+          cards: run.brief.cards.length,
+          hidden: run.brief.hidden.length,
           notes: run.notes,
         },
         asText,
@@ -1438,14 +1443,14 @@ function renderBrief(result: {
   deployed: string | null;
   complete: boolean;
   topline: string | null;
-  signals: number;
+  cards: number;
   hidden: number;
   notes: string[];
 }): string {
   const lines = [
     result.topline ?? '(ingen topline)',
     '',
-    `${result.signals} punkt(er) vist, ${result.hidden} skjult efter jeres ønsker — layout: ${result.layout}`,
+    `${result.cards} kort, ${result.hidden} kilde(r) skjult — ${result.layout === 'model' ? 'modellen skrev kortene' : 'kun reglerne'}`,
     `HTML: ${result.html}`,
   ];
   if (result.pdf) lines.push(`PDF:  ${result.pdf}`);

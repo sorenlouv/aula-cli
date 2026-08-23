@@ -25,38 +25,35 @@
  *   `localStorage` access throws. Storage is keyed by origin and not by
  *   version, so `force: true` replacing the whole page each morning leaves it
  *   untouched.
- * - **The key is not the signal id.** See `doneKeys`.
+ * - **The key is not the card id.** See `doneKeys`.
  */
 
-import type { RankedSignal } from './types.ts';
+import type { Card } from './types.ts';
 
 /**
  * What a tick is recorded against.
  *
- * Not `signal.id`: model signals are numbered `model:0`, `model:1` … by their
+ * Not `card.id`: model cards are numbered `model:0`, `model:1` … by their
  * position in whatever came back and survived validation, so yesterday's
  * `model:3` is tomorrow's something else entirely. Storing that would tick off
  * a *different* item each morning — the "page looks fine and quietly left out
  * the meeting" failure, arrived at from the other direction.
  *
  * So the key is built from the two fields that mean the same thing tomorrow:
- * `sourceKey` is Aula's own id, and `dueAt` is grounded against the source text
- * by `dates.ts` before it is allowed to exist. Deliberately *not* in the key:
- * `title`, which the composer rewords by design, and `kind`, which is model
- * judgement and drifts between `action`, `deadline` and `bring` for the same
- * sentence.
+ * the source keys are Aula's own ids, and `date` is grounded against the source
+ * text by `dates.ts` before it is allowed to exist. Deliberately *not* in the
+ * key: `title` and `summary`, which the model words differently each morning.
  *
  * Including the date is also what scopes a tick correctly for something
  * recurring: next Monday's *husk løbetøj* has a different `dueAt`, so it comes
  * back, which is the whole point. An undated obligation gets `-` and stays
  * ticked until the sweep in the page script drops it.
  *
- * A signal carries *several* keys, one per source it was merged from. The
- * ranker keeps the highest-scoring source as `sourceKey`, and which source wins
- * can change between runs — the same meeting arriving as an invitation and a
- * reminder is the normal case. Writing every key on the tick, and matching on
- * any of them, is what stops a merge-winner flip resurrecting something already
- * dealt with.
+ * A card carries *several* keys, one per source it gathers — the same meeting
+ * arriving as an invitation and a reminder is the normal case, and which
+ * sources a card gathers can change between runs. Writing every key on the
+ * tick, and matching on any of them, is what stops a regrouping resurrecting
+ * something already dealt with.
  *
  * The cost, stated plainly: two *distinct* obligations from one source on one
  * date share a key, so ticking one hides both. Rare, and recoverable — a ticked
@@ -66,9 +63,9 @@ import type { RankedSignal } from './types.ts';
  * cannot contain one: they are built in `collect.ts` from numeric ids, ISO
  * weeks and snake_case provider names.
  */
-export function doneKeys(signal: RankedSignal): string[] {
-  const due = signal.dueAt ?? '-';
-  return [signal.sourceKey, ...signal.mergedSourceKeys].map((key) => `${key}|${due}`);
+export function doneKeys(card: Pick<Card, 'sourceKeys' | 'date'>): string[] {
+  const day = card.date ?? '-';
+  return card.sourceKeys.map((key) => `${key}|${day}`);
 }
 
 /**
