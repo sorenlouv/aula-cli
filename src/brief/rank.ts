@@ -52,22 +52,44 @@ export function cardsFromRules(input: BriefInput, now = new Date()): Card[] {
     if (item.kind === 'personal') continue;
     const written = item.at ? new Date(item.at) : now;
     const reference = Number.isNaN(written.getTime()) ? now : written;
-    for (const [index, hit] of extractHits(item.text, reference, now).entries()) {
-      // A weekly-plan entry carries its own date, so "Husk skiftetøj" with no
-      // date in the sentence still lands on the right day. A post or thread
-      // does not: its timestamp is when it was written, not a deadline.
-      const date = hit.dueAt ?? (item.kind === 'plan' ? isoOf(item.at) : null);
-      cards.push({
-        id: `${item.key}#${index}`,
-        title: item.title,
-        summary: hit.quote,
-        children: item.childNames.map(firstName),
-        date,
-        needsAction: hit.kind === 'bring' || hit.kind === 'action' || hit.kind === 'deadline',
-        reason: null,
-        sourceKeys: [item.key],
-        origin: 'rule',
-      });
+    const messageReference = (at: string | null) => {
+      if (!at) return reference;
+      const parsed = new Date(at);
+      return Number.isNaN(parsed.getTime()) ? reference : parsed;
+    };
+    const scans = item.conversation
+      ? [
+          {
+            text: item.title,
+            reference: messageReference(
+              item.conversation.messages.find((message) => message.at)?.at ?? null,
+            ),
+          },
+          ...item.conversation.messages.map((message) => ({
+            text: message.text,
+            reference: messageReference(message.at),
+          })),
+        ]
+      : [{ text: item.text, reference }];
+    let index = 0;
+    for (const scan of scans) {
+      for (const hit of extractHits(scan.text, scan.reference, now)) {
+        // A weekly-plan entry carries its own date, so "Husk skiftetøj" with no
+        // date in the sentence still lands on the right day. A post or thread
+        // does not: its timestamp is when it was written, not a deadline.
+        const date = hit.dueAt ?? (item.kind === 'plan' ? isoOf(item.at) : null);
+        cards.push({
+          id: `${item.key}#${index++}`,
+          title: item.title,
+          summary: hit.quote,
+          children: item.childNames.map(firstName),
+          date,
+          needsAction: hit.kind === 'bring' || hit.kind === 'action' || hit.kind === 'deadline',
+          reason: null,
+          sourceKeys: [item.key],
+          origin: 'rule',
+        });
+      }
     }
   }
   return cards;

@@ -226,6 +226,30 @@ describe('cardsFromRules', () => {
     expect(rule?.date).toBeNull();
   });
 
+  test('a thread rule resolves relative language from the message that contains it', () => {
+    const thread = item({
+      key: 'thread:relative',
+      kind: 'thread',
+      title: 'Aftale',
+      text: 'Husk at vi ses i morgen.\n\nTak for aftalen.',
+      at: '2026-08-22T09:00:00+00:00',
+      conversation: {
+        messages: [
+          {
+            from: 'Palle',
+            at: '2026-08-10T09:00:00+00:00',
+            text: 'Husk at vi ses i morgen.',
+          },
+          { from: 'Yrsa', at: '2026-08-22T09:00:00+00:00', text: 'Tak for aftalen.' },
+        ],
+        total: 2,
+        truncated: false,
+      },
+    });
+
+    expect(cardsFromRules(input([thread]), TODAY)[0]?.date).toBe('2026-08-11');
+  });
+
   test('the Danish extractors are not run over a calendar title', () => {
     const source = { ...DENTIST, title: 'Frist for tilmelding d. 18/9 kl. 09:00' };
     expect(cardsFromRules(input([source]), TODAY)).toEqual([]);

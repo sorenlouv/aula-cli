@@ -229,8 +229,34 @@ export function buildDateSupport(input: BriefInput): DateSupport {
     }
     const at = item.at ? isoDate(item.at) : null;
     const reference = at ?? todayParsed;
-    if (reference) {
-      for (const date of extractDates(text, asLocalDate(reference))) per.dates.add(date);
+    const addExtractedDates = (
+      sourceText: string,
+      sourceDate: ReturnType<typeof isoDate> | null,
+    ) => {
+      if (!sourceDate) return;
+      for (const date of extractDates(sourceText, asLocalDate(sourceDate))) per.dates.add(date);
+    };
+    if (item.conversation) {
+      const messages = item.conversation.messages.map((message) => ({
+        ...message,
+        written: message.at ? isoDate(message.at) : null,
+      }));
+      // A subject belongs to the start of the exchange, so its relative dates
+      // use the first timestamp we have. Each message then uses its own: a late
+      // "tak" must not turn "i morgen" from two weeks ago into tomorrow now.
+      addExtractedDates(
+        item.title,
+        messages.find((message) => message.written)?.written ?? reference,
+      );
+      for (const message of messages) {
+        addExtractedDates(message.text, message.written ?? reference);
+        if (message.written) {
+          per.dates.add(message.written.iso);
+          support.weekdays.add(message.written.weekday);
+        }
+      }
+    } else {
+      addExtractedDates(text, reference);
     }
     if (at) {
       // The timestamp's date and weekday are visible metadata, so prose may

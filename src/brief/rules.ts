@@ -169,8 +169,29 @@ export function extractDates(sentence: string, today: Date): string[] {
     if (!found.includes(value)) found.push(value);
   };
 
-  // "1. september 2026", "den 25. august", "d. 24. august", "d. 18 sep"
-  const named = new RegExp(`(\\d{1,2})\\.?\\s+(${MONTH_PATTERN})\\.?(?:\\s+(\\d{4}))?`, 'gi');
+  // "24.-28. august" / "24.–28. august" / "24. til 28. august". Read the
+  // start before the ordinary named-date pass reads the end, because the first
+  // date is what a rule-made event card sorts on.
+  const rangeStart = new RegExp(
+    `\\b(\\d{1,2})\\.?\\s*(?:til\\s*|[-–]\\s*)\\d{1,2}\\.?\\s*(${MONTH_PATTERN})\\.?(?:\\s+(\\d{4}))?`,
+    'gi',
+  );
+  for (const match of sentence.matchAll(rangeStart)) {
+    const day = Number(match[1]);
+    const month = MONTHS[(match[2] ?? '').toLowerCase()];
+    if (!month) continue;
+    const year = match[3] ? Number(match[3]) : inferYear(day, month, today);
+    if (!isValidCalendarDate(year, month, day)) continue;
+    push(new Date(year, month - 1, day));
+  }
+
+  // "1. september 2026", "25.august", "d. 24. august", "d. 18 sep".
+  // A dot may stand in for the whitespace; one of them is required so a word
+  // ending in digits is not mistaken for a date.
+  const named = new RegExp(
+    `\\b(\\d{1,2})(?:\\.\\s*|\\s+)(${MONTH_PATTERN})\\.?(?:\\s+(\\d{4}))?`,
+    'gi',
+  );
   for (const match of sentence.matchAll(named)) {
     const day = Number(match[1]);
     const month = MONTHS[(match[2] ?? '').toLowerCase()];

@@ -125,6 +125,21 @@ describe('dueAtSupported', () => {
     expect(dueAtSupported('2026-08-26', 'post:1', s)).toBe(true);
   });
 
+  test('range starts and named dates without spaces ground dueAt', () => {
+    const cases = [
+      ['Lejrskole 24.-28. august', '2026-08-24'],
+      ['Lejr 24.–28. august', '2026-08-24'],
+      ['Lejrskole 24. til 28. august', '2026-08-24'],
+      ['Husk 25.august', '2026-08-25'],
+      ['Fest 1.sep', '2026-09-01'],
+    ] as const;
+
+    for (const [text, dueAt] of cases) {
+      const s = buildDateSupport(input([item('post:1', text, '2026-08-20T11:00:00+00:00')]));
+      expect(dueAtSupported(dueAt, 'post:1', s)).toBe(true);
+    }
+  });
+
   test('a date from another source does not ground it', () => {
     const s = buildDateSupport(
       input([item('post:1', 'Husk turtasken.'), item('post:2', 'Skolefoto 25/8.')]),
@@ -149,6 +164,28 @@ describe('dueAtSupported', () => {
     const s = buildDateSupport(input([item('post:1', 'I morgen holder vi løbedag.')]));
     expect(dueAtSupported('2026-08-11', 'post:1', s)).toBe(true);
     expect(dueAtSupported('2026-08-14', 'post:1', s)).toBe(false);
+  });
+
+  test('relative dates in a thread resolve from their individual message timestamps', () => {
+    const thread = sourceItem({
+      key: 'thread:1',
+      kind: 'thread',
+      title: 'Skal vi ses?',
+      text: 'Vi ses i morgen.\n\nTak for aftalen.',
+      at: '2026-08-22T09:00:00+00:00',
+      conversation: {
+        messages: [
+          { from: 'Palle', at: '2026-08-10T09:00:00+00:00', text: 'Vi ses i morgen.' },
+          { from: 'Yrsa', at: '2026-08-22T09:00:00+00:00', text: 'Tak for aftalen.' },
+        ],
+        total: 2,
+        truncated: false,
+      },
+    });
+    const s = buildDateSupport(input([thread]));
+
+    expect(dueAtSupported('2026-08-11', thread.key, s)).toBe(true);
+    expect(dueAtSupported('2026-08-23', thread.key, s)).toBe(false);
   });
 
   test('a source timestamp cannot license the same month and day in another year', () => {
