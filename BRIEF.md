@@ -157,6 +157,10 @@ A brief that keeps asking for something you did last Tuesday is worse than one
 that never asked. Cards and calendar rows are tickable and the tick survives the
 next morning's regeneration.
 
+Folded entries in *Øvrigt fra Aula* are not tickable: they are compact source
+entries, not cards, so the ticking invariant covers only cards displayed on the
+page (plus the calendar rows).
+
 **The store is the browser's.** The page is read on a phone and nothing there
 can write to `~/.aula`, so the record is `localStorage` on the page's origin
 (pruned after `KEEP_DAYS`). `state.json` never learns: the model still writes
@@ -303,7 +307,9 @@ that should not be shown at all — because the cues find them irrelevant, or th
 family said *aldrig* — and the page counts them in the muted foot instead of
 listing them in *Øvrigt fra Aula*. A setting that visibly does nothing is worse
 than no setting, and the way to avoid that is to have exactly one reader of the
-prose.
+prose. `hidden` therefore stays in the model contract as source keys only:
+typically about 200–300 output tokens, in exchange for giving *aldrig* an
+observable effect.
 
 **They travel in the instructions, never in the payload.** stdin is Danish prose
 written by school staff and other parents, none of it trusted. Put preferences
