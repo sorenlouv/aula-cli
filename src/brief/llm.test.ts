@@ -165,6 +165,21 @@ describe('validateExtraction', () => {
     expect(result.childSummaries).toEqual({ Viggo: 'Løbedag mandag.' });
   });
 
+  test('normalises enum values whose capitalization changed', () => {
+    const result = validateExtraction(
+      input,
+      answer({
+        cards: [{ ...good, sourceKeys: ['POST:1'], children: ['vIGGO'] }],
+        hidden: ['POST:2'],
+      }),
+    );
+
+    expect(result.problems).toEqual([]);
+    expect(result.cards[0]?.sourceKeys).toEqual(['post:1']);
+    expect(result.cards[0]?.children).toEqual(['Viggo']);
+    expect(result.hidden).toEqual(['post:2']);
+  });
+
   test('a card may gather several sources, and its date may come from any of them', () => {
     // The July post has the date; the August post has the news. One card.
     const merged = {

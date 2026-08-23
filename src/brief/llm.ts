@@ -294,6 +294,17 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
   const problems: string[] = [];
   const items = new Map(input.items.map((item) => [item.key, item]));
   const firstNames = new Set(input.family.children.map((c) => c.firstName));
+  // Anthropic's structured-output contract explicitly permits string enum and
+  // const values to differ only in capitalization. Recover the input's exact
+  // spelling before any lookup or before a key reaches the rendered page.
+  const byCase = (values: Iterable<string>) =>
+    new Map([...values].map((value) => [value.toLocaleLowerCase('da-DK'), value]));
+  const itemKeysByCase = byCase(items.keys());
+  const firstNamesByCase = byCase(firstNames);
+  const canonicalItemKey = (value: string) =>
+    items.has(value) ? value : (itemKeysByCase.get(value.toLocaleLowerCase('da-DK')) ?? value);
+  const canonicalFirstName = (value: string) =>
+    firstNames.has(value) ? value : firstNamesByCase.get(value.toLocaleLowerCase('da-DK'));
   const support = buildDateSupport(input);
 
   // A claim is unsupported only if *none* of the card's sources supports it —
@@ -322,7 +333,7 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
       continue;
     }
     const sourceKeys = Array.isArray(raw.sourceKeys)
-      ? raw.sourceKeys.filter((key): key is string => typeof key === 'string')
+      ? raw.sourceKeys.filter((key): key is string => typeof key === 'string').map(canonicalItemKey)
       : [];
     const unknown = sourceKeys.filter((key) => !items.has(key));
     if (sourceKeys.length === 0 || unknown.length > 0) {
@@ -357,9 +368,10 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
       continue;
     }
     const children = Array.isArray(raw.children)
-      ? raw.children.filter(
-          (name): name is string => typeof name === 'string' && firstNames.has(name),
-        )
+      ? raw.children
+          .filter((name): name is string => typeof name === 'string')
+          .map(canonicalFirstName)
+          .filter((name): name is string => name !== undefined)
       : [];
     cards.push({
       id: `model:${index}`,
@@ -393,7 +405,10 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
   }
 
   const hidden = Array.isArray(parsed.hidden)
-    ? parsed.hidden.filter((key): key is string => typeof key === 'string' && items.has(key))
+    ? parsed.hidden
+        .filter((key): key is string => typeof key === 'string')
+        .map(canonicalItemKey)
+        .filter((key) => items.has(key))
     : [];
 
   return { topline, cards, childSummaries, hidden, problems };
