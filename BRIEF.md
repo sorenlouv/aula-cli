@@ -101,6 +101,13 @@ every entry with more to show carries a collapsed **Læs mere**. The toggle is
 skipped where the source is the sentence already quoted above it — a *læs mere*
 revealing what you just read teaches people to stop pressing things.
 
+**Every entry says when its source is from** — on the attribution line and
+again as a head inside *Læs mere*, where the question is actually asked. A card
+can hold two dates meaning opposite things, so the source's is always labelled
+by what it is: a post was *skrevet*, a thread's stamp is its *seneste besked*, a
+weekly-plan entry is *for* a day. Calendar entries get none, their date being
+the entry itself. Undated, a quote reads as current however old it is.
+
 A conversation is a different shape from a message: threads of
 `CONVERSATION_MIN_MESSAGES` (3) or more get a summary — what it is about, who
 asked what, whether we still owe a reply — with the exchange underneath, oldest

@@ -42,6 +42,51 @@ function capitalise(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+/**
+ * "13. august", with the year only when it is not the year being read.
+ *
+ * The weekday is dropped on purpose: it earns its place on a chip naming a day
+ * to act on, and is noise on an attribution line that is already dense.
+ */
+function dayMonth(iso: string, today: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const stamp = `${date.getDate()}. ${DA_MONTHS[date.getMonth()]}`;
+  return String(year) === today.slice(0, 4) ? stamp : `${stamp} ${year}`;
+}
+
+/**
+ * When the source is from — the fact that tells a reader whether to trust a
+ * summary of it.
+ *
+ * A card can carry two dates and they mean opposite things: the chip is the day
+ * something happens, this is the day somebody wrote it. So each kind says what
+ * its own timestamp *is* rather than printing a bare date beside the other one:
+ * a post was written, a thread's timestamp is its newest message, a weekly-plan
+ * entry is not written at all but is *for* a day.
+ *
+ * Without it a quote can be read as current when it is not. The overnatning
+ * post is the case that prompted this — a card quoting "vi talte om
+ * overnatningen" reads as news until you know the thing was announced in July.
+ *
+ * `event` and `personal` get none: their timestamp is the entry itself, already
+ * on the chip or in the row, and repeating it as attribution would say the
+ * appointment was written on the day it happens.
+ */
+function sourceDateline(source: SourceItem, today: string): string | null {
+  if (!source.at || source.kind === 'event' || source.kind === 'personal') return null;
+  const day = dayMonth(source.at, today);
+  if (!day) return null;
+  if (source.kind === 'thread') {
+    return (source.conversation?.messages.length ?? 0) > 1
+      ? `seneste besked ${day}`
+      : `skrevet ${day}`;
+  }
+  if (source.kind === 'plan') return `ugeplan for ${day}`;
+  return `skrevet ${day}`;
+}
+
 /** "12. aug · 14:32" — short enough to sit beside a sender's name. */
 function messageWhen(iso: string): string {
   const date = new Date(iso);
@@ -92,7 +137,7 @@ function messageBlock(message: ConversationMessage): string {
  * reveals what the reader just read is the kind of small lie that teaches them
  * to stop pressing things.
  */
-function moreBlock(source: SourceItem, shown: string): string {
+function moreBlock(source: SourceItem, shown: string, today: string): string {
   const conversation = source.conversation;
   const messages = conversation?.messages ?? [];
   const body = flatten(messages.length ? messages.map((m) => m.text).join(' ') : source.text);
@@ -121,7 +166,17 @@ function moreBlock(source: SourceItem, shown: string): string {
       .join('')}${note}</div></details>`;
   }
 
-  return `<details class="more"><summary>Læs mere</summary><div class="body">${paragraphs(source.text)}</div></details>`;
+  // The same head a thread's messages carry, for a source that has no messages:
+  // opening the original is exactly when "and when was this?" gets asked, and a
+  // wall of prose with no date on it is what sent the reader to Aula to check.
+  const dateline = sourceDateline(source, today);
+  const head =
+    source.author || dateline
+      ? `<div class="msg-head">${source.author ? `<b>${escapeHtml(source.author)}</b>` : ''}${
+          dateline ? `<span>${escapeHtml(dateline)}</span>` : ''
+        }</div>`
+      : '';
+  return `<details class="more"><summary>Læs mere</summary><div class="body">${head}${paragraphs(source.text)}</div></details>`;
 }
 
 /**
@@ -592,8 +647,8 @@ function buildPage(
       ${why ? `<p class="why">${escapeHtml(why)}</p>` : ''}
       ${s.quote ? `<blockquote>«${escapeHtml(s.quote)}»</blockquote>` : ''}
       ${gist ? `<p class="gist">${escapeHtml(gist)}</p>` : ''}
-      ${moreBlock(s.source, [title ?? s.title, why, s.quote, gist].filter(Boolean).join(' '))}
-      <div class="src">${escapeHtml(s.source.title)}${s.source.author ? ` · ${escapeHtml(s.source.author)}` : ''}${s.source.url ? ` · <a href="${escapeHtml(s.source.url)}">åbn i Aula</a>` : ''}</div>
+      ${moreBlock(s.source, [title ?? s.title, why, s.quote, gist].filter(Boolean).join(' '), input.today)}
+      <div class="src">${escapeHtml([s.source.title, sourceDateline(s.source, input.today), s.source.author].filter(Boolean).join(' · '))}${s.source.url ? ` · <a href="${escapeHtml(s.source.url)}">åbn i Aula</a>` : ''}</div>
       <button class="tick" type="button" aria-pressed="false" aria-label="Markér som klaret"></button>
     </div>`;
   };
@@ -730,20 +785,20 @@ function buildPage(
             return `<div class="di" data-source-id="${escapeHtml(s.sourceKey)}"><b>${escapeHtml(s.title)}</b><p>${escapeHtml([s.dueAt ? capitalise(danishDate(s.dueAt)) : null, whenLabel(s.source), s.source.author].filter(Boolean).join(' · '))}</p></div>`;
           }
           const gist = opts.conversations?.[s.sourceKey];
-          return `<div class="di" data-source-id="${escapeHtml(s.sourceKey)}"><b>${escapeHtml(s.title)}</b>${s.quote ? `<p>«${escapeHtml(s.quote)}»</p>` : ''}${gist ? `<p class="gist">${escapeHtml(gist)}</p>` : ''}${moreBlock(s.source, [s.title, s.quote, gist].filter(Boolean).join(' '))}</div>`;
+          return `<div class="di" data-source-id="${escapeHtml(s.sourceKey)}"><b>${escapeHtml(s.title)}</b>${s.quote ? `<p>«${escapeHtml(s.quote)}»</p>` : ''}${gist ? `<p class="gist">${escapeHtml(gist)}</p>` : ''}${moreBlock(s.source, [s.title, s.quote, gist].filter(Boolean).join(' '), input.today)}<div class="src">${escapeHtml([sourceDateline(s.source, input.today), s.source.author].filter(Boolean).join(' · '))}</div></div>`;
         })
         .join('')}
       ${brief.unusedSources
         .map((i) => {
           const gist = opts.conversations?.[i.key];
-          return `<div class="di" data-source-id="${escapeHtml(i.key)}"><b>${escapeHtml(i.title)}</b><p>${escapeHtml(i.author ?? '')}</p>${gist ? `<p class="gist">${escapeHtml(gist)}</p>` : ''}${moreBlock(i, [i.title, gist].filter(Boolean).join(' '))}</div>`;
+          return `<div class="di" data-source-id="${escapeHtml(i.key)}"><b>${escapeHtml(i.title)}</b><p>${escapeHtml([sourceDateline(i, input.today), i.author].filter(Boolean).join(' · '))}</p>${gist ? `<p class="gist">${escapeHtml(gist)}</p>` : ''}${moreBlock(i, [i.title, gist].filter(Boolean).join(' '), input.today)}</div>`;
         })
         .join('')}
     </details></section>`
       : ''
   }
 
-  ${hidden.length ? `<details class="muted"><summary>${hidden.length} skjult efter jeres ønsker</summary>${hidden.map((s) => `<div class="di"><b>${escapeHtml(s.title)}</b><p>${escapeHtml(s.source.author ?? s.source.groups.join(', '))}</p></div>`).join('')}</details>` : ''}
+  ${hidden.length ? `<details class="muted"><summary>${hidden.length} skjult efter jeres ønsker</summary>${hidden.map((s) => `<div class="di"><b>${escapeHtml(s.title)}</b><p>${escapeHtml([sourceDateline(s.source, input.today), s.source.author ?? s.source.groups.join(', ')].filter(Boolean).join(' · '))}</p></div>`).join('')}</details>` : ''}
 
   ${fetchFailed ? '' : `<details class="muted"><summary>${escapeHtml(datastatusSummary)}</summary>${datastatus}</details>`}
 

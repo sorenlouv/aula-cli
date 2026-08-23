@@ -455,6 +455,100 @@ describe('Kommende order', () => {
   });
 });
 
+describe('when a source is from', () => {
+  // INPUT.today is 2026-08-13; SOURCE was written 2026-08-13.
+  const from = (overrides: Partial<SourceItem>): RankedBrief => {
+    const item = sourceItem({ key: 'post:5', kind: 'post', title: 'Overnatning', ...overrides });
+    const ranked: RankedSignal = { ...MUST_SHOW, sourceKey: item.key, source: item, quote: null };
+    return { ...BRIEF, signals: [ranked], input: { ...INPUT, items: [item] } };
+  };
+
+  test('a post says when it was written, on the card and inside Læs mere', () => {
+    // The case that prompted this: a card quoting "vi talte om overnatningen"
+    // reads as news until you can see the post is six weeks old.
+    const brief = from({
+      at: '2026-07-03T08:13:00+00:00',
+      author: 'Palle',
+      text: 'Vi afholder det fredag den 11. september.',
+    });
+    const html = fallbackPage(brief);
+    expect(html).toContain('Overnatning · skrevet 3. juli · Palle');
+    expect(html).toContain('<div class="msg-head"><b>Palle</b><span>skrevet 3. juli</span></div>');
+    expect(validatePage(html, brief)).toEqual([]);
+  });
+
+  test('the year is named only when it is not the year being read', () => {
+    expect(fallbackPage(from({ at: '2025-11-04T09:00:00+00:00' }))).toContain(
+      'skrevet 4. november 2025',
+    );
+    expect(fallbackPage(from({ at: '2026-07-03T08:13:00+00:00' }))).toContain('skrevet 3. juli');
+  });
+
+  test('each kind says what its own timestamp is', () => {
+    expect(fallbackPage(from({ kind: 'plan', at: '2026-08-14T08:00:00' }))).toContain(
+      'ugeplan for 14. august',
+    );
+    const thread = from({
+      kind: 'thread',
+      at: '2026-08-12T15:00:00',
+      text: 'Møde om Alma',
+      conversation: {
+        messages: [
+          { from: 'Yrsa', at: '2026-08-10T09:00:00', text: 'Første.' },
+          { from: 'Søren', at: '2026-08-12T15:00:00', text: 'Anden.' },
+        ],
+        total: 2,
+        truncated: false,
+      },
+    });
+    expect(fallbackPage(thread)).toContain('seneste besked 12. august');
+    // One message is not a conversation, so nothing is "latest" about it.
+    expect(fallbackPage(from({ kind: 'thread', at: '2026-08-12T15:00:00' }))).toContain(
+      'skrevet 12. august',
+    );
+  });
+
+  test('an appointment and a calendar event get none — their date is the entry', () => {
+    const html = fallbackPage({ ...BRIEF, signals: [DENTIST] });
+    expect(html).not.toContain('skrevet');
+    expect(html).toContain('kl. 13:30–14:15');
+  });
+
+  test('the context tier and the hidden foot carry it too', () => {
+    const asPost = (key: string, at: string, author: string): Partial<SourceItem> => ({
+      ...SOURCE,
+      kind: 'post',
+      key,
+      title: 'Velkommen',
+      at,
+      author,
+    });
+    const context: RankedSignal = {
+      ...UPCOMING,
+      id: 'post:8#0',
+      tier: 'context',
+      mustShow: false,
+      sourceKey: 'post:8',
+      source: asPost('post:8', '2026-08-04T10:00:00', 'Pia') as SourceItem,
+    };
+    const hidden: RankedSignal = {
+      ...HIDDEN,
+      source: asPost('post:9', '2026-08-02T10:00:00', 'Kari') as SourceItem,
+      sourceKey: 'post:9',
+    };
+    const html = fallbackPage({ ...BRIEF, signals: [MUST_SHOW, context, hidden] });
+    expect(html).toContain('<div class="src">skrevet 4. august · Pia</div>');
+    expect(html).toContain('skrevet 2. august · Kari'); // in the muted foot
+  });
+
+  test('a source with no timestamp simply says nothing', () => {
+    const brief = from({ at: null, author: null });
+    const html = fallbackPage(brief);
+    expect(html).not.toContain('skrevet');
+    expect(validatePage(html, brief)).toEqual([]);
+  });
+});
+
 // The reader's escape hatch: a card is a summary, and a summary is only worth
 // trusting if the thing it summarises is one tap away.
 describe('more-block', () => {

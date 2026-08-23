@@ -192,6 +192,10 @@ details[open]>summary::after{content:"⌃"}
 .di:first-of-type{border-top:0}
 .di b{font-size:14px;font-weight:600;display:block}
 .di p{margin:3px 0 0;font-size:13.5px;color:var(--ink-2)}
+.di .src{margin-top:7px}
+/* The dateline head on a source that has no messages of its own — same shape
+   as a thread's, so an original reads the same however it arrived. */
+.more .body>.msg-head{margin-bottom:8px;padding-bottom:7px;border-bottom:1px solid var(--line)}
 .di .more .body p{font-size:14px}
 details.muted{margin-top:30px;background:transparent;border-style:dashed;box-shadow:none;opacity:.62}
 details.muted summary{font-size:12.5px;font-weight:500;color:var(--ink-3);padding:11px 16px}
