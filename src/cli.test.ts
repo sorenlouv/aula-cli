@@ -823,6 +823,7 @@ test("the model's cards and hides reach the page — the whole return leg", () =
         sourceKeys: ['thread:5002'],
       },
     ],
+    personalEvents: [],
     childSummaries: {},
     hidden: ['thread:5003'],
   });
@@ -832,7 +833,7 @@ test("the model's cards and hides reach the page — the whole return leg", () =
   assert.equal(result.code, 0, result.stderr);
   // Exactly the model's one card; one source hidden, as the model said.
   assert.match(result.stdout, /1 kort, 1 kilde\(r\) skjult — modellen skrev kortene/);
-  assert.match(result.stderr, /1 kort, .* 1 skjult/);
+  assert.match(result.stderr, /1 Aula-kort, 0 kalenderkort, .* 1 skjult/);
   assert.doesNotMatch(result.stderr, /rule-made/);
   const page = readFileSync(join(box.dir, 'brief', 'latest.html'), 'utf8');
   assert.match(page, /Svar Yrsa om mødet/);

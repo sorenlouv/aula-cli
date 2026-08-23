@@ -25,6 +25,19 @@ const DENTIST = item({
   at: '2026-08-14T13:30:00',
   audience: 'family',
 });
+const AULA_MEETING = item({
+  key: 'event:4',
+  kind: 'event',
+  title: 'Forældremøde',
+  at: '2026-08-14T15:00:00',
+  endsAt: '2026-08-14T17:00:00',
+});
+const DENTIST_VERDICT = {
+  sourceKey: DENTIST.key,
+  relevant: true,
+  summary: 'Tandlægetid fredag eftermiddag.',
+  reason: 'Aftalen påvirker familiens fredag.',
+};
 
 describe('classifyAudience', () => {
   const classes = new Set(['Sommerfuglene', '1B']);
@@ -122,6 +135,69 @@ describe('rank: the cap', () => {
     const brief = rank(input(items), { model: cards, rules: [], hidden: [] });
     expect(brief.folded).toHaveLength(1);
     expect(brief.rest).toHaveLength(0);
+  });
+});
+
+describe('rank: personal appointments in the shared timeline', () => {
+  test('known starts on the same day are chronological across Aula and Google', () => {
+    const meeting = card({
+      id: 'meeting',
+      title: 'Forældremøde',
+      date: '2026-08-14',
+      sourceKeys: [AULA_MEETING.key],
+    });
+    const brief = rank(input([AULA_MEETING, DENTIST]), {
+      model: [meeting],
+      personalEvents: [DENTIST_VERDICT],
+      rules: [],
+      hidden: [],
+    });
+
+    expect(brief.timeline.map((entry) => entry.title)).toEqual(['Tandlæge', 'Forældremøde']);
+    expect(brief.personalEvents[0]).toMatchObject({
+      sourceKey: DENTIST.key,
+      summary: DENTIST_VERDICT.summary,
+      modelRank: 1,
+    });
+  });
+
+  test('irrelevant appointments are hidden; missing verdicts fail open', () => {
+    const hidden = rank(input([DENTIST]), {
+      model: [],
+      personalEvents: [{ ...DENTIST_VERDICT, relevant: false }],
+      rules: [],
+      hidden: [],
+    });
+    expect(hidden.timeline).toEqual([]);
+    expect(hidden.hidden.map((source) => source.key)).toEqual([DENTIST.key]);
+
+    const missing = rank(input([DENTIST]), {
+      model: [],
+      personalEvents: [],
+      rules: [],
+      hidden: [],
+    });
+    expect(missing.personalEvents).toHaveLength(1);
+    expect(missing.personalEvents[0]?.summary).toBe('');
+    expect(missing.personalEvents[0]?.reasons).toContain('calendar verdict missing → shown');
+  });
+
+  test('compact appointments do not consume the full-card cap', () => {
+    const items = Array.from({ length: CARD_CAP + 1 }, (_, index) =>
+      item({ key: `post:${100 + index}` }),
+    );
+    const cards = items.map((source, index) => card({ id: `c${index}`, sourceKeys: [source.key] }));
+    const brief = rank(input([...items, DENTIST]), {
+      model: cards,
+      personalEvents: [DENTIST_VERDICT],
+      rules: [],
+      hidden: [],
+    });
+
+    expect(brief.cards).toHaveLength(CARD_CAP);
+    expect(brief.personalEvents).toHaveLength(1);
+    expect(brief.timeline).toHaveLength(CARD_CAP + 1);
+    expect(brief.folded).toHaveLength(1);
   });
 });
 
@@ -287,7 +363,7 @@ describe('explain', () => {
       hidden: [],
     });
     const text = explain(brief);
-    expect(text).toContain('2 kort');
+    expect(text).toContain('2 Aula-kort');
     expect(text).toContain('[upcoming] ! Skolefoto  (2026-08-17)');
     expect(text).toContain('[undated]   Møde');
     expect(text).toContain('model rank:1');

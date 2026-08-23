@@ -136,35 +136,17 @@ h2::after{content:"";flex:1;height:1px;background:var(--line)}
 .tick:hover{border-color:var(--c2);color:var(--c2)}
 .tick:focus-visible{outline:2px solid var(--c2);outline-offset:2px}
 .tick[aria-pressed="true"]{background:var(--c2);border-color:var(--c2);color:var(--panel)}
-/* Hidden, never dropped: the toggle below puts them back. Two classes on
-   purpose: .cal-row sets its own display further down, and a single-class
-   rule here would lose to it. */
-.card.is-done,.cal-row.is-done{display:none}
+/* Hidden, never dropped: the toggle below puts them back. */
+.card.is-done{display:none}
 section.reveal .card.is-done{display:block;opacity:.55}
-section.reveal .card.is-done .title{text-decoration:line-through}
-section.reveal .cal-row.is-done{display:flex;opacity:.55}
-section.reveal .cal-row.is-done .cal-title{text-decoration:line-through}
+section.reveal .card.is-done .title,
+section.reveal .card.is-done .calendar-title{text-decoration:line-through}
 
 /* Kommende is in date order; the undated tail — mostly Kræver handling's
    overflow — is set off so it is visible why those carry no date chip. */
 .divider{margin:16px 0 10px;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
   color:var(--ink-3);font-weight:650}
 
-/* The family's own calendar — see calendarSection in render.ts. One line per
-   appointment, days as plain labels, folded shut: the summary carries what is
-   worth knowing before the fold is opened. */
-.cal>summary{font-weight:500;font-size:14px;color:var(--ink-2);gap:14px;line-height:1.45}
-.cal-body{padding:4px 18px 12px}
-.cal-day{margin:12px 0 4px;font-size:12px;font-weight:650;color:var(--ink-3)}
-.cal-day:first-child{margin-top:4px}
-.cal-row{position:relative;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
-  padding:7px 40px 7px 0;border-top:1px solid var(--line-2);font-size:14px}
-.cal-day+.cal-row{border-top:0}
-.cal-when{flex:none;min-width:7.5em;color:var(--ink-3);font-size:12.5px;font-variant-numeric:tabular-nums}
-.cal-title{flex:1 1 auto;min-width:0;font-weight:600}
-.cal-src{margin-left:auto;font-size:12px;color:var(--ink-3);white-space:nowrap}
-.cal-src a{color:var(--ink-3);text-decoration:underline;text-underline-offset:2px;white-space:nowrap}
-.cal-row .tick{top:50%;right:4px;width:24px;height:24px;margin-top:-12px;font-size:12px}
 /* The empty-state line under two visible cards reads as a contradiction,
    however true the count is. While they are on show, the toggle says it. */
 section.reveal [data-empty]{display:none}
@@ -191,6 +173,24 @@ summary::after{content:"⌄";color:var(--ink-3);font-size:17px;line-height:1}
    descendant selector points its chevron up while it is still shut — the outer
    section's open state deciding the inner one's arrow. */
 details[open]>summary::after{content:"⌃"}
+
+/* A personal appointment shares Kommende's chronology without borrowing the
+   visual weight of an Aula card. The face is one compact flex row; the model's
+   summary and reason live in the individual fold. */
+.calendar-card{padding:0 46px 0 0;border-left-color:var(--line);box-shadow:none;margin-bottom:6px}
+details.calendar-details{background:transparent;border:0;border-radius:12px;box-shadow:none}
+details.calendar-details>summary{padding:9px 8px 9px 13px;font-weight:500;gap:8px;min-height:46px}
+details.calendar-details>summary::after{margin-left:auto;flex:none}
+.calendar-face{display:flex;align-items:center;gap:9px;flex:1 1 auto;min-width:0;flex-wrap:wrap}
+.calendar-when{color:var(--ink-3);font-size:12.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.calendar-title{font-size:14px;font-weight:600;color:var(--ink);min-width:0}
+.calendar-origin{margin-left:auto;color:var(--ink-3);font-size:11.5px;white-space:nowrap}
+.calendar-body{padding:11px 14px 13px;border-top:1px solid var(--line-2);color:var(--ink-2)}
+.calendar-copy{font-size:13.5px;margin:0 0 9px}
+.calendar-body .reason{font-size:12.5px;margin-bottom:9px}
+.calendar-meta{font-size:12px;color:var(--ink-3)}
+.calendar-meta a{color:var(--ink-3);text-decoration:underline;text-underline-offset:2px}
+.calendar-card .tick{top:11px;right:10px;width:24px;height:24px;font-size:12px}
 .di{padding:12px 18px;border-top:1px solid var(--line-2)}
 .di:first-of-type{border-top:0}
 .di b{font-size:14px;font-weight:600;display:block}
@@ -234,8 +234,7 @@ footer{margin-top:26px;text-align:center;color:var(--ink-3);font-size:12px}
      beforeprint hook in publish.ts, which skips these to match. */
   .more{display:none}
   .card{padding-right:20px}
-  .cal-row{padding-right:0;break-inside:avoid}
-  section.reveal .card.is-done,section.reveal .cal-row.is-done{display:none}
+  section.reveal .card.is-done{display:none}
   .done-toggle{border-style:solid;cursor:auto}
 }
 @media (max-width:680px){
@@ -245,10 +244,7 @@ footer{margin-top:26px;text-align:center;color:var(--ink-3);font-size:12px}
   /* As a flex item, the chip row otherwise keeps its max-content width and
      makes the whole page wider than a narrow phone before its own wrap runs. */
   .kids{width:100%;min-width:0}
-  /* A phone has no room for time, title and source on one line: the source
-     drops under the title, indented past the time column, rather than
-     floating right on a line of its own. */
-  .cal-when{min-width:6.5em}
-  .cal-src{flex-basis:100%;margin-left:0;margin-top:-2px;padding-left:calc(6.5em + 10px);white-space:normal}
+  .calendar-card{padding-right:42px}
+  .calendar-origin{flex-basis:100%;margin-left:0}
 }
 `;

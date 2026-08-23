@@ -68,6 +68,7 @@ const DENTIST: SourceItem = sourceItem({
   allDay: false,
   author: 'Familien',
   audience: 'family',
+  location: 'Tandlægehuset',
   url: 'https://calendar.google.com/calendar/event?eid=abc',
 });
 
@@ -92,7 +93,7 @@ const INPUT: BriefInput = briefInput({
     ],
     isSteppedUp: true,
   },
-  items: [PHOTO, PHOTO_REMINDER, DIARY, COURSE, DENTIST],
+  items: [PHOTO, PHOTO_REMINDER, DIARY, COURSE],
   albums: [{ title: 'Skovtur med 1B', at: '2026-08-12', childNames: ['Alma'] }],
 });
 
@@ -116,12 +117,30 @@ const MEETING: Card = card({
   sourceKeys: ['thread:2'],
 });
 
+const DENTIST_VERDICT = {
+  sourceKey: DENTIST.key,
+  relevant: true,
+  summary: 'Tandlægetid i Tandlægehuset i eftermiddag.',
+  reason: 'Aftalen påvirker familiens plan i dag.',
+};
+
 const page = (
   cards: Card[],
   opts: Parameters<typeof renderPage>[1] = {},
   hidden: string[] = [],
 ) => {
   const brief = rankedBrief(INPUT, cards, { hidden });
+  return { brief, html: renderPage(brief, opts) };
+};
+
+const calendarPage = (
+  cards: Card[],
+  opts: Parameters<typeof renderPage>[1] = {},
+  personalEvents = [DENTIST_VERDICT],
+  extraItems: SourceItem[] = [],
+) => {
+  const input = { ...INPUT, items: [...INPUT.items, DENTIST, ...extraItems] };
+  const brief = rankedBrief(input, cards, { personalEvents });
   return { brief, html: renderPage(brief, opts) };
 };
 
@@ -242,7 +261,7 @@ describe('the list', () => {
       'Kommende <span class="count" data-count>2</span>',
     );
     const { html } = page([]);
-    expect(html).toContain('data-empty>Ingen kort i dag');
+    expect(html).toContain('data-empty>Ingen punkter i dag');
   });
 
   test('the fallback topline counts what needs doing', () => {
@@ -292,49 +311,56 @@ describe('what is not a card', () => {
 });
 
 describe('the family’s calendar', () => {
-  test('appointments fold into one collapsed section of rows, never cards', () => {
-    const { brief, html } = page([SIGNUP]);
-    expect(html).toContain('<section data-section="calendar">');
-    expect(html).toContain('<details class="cal">');
-    expect(html).not.toContain('<details class="cal" open');
-    const open = `<div class="cal-row" data-signal-id="${DENTIST.key}"`;
+  test('a relevant appointment is a compact collapsed card inside Kommende', () => {
+    const { brief, html } = calendarPage([SIGNUP]);
+    expect(html).not.toContain('<h2>Egen kalender');
+    expect(html).not.toContain('data-section="calendar"');
+    expect(html).toContain('Kommende <span class="count" data-count>2</span>');
+    expect(html).toContain('<details class="calendar-details">');
+    expect(html).not.toContain('<details class="calendar-details" open');
+    const open = `<div class="card calendar-card" data-signal-id="personal:${DENTIST.key}"`;
     expect(html).toContain(open);
     const row = html.slice(html.indexOf(open), html.indexOf('</div>', html.indexOf(open)));
     expect(row).toContain(`data-source-id="${DENTIST.key}"`);
     expect(row).toContain(`data-done-keys="${DENTIST.key}|2026-08-13"`);
-    expect(row).toContain('åbn i kalender');
-    expect(html).toContain('<span class="cal-when">kl. 13:30–14:15</span>');
-    expect(html).toContain('<span class="cal-title">Tandlæge</span>');
+    expect(html).toContain('<span class="calendar-when">kl. 13:30–14:15</span>');
+    expect(html).toContain('<span class="calendar-title">Tandlæge</span>');
+    expect(html).toContain('<span class="calendar-origin">Egen kalender</span>');
+    expect(html).toContain(DENTIST_VERDICT.summary);
+    expect(html).toContain(`<b>Vist fordi:</b> ${DENTIST_VERDICT.reason}`);
+    expect(html).toContain('Tandlægehuset · Familien · <a href=');
+    expect(html).toContain('åbn i kalender');
     expect(validatePage(html, brief)).toEqual([]);
   });
 
-  test('the summary names today, and any day a card lands on — nothing else', () => {
-    const football = {
-      ...DENTIST,
-      key: 'cal:f',
-      title: 'Half fodbold',
-      at: '2026-08-19T16:25:00',
-      endsAt: '2026-08-19T17:45:00',
-    };
-    const gym = {
-      ...DENTIST,
-      key: 'cal:g',
-      title: 'Viggo gymnastik',
-      at: '2026-08-26T17:10:00',
-      endsAt: '2026-08-26T18:10:00',
-    };
-    const input = { ...INPUT, items: [...INPUT.items, football, gym] };
-    const brief = rankedBrief(input, [MEETING]); // Wednesday 26th
-    const html = renderPage(brief);
-    const summary = /<details class="cal"><summary>(.*?)<\/summary>/.exec(html)?.[1];
-    expect(summary).toBe('I dag: Tandlæge 13:30 · onsdag 26/8: Viggo gymnastik 17:10');
-    expect(summary).not.toContain('fodbold');
+  test('Google and structured Aula events on the same day are interleaved by start time', () => {
+    const aulaEvent = sourceItem({
+      key: 'event:meeting',
+      kind: 'event',
+      title: 'Forældremøde',
+      at: '2026-08-13T15:00:00',
+      endsAt: '2026-08-13T17:00:00',
+    });
+    const meeting = card({
+      id: 'meeting',
+      title: 'Forældremøde',
+      date: TODAY,
+      sourceKeys: [aulaEvent.key],
+    });
+    const { html } = calendarPage([meeting], {}, [DENTIST_VERDICT], [aulaEvent]);
+
+    expect(html.indexOf('calendar-title">Tandlæge')).toBeLessThan(
+      html.indexOf('class="title">Forældremøde'),
+    );
   });
 
-  test('a hidden appointment is not in the fold — that is the family saying no', () => {
-    const { html } = page([SIGNUP], {}, [DENTIST.key]);
-    expect(html).not.toContain('data-section="calendar"');
+  test('an irrelevant appointment is absent from Kommende and counted as hidden', () => {
+    const { brief, html } = calendarPage([SIGNUP], {}, [
+      { ...DENTIST_VERDICT, relevant: false, reason: 'Ikke relevant for skoleugen.' },
+    ]);
+    expect(html).not.toContain('calendar-title">Tandlæge');
     expect(html).toContain('<summary>1 skjult</summary>');
+    expect(validatePage(html, brief)).toEqual([]);
   });
 });
 
@@ -342,6 +368,7 @@ describe('the rest of the page', () => {
   test('phone layout lets the child-chip row shrink before it wraps', () => {
     expect(BRIEF_CSS).toContain('.kids{width:100%;min-width:0}');
     expect(BRIEF_CSS).toContain('.wrap{padding:26px 16px 60px;overflow-wrap:anywhere}');
+    expect(BRIEF_CSS).toContain('.calendar-origin{flex-basis:100%;margin-left:0}');
   });
 
   test('per-child lines, album tiles and the kids in the header', () => {

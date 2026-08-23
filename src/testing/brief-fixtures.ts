@@ -9,7 +9,13 @@
  */
 
 import { rank } from '../brief/rank.ts';
-import type { BriefInput, Card, RankedBrief, SourceItem } from '../brief/types.ts';
+import type {
+  BriefInput,
+  Card,
+  PersonalEventVerdict,
+  RankedBrief,
+  SourceItem,
+} from '../brief/types.ts';
 
 export function sourceItem(overrides: Partial<SourceItem> & Pick<SourceItem, 'key'>): SourceItem {
   return {
@@ -63,7 +69,16 @@ export function card(overrides: Partial<Card> & Pick<Card, 'id' | 'sourceKeys'>)
 export function rankedBrief(
   input: BriefInput,
   cards: Card[],
-  opts: { hidden?: string[]; rules?: Card[] } = {},
+  opts: {
+    hidden?: string[];
+    personalEvents?: PersonalEventVerdict[] | null;
+    rules?: Card[];
+  } = {},
 ): RankedBrief {
-  return rank(input, { model: cards, rules: opts.rules ?? [], hidden: opts.hidden ?? [] });
+  return rank(input, {
+    model: cards,
+    personalEvents: opts.personalEvents ?? null,
+    rules: opts.rules ?? [],
+    hidden: opts.hidden ?? [],
+  });
 }

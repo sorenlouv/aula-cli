@@ -25,7 +25,7 @@ import {
   saveState,
   whichAreNew,
 } from './state.ts';
-import type { Card, RankedBrief } from './types.ts';
+import type { Card, PersonalEventVerdict, RankedBrief } from './types.ts';
 import { validatePage, type Violation } from './validate.ts';
 import { errorMessage } from '../validation.ts';
 
@@ -95,6 +95,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   // null until the model has answered: the rules are then the cards, not a
   // supplement to them — see `rank`.
   let modelCards: Card[] | null = null;
+  let personalEvents: PersonalEventVerdict[] | null = null;
   let hidden: string[] = [];
   let extractionRan = opts.useModel === false;
   let extractionStatus: string | null = null;
@@ -105,6 +106,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
       topline = extracted.topline;
       summaries = extracted.childSummaries;
       modelCards = extracted.cards;
+      personalEvents = extracted.personalEvents;
       hidden = extracted.hidden;
       extractionRan = extracted.problems.length === 0;
       if (extracted.problems.length > 0) {
@@ -121,7 +123,12 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
     }
   }
 
-  const brief = rank(input, { model: modelCards, rules: cardsFromRules(input, now), hidden });
+  const brief = rank(input, {
+    model: modelCards,
+    personalEvents,
+    rules: cardsFromRules(input, now),
+    hidden,
+  });
   if (extractionStatus) brief.degraded.push(extractionStatus);
 
   // ----------------------------------------------------------------- render

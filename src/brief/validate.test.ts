@@ -66,6 +66,38 @@ describe('validatePage', () => {
     expect(validatePage(html, BRIEF).map((v) => v.rule)).toContain('must-show');
   });
 
+  test('holds compact personal cards to must-show and noise invariants too', () => {
+    const appointment = sourceItem({
+      key: 'cal:family:dentist:2026-08-13T13:30:00',
+      kind: 'personal',
+      title: 'Tandlæge',
+      at: '2026-08-13T13:30:00',
+      endsAt: '2026-08-13T14:15:00',
+      audience: 'family',
+    });
+    const input = { ...INPUT, items: [...INPUT.items, appointment] };
+    const ranked = rankedBrief(input, [CARD], {
+      personalEvents: [
+        {
+          sourceKey: appointment.key,
+          relevant: true,
+          summary: 'Tandlægetid i eftermiddag.',
+          reason: 'Aftalen påvirker familiens dag.',
+        },
+      ],
+    });
+    const html = renderPage(ranked);
+    const event = ranked.personalEvents[0]!;
+
+    expect(
+      validatePage(html.replace(`data-signal-id="${event.id}"`, 'data-x="1"'), ranked).map(
+        (violation) => violation.rule,
+      ),
+    ).toContain('must-show');
+    const inconsistent = { ...ranked, hidden: [appointment] };
+    expect(validatePage(html, inconsistent).map((violation) => violation.rule)).toContain('noise');
+  });
+
   test('catches a claim with no source attached', () => {
     const html = renderPage(BRIEF).replace(`data-source-id="${CARD.sourceKeys[0]}"`, '');
     expect(validatePage(html, BRIEF).map((v) => v.rule)).toContain('attribution');

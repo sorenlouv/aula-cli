@@ -30,8 +30,8 @@
  *
  * `family` is the one value that does not come from Aula at all: an appointment
  * out of the family's own calendar, addressed to nobody because they wrote it
- * themselves. Those never become cards — the page lists them in a fold of their
- * own — but the model reads them to understand the week.
+ * themselves. The model gives each one a relevance verdict; relevant ones are
+ * compact cards in the same timeline as the Aula cards.
  */
 export type Audience = 'child' | 'class' | 'institution' | 'municipal' | 'family';
 
@@ -87,6 +87,8 @@ export type SourceItem = {
   audience: Audience;
   /** Aula's own `isImportant`. Almost always false, but load-bearing when set. */
   important: boolean;
+  /** Calendar-shaped sources only. Kept structured for the compact card. */
+  location?: string | null;
   url: string | null;
   /** Threads only. What the more-block expands to on a thread. */
   conversation?: Conversation;
@@ -182,24 +184,66 @@ export type Card = {
 };
 
 /**
+ * The model's decision about one appointment from the family's own calendar.
+ *
+ * Identity, title, interval, location and link remain on the source and are
+ * rendered verbatim. The model supplies only the editorial judgement: whether
+ * the appointment belongs in an Aula overview, its short summary, and why.
+ */
+export type PersonalEventVerdict = {
+  sourceKey: string;
+  relevant: boolean;
+  summary: string;
+  reason: string;
+};
+
+/**
  * Where a card sits on the page. Decided by the date alone, in code: the model
  * chooses the cards and says what they are; it never orders the page.
  */
 export type Placement = 'upcoming' | 'undated' | 'past';
 
 export type RankedCard = Card & {
+  entryType: 'card';
   placement: Placement;
   sources: SourceItem[];
+  /** Exact start only when a cited calendar source supplies one. */
+  sortAt: string | null;
   /** One-based priority in the model's answer; null on the rules fallback. */
   modelRank: number | null;
   /** Why it sits where it does — `--explain`. */
   reasons: string[];
 };
 
+/** A relevant personal appointment, ready for the compact timeline renderer. */
+export type RankedPersonalEvent = {
+  entryType: 'personal';
+  id: string;
+  sourceKey: string;
+  title: string;
+  summary: string;
+  reason: string | null;
+  date: string | null;
+  placement: Placement;
+  source: SourceItem;
+  /** Exact start for timed events; null for all-day appointments. */
+  sortAt: string | null;
+  /** One-based priority in the model's calendar verdicts; null on fallback. */
+  modelRank: number | null;
+  /** Why it sits where it does — `--explain`. */
+  reasons: string[];
+};
+
+export type RankedTimelineEntry = RankedCard | RankedPersonalEvent;
+
 export type RankedBrief = {
   input: BriefInput;
-  /** The cards, in page order: upcoming by date, then undated, then past. */
+  /** Full Aula cards, in page order: upcoming by date, then undated, then past. */
   cards: RankedCard[];
+  /** Relevant personal appointments in chronological page order. */
+  personalEvents: RankedPersonalEvent[];
+  /** Full Aula cards and compact personal cards in their shared page order. */
+  timeline: RankedTimelineEntry[];
   /**
    * Cards after the first `CARD_CAP` in model priority order. Listed in the
    * fold with their title and summary — demoted, never dropped.
@@ -207,7 +251,7 @@ export type RankedBrief = {
   folded: RankedCard[];
   /** Sources no card covers and the model did not hide: the fold. */
   rest: SourceItem[];
-  /** Sources the model hid — the family's list, or plain irrelevance. Named in the muted foot. */
+  /** Sources the model hid by verdict or preference. Named in the muted foot. */
   hidden: SourceItem[];
   degraded: string[];
 };

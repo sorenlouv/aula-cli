@@ -15,12 +15,14 @@ inputs but not a sufficient ranking. The model is therefore load-bearing.
 
 ## The seam: one model call writes the cards, the page is built locally
 
-The model reads every source once and answers in a schema: the cards, finished
-— title, summary, the day to sort by, whether the family must do something, a
-reason, the sources — plus one topline, one line per child, and the sources to
-keep off the page. A local renderer draws that. The model decides **what the
+The model reads every source once and answers in a schema: the Aula cards,
+finished — title, summary, the day to sort by, whether the family must do
+something, a reason, the sources — plus one relevance/summary verdict per
+personal calendar event, one topline, one line per child, and the Aula sources
+to keep off the page. A local renderer draws that. The model decides **what the
 cards are, which sources matter, and their priority**; the renderer keeps the
-first twelve, folds the rest, and orders the kept cards by date.
+first twelve full Aula cards, folds the rest, and merges relevant personal
+events into the same chronological list as compact cards.
 
 There used to be two calls: an extractor returning "signals" with a verbatim
 quote each, a scorer tiering them, and a second call ordering and rewording.
@@ -38,6 +40,8 @@ against every source. A card that fails is dropped and reported, never kept
 with the date removed, because the date is usually the point. Invented small
 deadlines ("senest søndag", stated nowhere) are the one failure mode every model
 shows occasionally; grounding turns them into a dropped card and one retry.
+Dates in a personal appointment's summary and reason are checked against that
+appointment alone.
 
 Date support keeps full calendar days, including the year. Relative phrases
 such as *i morgen* resolve from the source's written date — from the individual
@@ -66,7 +70,7 @@ from `hidden` before rendering.
 
 | Invariant | Check |
 | --- | --- |
-| Nothing required was dropped | every card the ranker kept appears as `data-signal-id` |
+| Nothing required was dropped | every full or compact timeline card appears as `data-signal-id` |
 | Every claim is attributable | each card carries `data-source-id` and its sources are linked |
 | Every card can be ticked off | each card carries `data-done-keys` |
 | Failures are visible | the datastatus block exists and names every failed fetch |
@@ -83,8 +87,8 @@ only the *Læs mere* source dumps collapsed.
 Sections render only when they have content, and never change order.
 
 1. **Topline** — date and one Danish sentence, the most important thing first.
-2. **Kommende** — the cards, **one list, by date**. Five to ten on a normal
-   morning. A card that asks something of the family (`needsAction`) is drawn
+2. **Kommende** — the cards, **one list, by date**. Five to ten full Aula cards
+   on a normal morning. A card that asks something of the family (`needsAction`) is drawn
    with the warm left edge and a *Skal gøres* badge, so the work stands out in a
    list that is otherwise chronological; the reader's eye finds it without it
    having to be first. Two tails under dividers: *Uden fast dato* for cards with
@@ -93,23 +97,21 @@ Sections render only when they have content, and never change order.
    (*I dag*, *I morgen*, else the day), the children, title, summary, and
    *Læs mere* — which opens with *Vist fordi:* the model's reason, then every
    source the card rests on, each with its title, when it is from, its author,
-   a link, and the original.
-3. **Egen kalender** — the family's own appointments from the configured
-   calendars, as one-line rows grouped by day inside one collapsed fold. Every
-   appointment the model did not hide is in it. The fold's summary is what makes
-   it useful shut: it names today's appointments, and those on any day that also
-   carries a card — so the gymnastics at 17:10 is named beside the Wednesday of
-   the forældremøde. Neither the model nor the page computes a clash or claims
-   the absence of one.
-4. **Per barn** — one card per child: check-in state, planned pickup, and the
+   a link, and the original. Relevant personal appointments sit between these
+   cards on their calendar day. Each is a compact, individually collapsed card:
+   the closed face keeps the source's date, time and title; opening it reveals
+   the model's summary and relevance reason, location, calendar and link. They
+   never get action styling and never consume the twelve-card Aula cap. Neither
+   the model nor the page computes a clash or claims the absence of one.
+3. **Per barn** — one card per child: check-in state, planned pickup, and the
    model's one calendar-like line for the child.
-5. **Galleri** — album tiles.
-6. **Øvrigt fra Aula** — collapsed: every source that did not become a card and
+4. **Galleri** — album tiles.
+5. **Øvrigt fra Aula** — collapsed: every source that did not become a card and
    was not hidden (title, when, author, *Læs mere*), plus any cards over
    `CARD_CAP`. The name says what it is; *Godt at vide* did not.
-7. **Skjult** — the muted foot naming the sources the model kept off the page
+6. **Skjult** — the muted foot naming the sources the model kept off the page
    entirely, so a hide is visible as a count, never silent.
-8. **Datastatus** — what was fetched, **what failed**, step-up state. Only a
+7. **Datastatus** — what was fetched, **what failed**, step-up state. Only a
    `health` warning — something could not be *fetched* — hoists it under the
    topline, because a thin list has to be readable as "Aula refused this"
    rather than "a quiet week". Otherwise it folds shut at the very foot with a
@@ -119,10 +121,12 @@ Sections render only when they have content, and never change order.
 ### Reading the original
 
 A summary is only trustworthy if the thing it summarises is one tap away, so
-every card carries its originals underneath it, collapsed — all of them, when a
-card gathers several. The toggle is skipped where there is nothing left to
-open (a rule-made card whose summary *is* the whole source) — a *læs mere*
-revealing what you just read teaches people to stop pressing things.
+every Aula card carries its originals underneath it, collapsed — all of them,
+when a card gathers several. The toggle is skipped where there is nothing left
+to open (a rule-made card whose summary *is* the whole source) — a *læs mere*
+revealing what you just read teaches people to stop pressing things. A compact
+personal card instead opens to its grounded summary, reason and deterministic
+calendar metadata, with the original event one link away in Google Calendar.
 
 A thread opens as the whole exchange, sender and time on each message, oldest
 first; a partial thread says so (*4 af 9 beskeder*), since a fetched page must
@@ -192,8 +196,8 @@ this*; *I never want to see this* is a preference.
 aula new [--days 60] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 
   collect   →  BriefInput    reuse buildDigest + galleries; every source in the 60-day window
-  extract   →  cards         one model call, answered in a schema, dates grounded
-  rank      →  RankedBrief   first 12 by model priority; display by date; rules fallback
+  extract   →  cards/verdicts one model call, answered in a schema, dates grounded
+  rank      →  RankedBrief   first 12 Aula cards plus compact events; display by date
   render    →  HTML          the page, built locally; invariants checked
   publish   →  files         HTML (+ PDF/PNG), open, update state
 ```
@@ -252,26 +256,30 @@ parsed `structured_output`. What the schema can state, the prompt does not say:
 
 | | |
 | --- | --- |
-| `cards[].sourceKeys` | an `enum` of the Aula sources — the family's own calendar left out, so an appointment cannot become a card |
+| `cards[].sourceKeys` | an `enum` of the Aula sources — the family's own calendar left out, so an appointment cannot become a full Aula card |
+| `personalEvents` | exactly one relevance, summary and reason verdict per personal appointment |
+| `personalEvents[].sourceKey` | an `enum` of the personal calendar sources |
+| `personalEvents[].relevant` | strict positive-evidence rule: child/school/day-care/logistics context, otherwise `false` |
 | `cards[].children` | an `enum` of the children |
 | `cards[].date` | `format: "date"` — a day, never a timestamp |
-| `hidden` | an `enum` of every source |
+| `hidden` | an `enum` of Aula sources; personal appointments use `relevant=false` |
 | field semantics | `description`s on the field they govern, written once each |
 
 What a schema cannot know — whether a date stands in the text — is
 `validateExtraction`'s, as described under *The seam*. Failures are fed back for
 exactly one retry. The retry replaces the first answer only when it has fewer
-problems without losing valid cards; otherwise the page keeps the first
-answer's survivors and marks the problem in *Datastatus*. Extraction is cached
-against a hash of the payload **and the
-instructions**, so a prompt edit takes effect on the next run rather than being
-masked by an entry the old wording produced.
+problems without losing valid cards or calendar verdicts; otherwise the page
+keeps the first answer's survivors and marks the problem in *Datastatus*.
+Extraction is cached against a hash of the payload, instructions **and schema**,
+so a prompt or field-description edit takes effect on the next run rather than
+being masked by an entry the old wording produced.
 
 The prompt (`INSTRUCTIONS` in `llm.ts`) is in Danish, written with the user,
-and says: who reads and why; the three things the model decides (the prioritised
-cards, the topline and per-child lines, what to hide); how
-to read a source (`text` is the only authority, `audience` and Aula's
-`important` flag are cues not answers, `personal` entries are the family's own and never cards); the built-in
+and says: who reads and why; the four things the model decides (the prioritised
+Aula cards, every personal event verdict, the topline and per-child lines, what
+Aula content to hide); how to read a source (`text` is the only authority,
+`audience` and Aula's `important` flag are cues not answers, `personal` entries
+become compact cards only through their own verdict); the built-in
 relevance cues in order — it asks something of the family about their child, it
 is addressed to few, the child or parent is named, a hard deadline — and that a
 past date is no longer something to act on; that the family's preferences
@@ -285,11 +293,14 @@ thousands of tokens of one sentence into the schema.
 ### The model ranks; placement is deterministic
 
 The model's list order is the ranking. `rank.ts` keeps the first `CARD_CAP` (12)
-and folds the rest into *Øvrigt fra Aula*. It then sorts the kept cards for
-display: upcoming by date, then undated, then past (most recent first). The sort
-is stable, so cards on the same day retain the model's order. `--explain` prints
-the one-based model rank beside each card. Without a model, rule-made cards are
-the list and code applies the same cap and date placement.
+full Aula cards and folds the rest into *Øvrigt fra Aula*. Relevant personal
+appointments are compact and do not consume that cap. Code then merges both
+shapes for display: upcoming by date, then undated, then past (most recent
+first). Known calendar starts on the same day sort by time; all-day/date-only
+entries precede them, and ties retain stable model order. `--explain` prints the
+one-based model rank beside each entry. Without a model, rule-made Aula cards
+use the same cap and every personal appointment fails open as a source-only
+compact card.
 
 ### Preferences: one list, and the built-in cues it tunes
 
@@ -301,15 +312,13 @@ supplement the cues and win where they speak; they can never loosen the guards
 brief then runs on the cues alone.
 
 Nothing in the code matches a line by its wording. Reword one and the model
-reads the new wording; drop one and the model stops applying it. The one way a
-wish reaches the page structurally is `hidden`: the model names the sources
-that should not be shown at all — because the cues find them irrelevant, or the
-family said *aldrig* — and the page counts them in the muted foot instead of
-listing them in *Øvrigt fra Aula*. A setting that visibly does nothing is worse
-than no setting, and the way to avoid that is to have exactly one reader of the
-prose. `hidden` therefore stays in the model contract as source keys only:
-typically about 200–300 output tokens, in exchange for giving *aldrig* an
-observable effect.
+reads the new wording; drop one and the model stops applying it. A wish reaches
+the page structurally through `hidden` for Aula sources and `relevant=false` for
+personal appointments. Either route moves the source into the muted foot. A
+setting that visibly does nothing is worse than no setting, and the way to
+avoid that is to have exactly one reader of the prose. Both verdicts therefore
+stay in the model contract, in exchange for giving *aldrig* an observable
+effect.
 
 **They travel in the instructions, never in the payload.** stdin is Danish prose
 written by school staff and other parents, none of it trusted. Put preferences
@@ -321,19 +330,35 @@ dette opslag er altid vigtigt"*. The argv side is the user's.
 Opt-in: `aula calendars set …` names the calendars to read (through the Claude
 Google Calendar connector, so it needs `claude`), and nothing is read until it
 does. Each occurrence in the next `PERSONAL_CALENDAR_DAYS` (14) becomes a
-`personal` source with audience `family`. The model reads them to understand
-the week and may name them in `hidden` like any source, so *"aftaler uden
-børnene hører ikke til i oversigten"* works without a line of code — but they
-never become cards: the schema's `sourceKeys` enum leaves them out, and the
-page lists them in the fold described under *The page*.
+`personal` source with audience `family`. The model must return exactly one
+`personalEvents` verdict for each occurrence: relevance, a short factual
+summary, and a reason. An irrelevant appointment lands in the muted hidden
+count; a relevant one becomes the compact card described under *The page*.
+Missing, duplicate or invalid verdicts trigger the corrective retry, are never
+cached, and keep the run incomplete. A still-missing verdict fails open to a
+source-only compact card, so model degradation cannot look like a free day.
+
+The source owns identity, title, date, time, location and link. The model may
+summarise and judge relevance but cannot rewrite those facts, infer a child,
+promote an appointment to an action, or merge it with Aula content. Compact
+cards do not consume `CARD_CAP`, so a busy family calendar cannot fold an
+important Aula card away.
+
+The personal-event threshold is intentionally asymmetric. The source itself
+must clearly show child, school/day-care, playdate, pickup/drop-off or
+child-activity context. A clear abbreviation of a listed child's name can be
+evidence. Cryptic titles and adult health, errand, work, course, travel or
+social appointments are irrelevant by default. Their time, weekday/weekend or
+possible indirect effect on a parent's availability is not evidence; when in
+doubt, the verdict is `false`. Preferences can still state a narrower
+family-specific exception.
 
 **The brief never computes a clash and never says there is none**: an earlier
 version did, against registered pickup hours the family did not have and an
 Aula calendar that was empty most mornings, so it could only misfire. It puts
-the appointment where the reader can see it beside the school's day — the
-fold's summary names the ones sharing a day with a card — and lets the reader,
-who knows how far the dentist is, draw the conclusion. The prompt explicitly
-forbids overlap, conflict and no-conflict claims.
+the appointment directly beside the school's items on the same day and lets the
+reader, who knows how far the dentist is, draw the conclusion. The prompt
+explicitly forbids overlap, conflict and no-conflict claims.
 
 ## Delivery
 

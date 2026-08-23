@@ -35,12 +35,13 @@ const EXTERNAL_RESOURCE = /<(?:img|script|link|style|iframe|object|embed|base)\b
 export function validatePage(html: string, brief: RankedBrief): Violation[] {
   const violations: Violation[] = [];
 
-  // 1. Nothing required was dropped: every card the ranker kept is on the page.
-  for (const card of brief.cards) {
-    if (!html.includes(`data-signal-id="${card.id}"`)) {
+  // 1. Nothing required was dropped: every full or compact timeline entry the
+  //    ranker kept is on the page.
+  for (const entry of brief.timeline) {
+    if (!html.includes(`data-signal-id="${entry.id}"`)) {
       violations.push({
         rule: 'must-show',
-        detail: `"${card.title}" (${card.id}) mangler på siden`,
+        detail: `"${entry.title}" (${entry.id}) mangler på siden`,
       });
     }
   }

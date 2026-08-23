@@ -249,6 +249,7 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
       childNames: event.children,
       audience: event.children.length > 0 ? 'child' : 'class',
       important: event.responseRequired,
+      location: event.location,
       url: `${AULA_PORTAL}/kalender`,
     });
   }
@@ -378,11 +379,10 @@ function summariseWarning(warning: string): string {
  * appointments. `aula calendars` lists names, and `calendars set` records the
  * exact calendars the parent chose.
  *
- * **They are shown, not analysed.** An appointment becomes a dated item like
- * any other; the page folds the lot into one collapsed *Egen kalender* whose
- * summary names today's and any that share a day with a card (see
- * `calendarSection` in `render.ts`). This puts the facts beside each other for
- * the reader; code never infers a clash or the absence of one.
+ * **They are ranked, then shown without analysis.** Every appointment receives
+ * an explicit model verdict. Relevant ones become compact, collapsed entries in
+ * the same chronological list as Aula cards; code never infers a clash or the
+ * absence of one.
  *
  * The page also never reports the *absence* of a clash. A reassurance is a
  * claim, it would be made every quiet week, and it would train the reader to
@@ -427,9 +427,9 @@ async function collectPersonal(now: Date): Promise<{ items: SourceItem[]; health
  *
  * For a calendar entry the time *is* half of what it says, so it goes into
  * `text` for the model in words. The title stays bare: the page writes the time
- * itself from `at`/`endsAt`/`allDay`, once as a row and once, start time only,
- * in the fold's summary — and a title carrying "kl. 13:30–14:15" could not be
- * shortened to "Tandlæge 13:30" without parsing our own sentence back apart.
+ * itself from `at`/`endsAt`/`allDay` on the compact face. A title carrying
+ * "kl. 13:30–14:15" could not be shortened to "Tandlæge 13:30" without parsing
+ * our own sentence back apart.
  */
 export function toPersonalSourceItem(event: PersonalEvent): SourceItem {
   return {
@@ -457,6 +457,7 @@ export function toPersonalSourceItem(event: PersonalEvent): SourceItem {
     childNames: [],
     audience: 'family',
     important: false,
+    location: event.location,
     url: event.url,
   };
 }

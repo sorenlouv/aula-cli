@@ -119,7 +119,7 @@ describe('the bounded calendar window', () => {
 describe('appointment presentation', () => {
   test('the model reads the timed interval in words; the page gets it as fields', () => {
     // The title stays bare so the page can write "Tandlæge 13:30" in the
-    // calendar fold's summary without parsing its own sentence back apart.
+    // compact calendar card without parsing its own sentence back apart.
     const source = toPersonalSourceItem(toPersonalEvent(TIMED, CAL)!);
     expect(source.title).toBe('Tandlæge');
     expect(source.text).toBe('Tandlæge · kl. 13:30–14:15 · Fra kalenderen «Familien»');

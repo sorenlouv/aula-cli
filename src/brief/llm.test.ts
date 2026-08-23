@@ -6,7 +6,9 @@ import { briefInput, sourceItem } from '../testing/brief-fixtures.ts';
 import { installFakeClaude } from '../testing/fake-claude.ts';
 import {
   extractCards,
+  extractionInstructions,
   extractionPayload,
+  extractionSchema,
   parseClaudeJson,
   parseJsonLoosely,
   runClaude,
@@ -99,6 +101,34 @@ describe('withPreferences', () => {
   });
 });
 
+describe('personal appointment relevance policy', () => {
+  const personal = sourceItem({
+    key: 'cal:family:appointment',
+    kind: 'personal',
+    title: 'Aftale',
+    audience: 'family',
+  });
+  const input = briefInput({ items: [personal] });
+
+  test('requires positive child context and defaults uncertainty to false', () => {
+    const properties = extractionSchema(input).properties.personalEvents.items.properties;
+    const description = properties.relevant.description;
+
+    expect(description).toContain('kun når kalenderkilden selv tydeligt viser');
+    expect(description).toContain('legeaftale');
+    expect(description).toContain('voksenrelaterede aftaler er false');
+    expect(description).toContain('ved tvivl: false');
+    expect(properties.reason.description).toContain('tid eller mulig konflikt er ikke belæg');
+  });
+
+  test('the prose prompt delegates to that one structured policy', () => {
+    const instructions = extractionInstructions(input);
+
+    expect(instructions).toContain('snævre inklusionsregel i svarskemaets beskrivelse');
+    expect(instructions).not.toContain('ved tvivl er den true');
+  });
+});
+
 describe('parseJsonLoosely', () => {
   test('accepts a bare object, a fenced block, and prose around it', () => {
     expect(parseJsonLoosely('{"a":1}')).toEqual({ a: 1 });
@@ -138,9 +168,16 @@ describe('validateExtraction', () => {
     reason: 'Noget Viggo skal have med; rettet mod hans egen stue.',
     sourceKeys: ['post:1'],
   };
+  const personalVerdict = {
+    sourceKey: DENTIST.key,
+    relevant: true,
+    summary: 'Tandlægetid fredag kl. 13.30.',
+    reason: 'Aftalen påvirker familiens plan fredag.',
+  };
   const answer = (extra: Record<string, unknown> = {}) => ({
     topline: 'Løbetøj mandag.',
     cards: [good],
+    personalEvents: [personalVerdict],
     childSummaries: { Viggo: 'Løbedag mandag.' },
     hidden: [],
     ...extra,
@@ -170,6 +207,7 @@ describe('validateExtraction', () => {
       input,
       answer({
         cards: [{ ...good, sourceKeys: ['POST:1'], children: ['vIGGO'] }],
+        personalEvents: [{ ...personalVerdict, sourceKey: DENTIST.key.toUpperCase() }],
         hidden: ['POST:2'],
       }),
     );
@@ -177,6 +215,7 @@ describe('validateExtraction', () => {
     expect(result.problems).toEqual([]);
     expect(result.cards[0]?.sourceKeys).toEqual(['post:1']);
     expect(result.cards[0]?.children).toEqual(['Viggo']);
+    expect(result.personalEvents[0]?.sourceKey).toBe(DENTIST.key);
     expect(result.hidden).toEqual(['post:2']);
   });
 
@@ -274,12 +313,39 @@ describe('validateExtraction', () => {
     expect(result.cards).toHaveLength(1);
   });
 
-  test('hidden keeps only keys that name a source', () => {
+  test('every personal appointment gets one explicit, grounded verdict', () => {
+    const valid = validateExtraction(input, answer());
+    expect(valid.personalEvents).toEqual([personalVerdict]);
+
+    const missing = validateExtraction(input, answer({ personalEvents: [] }));
+    expect(missing.personalEvents).toEqual([]);
+    expect(missing.problems.some((problem) => problem.includes('mangler relevansvurdering'))).toBe(
+      true,
+    );
+
+    const duplicate = validateExtraction(
+      input,
+      answer({ personalEvents: [personalVerdict, personalVerdict] }),
+    );
+    expect(duplicate.problems.some((problem) => problem.includes('mere end én'))).toBe(true);
+
+    const invented = validateExtraction(
+      input,
+      answer({
+        personalEvents: [{ ...personalVerdict, summary: 'Tandlægetid 24/9.' }],
+      }),
+    );
+    expect(invented.personalEvents).toEqual([]);
+    expect(invented.problems.some((problem) => problem.includes('24/9'))).toBe(true);
+  });
+
+  test('hidden keeps Aula keys; personal appointments use their verdict', () => {
     const result = validateExtraction(
       input,
       answer({ hidden: ['post:2', DENTIST.key, 'post:404'] }),
     );
-    expect(result.hidden).toEqual(['post:2', DENTIST.key]);
+    expect(result.hidden).toEqual(['post:2']);
+    expect(result.problems.some((problem) => problem.includes('personalEvents'))).toBe(true);
   });
 
   test('a non-object answer is one problem, not a crash', () => {
@@ -457,6 +523,7 @@ describe('the claude subprocess', () => {
     const answer = (cards: unknown[]) => ({
       topline: 'Kort overblik.',
       cards,
+      personalEvents: [],
       childSummaries: {},
       hidden: [],
     });

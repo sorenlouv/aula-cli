@@ -2,9 +2,9 @@
  * The model call, and the validation that makes it safe to trust.
  *
  * One call. It reads the payload — every source, with text — and answers in a
- * schema: the cards, finished; the topline; a line per child; and the sources
- * to keep off the page. The page is then built locally from that answer, so
- * nothing the reader sees was typed by the model except the words on a card.
+ * schema: the cards, finished; one verdict per personal appointment; the
+ * topline; a line per child; and the Aula sources to keep off the page. The
+ * page is then built locally from that answer.
  *
  * Everything here exists to make that answer checkable. What a schema can
  * state, it states and the CLI enforces (`extractionSchema`). What it cannot
@@ -18,7 +18,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildDateSupport, dueAtSupported, unsupportedDateClaims } from './dates.ts';
 import { BRIEF_DIR } from './state.ts';
-import type { BriefInput, Card, SourceItem } from './types.ts';
+import type { BriefInput, Card, PersonalEventVerdict, SourceItem } from './types.ts';
 import { isRecord, parseIsoDateParts } from '../validation.ts';
 
 const CACHE_DIR = join(BRIEF_DIR, 'cache');
@@ -28,7 +28,7 @@ const CACHE_DIR = join(BRIEF_DIR, 'cache');
  * read back with a field missing — the first run after an upgrade must not
  * spend its day on yesterday's answer shape.
  */
-const CONTRACT_VERSION = 4;
+const CONTRACT_VERSION = 5;
 
 /**
  * Which model (and how hard it thinks) is the quality/speed dial for the whole
@@ -261,8 +261,9 @@ export function parseJsonLoosely(raw: string): unknown {
 export type ExtractResult = {
   topline: string | null;
   cards: Card[];
+  personalEvents: PersonalEventVerdict[];
   childSummaries: Record<string, string>;
-  /** Source keys the model kept off the page. Listed in the muted foot. */
+  /** Aula source keys the model kept off the page. Listed in the muted foot. */
   hidden: string[];
   problems: string[];
 };
@@ -270,6 +271,7 @@ export type ExtractResult = {
 const EMPTY: ExtractResult = {
   topline: null,
   cards: [],
+  personalEvents: [],
   childSummaries: {},
   hidden: [],
   problems: [],
@@ -278,12 +280,12 @@ const EMPTY: ExtractResult = {
 /**
  * Checks a model response against the input it was given.
  *
- * The shape is the schema's job, so what is left to check is the one thing a
- * schema cannot know: whether a date the model wrote is in the text it cites.
+ * The shape is the schema's job, so what is left to check is what a schema
+ * cannot know: whether a date the model wrote is in the text it cites, and
+ * whether the fixed-length personal verdict list names every appointment once.
  * A card's `date` must be supported by at least one of its sources; a date
  * named in its title, summary or reason must be supported by at least one of
- * them too. A card that fails is dropped and reported — not kept with the date
- * removed, because the date is usually the point.
+ * them too. A card or verdict that fails is dropped and reported.
  *
  * The topline and the per-child lines are checked against every source at
  * once (they are about the week, not one card) and dropped on failure; the
@@ -386,6 +388,58 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
     });
   }
 
+  // Every personal appointment needs an explicit verdict. A missing decision
+  // is not interpreted as irrelevant: the ranker shows unaccounted-for events
+  // with deterministic source text, while this problem keeps the run
+  // incomplete and out of the cache.
+  const personalKeys = input.items
+    .filter((item) => item.kind === 'personal')
+    .map((item) => item.key);
+  const expectedPersonal = new Set(personalKeys);
+  const seenPersonal = new Set<string>();
+  const personalEvents: PersonalEventVerdict[] = [];
+  const rawPersonal = Array.isArray(parsed.personalEvents) ? parsed.personalEvents : [];
+  if (!Array.isArray(parsed.personalEvents)) {
+    problems.push('"personalEvents" mangler eller er ikke en liste');
+  }
+  for (const [index, raw] of rawPersonal.entries()) {
+    if (!isRecord(raw)) {
+      problems.push(`personalEvents[${index}] er ikke et objekt`);
+      continue;
+    }
+    const sourceKey = typeof raw.sourceKey === 'string' ? canonicalItemKey(raw.sourceKey) : '';
+    const label = `personalEvents[${index}] (${sourceKey || '?'})`;
+    if (!expectedPersonal.has(sourceKey)) {
+      problems.push(`${label}: sourceKey er ikke en personlig kalenderaftale`);
+      continue;
+    }
+    if (seenPersonal.has(sourceKey)) {
+      problems.push(`${label}: kalenderaftalen har mere end én relevansvurdering`);
+      continue;
+    }
+    seenPersonal.add(sourceKey);
+    const summary = typeof raw.summary === 'string' ? raw.summary.trim() : '';
+    const reason = typeof raw.reason === 'string' ? raw.reason.trim() : '';
+    if (typeof raw.relevant !== 'boolean' || !summary || !reason) {
+      problems.push(`${label}: relevant, summary eller reason mangler`);
+      continue;
+    }
+    const invented = unsupportedDateClaims(`${summary} ${reason}`, support, { sourceKey });
+    if (invented.length > 0) {
+      problems.push(
+        `${label}: dato uden belæg i kalenderaftalen: ${invented.map((d) => `"${d}"`).join(', ')}`,
+      );
+      continue;
+    }
+    personalEvents.push({ sourceKey, relevant: raw.relevant, summary, reason });
+  }
+  const missingPersonal = personalKeys.filter((key) => !seenPersonal.has(key));
+  if (missingPersonal.length > 0) {
+    problems.push(
+      `personalEvents mangler relevansvurdering for ${missingPersonal.length} kalenderaftale${missingPersonal.length === 1 ? '' : 'r'}: ${missingPersonal.join(', ')}`,
+    );
+  }
+
   const grounded = (value: unknown, where: string): string | null => {
     if (typeof value !== 'string' || !value.trim()) return null;
     const bad = unsupportedDateClaims(value, support);
@@ -404,14 +458,22 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
     }
   }
 
-  const hidden = Array.isArray(parsed.hidden)
-    ? parsed.hidden
-        .filter((key): key is string => typeof key === 'string')
-        .map(canonicalItemKey)
-        .filter((key) => items.has(key))
-    : [];
+  const hidden: string[] = [];
+  if (Array.isArray(parsed.hidden)) {
+    for (const rawKey of parsed.hidden) {
+      if (typeof rawKey !== 'string') continue;
+      const key = canonicalItemKey(rawKey);
+      const item = items.get(key);
+      if (!item) continue;
+      if (item.kind === 'personal') {
+        problems.push(`hidden: kalenderaftalen ${key} skal vurderes i personalEvents`);
+        continue;
+      }
+      hidden.push(key);
+    }
+  }
 
-  return { topline, cards, childSummaries, hidden, problems };
+  return { topline, cards, personalEvents, childSummaries, hidden, problems };
 }
 
 // A 60-day live sample on 2026-08-23 contained 30 posts; the longest was 2,897
@@ -473,9 +535,10 @@ export function extractionPayload(input: BriefInput) {
  *
  * Everything a schema can state, the prompt no longer says: `sourceKeys` is an
  * enum of the Aula sources (the family's own appointments are left out, so an
- * appointment cannot become a card), `children` an enum of the children, `date`
- * a `format: "date"`, `hidden` an enum of every source. Field semantics are
- * `description`s on the field they govern; the docs confirm the model reads
+ * appointment cannot become a full card), `personalEvents[].sourceKey` names
+ * the personal sources, `children` names the children, `date` is a
+ * `format: "date"`, and `hidden` can name Aula sources only. Field semantics
+ * are `description`s on the field they govern; the docs confirm the model reads
  * them. Written once each — repeating a description per key put thousands of
  * tokens of one sentence into an earlier schema.
  *
@@ -484,7 +547,9 @@ export function extractionPayload(input: BriefInput) {
  */
 export function extractionSchema(input: BriefInput) {
   const aulaKeys = input.items.filter((item) => item.kind !== 'personal').map((item) => item.key);
-  const allKeys = input.items.map((item) => item.key);
+  const personalKeys = input.items
+    .filter((item) => item.kind === 'personal')
+    .map((item) => item.key);
   const firstNames = input.family.children.map((c) => c.firstName);
   const keyEnum = (keys: string[]) => (keys.length > 0 ? { enum: keys } : { type: 'string' });
 
@@ -546,6 +611,40 @@ export function extractionSchema(input: BriefInput) {
           additionalProperties: false,
         },
       },
+      personalEvents: {
+        type: 'array',
+        minItems: personalKeys.length,
+        maxItems: personalKeys.length,
+        description:
+          'Præcis én relevansvurdering per personlig kalenderaftale, i prioriteret rækkefølge. Aftalens titel, dato og tid omskrives ikke; siden tager dem direkte fra kilden.',
+        items: {
+          type: 'object',
+          properties: {
+            sourceKey: {
+              type: 'string',
+              ...keyEnum(personalKeys),
+              description: 'Den ene personlige kalenderaftale, vurderingen gælder.',
+            },
+            relevant: {
+              type: 'boolean',
+              description:
+                'True kun når kalenderkilden selv tydeligt viser, at aftalen handler om et barn, skole/dagtilbud, en legeaftale, hente/bringe-logistik eller et barns aktivitet. Uforståelige og voksenrelaterede aftaler er false; ved tvivl: false.',
+            },
+            summary: {
+              type: 'string',
+              description:
+                'Én kort, faktuel sætning om aftalen. Kun oplysninger fra den ene kalenderkilde.',
+            },
+            reason: {
+              type: 'string',
+              description:
+                'Én kort sætning med kildens afgørende belæg. Ved relevant=true skal den nævne barn, skole/dagtilbud, legeaftale, hente/bringe-logistik eller barnets aktivitet; tid eller mulig konflikt er ikke belæg.',
+            },
+          },
+          required: ['sourceKey', 'relevant', 'summary', 'reason'],
+          additionalProperties: false,
+        },
+      },
       childSummaries: {
         type: 'object',
         description:
@@ -555,25 +654,27 @@ export function extractionSchema(input: BriefInput) {
       },
       hidden: {
         type: 'array',
-        items: keyEnum(allKeys),
+        items: keyEnum(aulaKeys),
         description:
-          'Kilder, der slet ikke skal vises — irrelevante efter relevans-tegnene, eller noget forælderens præferencer siger aldrig skal med. En kilde med important=true bør ikke skjules uden en konkret grund i indholdet. Alt andet uden kort vises foldet sammen nederst.',
+          'Aula-kilder, der slet ikke skal vises — irrelevante efter relevans-tegnene, eller noget forælderens præferencer siger aldrig skal med. Personlige kalenderaftaler vurderes kun i personalEvents. En kilde med important=true bør ikke skjules uden en konkret grund i indholdet. Alt andet uden kort vises foldet sammen nederst.',
       },
     },
-    required: ['topline', 'cards', 'childSummaries', 'hidden'],
+    required: ['topline', 'cards', 'personalEvents', 'childSummaries', 'hidden'],
     additionalProperties: false,
   };
 }
 
 const INSTRUCTIONS = `Du læser de seneste ugers indhold fra Aula — opslag, beskeder, ugeplaner og kalender — på vegne af en forælder til et eller flere børn, sammen med forælderens egne kalenderaftaler. Ud fra det skriver du den korte oversigt, forælderen læser i stedet for at åbne Aula. Målet er, at forælderen aldrig går glip af noget, der kræver handling eller ændrer et barns dag, selv om de aldrig åbner Aula.
 
-Du afgør tre ting:
+Du afgør fire ting:
 
-1. Kortene. En normal morgen giver 5–10. Skriv kortene i prioriteret rækkefølge — vigtigst først; bliver der for mange, er det de sidste, siden folder sammen. Hvert kort er én ting, forælderen skal vide eller gøre: en titel, der nævner barnet og står i bydeform, når der skal gøres noget; et resumé på én til tre sætninger, der siger det vigtige, uden at læseren behøver kilden; datoen kortet sorteres efter — fristen, hvis der er én, ellers dagen det sker; om det kræver handling af forælderen; en begrundelse for, hvorfor kortet er med; og de kilder, det bygger på. Ét kort må samle flere kilder, og skal gøre det, når de handler om det samme: et opslag fra juli med datoen og en besked fra i dag om samme arrangement er ét kort med juli-datoen og begge kilder. Forælderen har for længst glemt juli-opslaget — når du binder dem sammen, hjælper du forælderen meget.
+1. Aula-kortene. En normal morgen giver 5–10. Skriv kortene i prioriteret rækkefølge — vigtigst først; bliver der for mange, er det de sidste, siden folder sammen. Hvert kort er én ting, forælderen skal vide eller gøre: en titel, der nævner barnet og står i bydeform, når der skal gøres noget; et resumé på én til tre sætninger, der siger det vigtige, uden at læseren behøver kilden; datoen kortet sorteres efter — fristen, hvis der er én, ellers dagen det sker; om det kræver handling af forælderen; en begrundelse for, hvorfor kortet er med; og de Aula-kilder, det bygger på. Ét kort må samle flere Aula-kilder, og skal gøre det, når de handler om det samme: et opslag fra juli med datoen og en besked fra i dag om samme arrangement er ét kort med juli-datoen og begge kilder. Forælderen har for længst glemt juli-opslaget — når du binder dem sammen, hjælper du forælderen meget. En personlig kalenderaftale må aldrig indgå i et Aula-kort.
 
-2. Toplinen: én sætning med det vigtigste først. Og én linje per barn om, hvad der sker for det i den kommende tid.
+2. De personlige kalenderaftaler. Svar med præcis én vurdering per kilde med type "personal", også når den er irrelevant. Skriv vurderingerne i prioriteret rækkefølge, og brug den snævre inklusionsregel i svarskemaets beskrivelse af "relevant". Skriv én kort, faktuel opsummering og én kort begrundelse. En aftale med relevant=false må ikke bruges i topline eller childSummaries. Gæt aldrig hvilket barn aftalen handler om, gør den aldrig til en handling, og bland den aldrig sammen med en Aula-kilde. Siden bruger selv kildens titel, dato, tid, sted og link.
 
-3. Hvilke øvrige kilder der slet ikke skal vises — enten fordi de ikke er relevante efter relevans-tegnene nedenfor, eller fordi forælderens præferencer siger, at den slags aldrig er relevant. Alt andet, der ikke blev et kort, vises foldet sammen nederst — et fravalg koster aldrig et punkt. Derfor: vær konkret, og lav ikke et kort for en sikkerheds skyld. Fremhæver du alt, fremhæver du intet.
+3. Toplinen: én sætning med det vigtigste først. Og én linje per barn om, hvad der sker for det i den kommende tid.
+
+4. Hvilke øvrige Aula-kilder der slet ikke skal vises — enten fordi de ikke er relevante efter relevans-tegnene nedenfor, eller fordi forælderens præferencer siger, at den slags aldrig er relevant. Personlige kalenderaftaler skjules kun med relevant=false i deres egen vurdering. Alt andet, der ikke blev et kort, vises foldet sammen nederst — et fravalg koster aldrig et punkt. Derfor: vær konkret, og lav ikke et kort for en sikkerheds skyld. Fremhæver du alt, fremhæver du intet.
 
 Du afgør prioriteringen, men ikke sidens kronologiske visningsrækkefølge eller udseende.
 
@@ -581,7 +682,7 @@ Sådan læser du en kilde:
 - "text" er kildens tekst og den eneste autoritet på, hvad der står. Når "textTruncated" er false, er den fuld; når feltet er true, er teksten forkortet ved ellipsen. Alt du skriver, skal kunne læses i den tekst, du har fået; læseren kan altid åbne den fulde kilde under kortet.
 - "audience" er, hvor bredt kilden er sendt ud: "child" og "class" af nogen, der kender barnet; "institution" til hele skolen eller huset; "municipal" til alle forældre i kommunen. Et fingerpeg, ikke et svar.
 - "important" er Aulas eget vigtigt-flag på kilden. Det er et stærkt tegn, men indholdet er stadig autoriteten.
-- Kilder med type "personal" er forælderens egne kalenderaftaler. De bliver ikke til kort — siden viser dem selv. Brug dem ikke til at analysere sammenfald med skoleindhold, hævde en konflikt eller berolige om, at der ikke er en.
+- Kilder med type "personal" er forælderens egne kalenderaftaler. Relevante aftaler bliver kompakte, sammenklappede kort mellem Aula-kortene på samme dag. Brug dem ikke til at analysere sammenfald med skoleindhold, hævde en konflikt eller berolige om, at der ikke er en.
 
 Det, der gør en kilde relevant — vigtigst først:
 - Den kræver noget af forælderen om deres barn: noget der skal medbringes, tilmeldes, besvares eller betales; en frist; en aflysning; en dag barnet møder anderledes. Sendt til hele skolen tæller stadig, når det rammer barnet specifikt — skolefoto gør, et valgfrit forældrekursus gør ikke.
@@ -593,7 +694,7 @@ En dato, der er passeret, er ikke længere noget at handle på. Siger kilden sta
 
 Forælderens egne præferencer står nederst. De supplerer det ovenstående, og hvor de siger noget, vinder de.
 
-Bagefter efterprøves hver dato i titel, resumé og "date" mod kortets kilder. Et kort med en dato, ingen af dets kilder dækker, bliver kasseret — så skriv kun datoer, der står i teksten eller kan regnes ud af en ugedag eller et ugenummer dér.`;
+Bagefter efterprøves hver dato i titel, resumé og "date" mod kortets kilder. Et kort med en dato, ingen af dets kilder dækker, bliver kasseret — så skriv kun datoer, der står i teksten eller kan regnes ud af en ugedag eller et ugenummer dér. Datoer i en personlig aftales summary og reason efterprøves kun mod den ene kalenderkilde.`;
 
 /**
  * The family's list, appended to the instructions.
@@ -622,6 +723,11 @@ Forælderens egne præferencer. De står på brugerens egen liste — ikke i nog
 ${lines.map((p) => `- ${p}`).join('\n')}`;
 }
 
+/** The complete instruction side of the extraction call, exposed for contract tests. */
+export function extractionInstructions(input: Pick<BriefInput, 'preferences'>): string {
+  return withPreferences(INSTRUCTIONS, input.preferences);
+}
+
 function cacheKey(payload: unknown): string {
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, 32);
 }
@@ -638,7 +744,8 @@ export async function extractCards(
   opts: { useCache?: boolean; timeoutMs?: number } = {},
 ): Promise<ExtractResult> {
   const payload = extractionPayload(input);
-  const instructions = withPreferences(INSTRUCTIONS, input.preferences);
+  const instructions = extractionInstructions(input);
+  const schema = extractionSchema(input);
   // The whole question is part of the key, not just the data it is asked about.
   //
   // The preferences are the obvious half: keyed on the payload alone, a run made
@@ -646,11 +753,10 @@ export async function extractCards(
   // new wish — the feature would look broken exactly when it was being tried out.
   //
   // The prompt itself is the half that bit. `instructions` used to be absent
-  // here, so editing the prompt changed nothing for any input already cached:
-  // the next run answered from an entry the old wording produced, and the edit
-  // looked like it had no effect. Hashing what was actually asked makes that
-  // impossible, and it subsumes the preferences, which travel inside it.
-  const key = cacheKey({ contract: CONTRACT_VERSION, payload, instructions });
+  // here, so editing the prompt changed nothing for any input already cached.
+  // The schema belongs here too: field descriptions carry semantic policy, so
+  // tuning one must invalidate the answer written under its old wording.
+  const key = cacheKey({ contract: CONTRACT_VERSION, payload, instructions, schema });
   const cachePath = join(CACHE_DIR, `extract-${key}.json`);
 
   if (opts.useCache !== false) {
@@ -672,7 +778,6 @@ export async function extractCards(
   // so letting it through still produces a brief — it just produces an honest
   // one. Nothing is written to the cache on this path either; a 06:30 outage
   // must not pin a degraded brief for the rest of the day.
-  const schema = extractionSchema(input);
   const call = { timeoutMs: opts.timeoutMs ?? 240_000, schema };
   const answer = await runClaude(instructions, body, call);
 
@@ -703,13 +808,13 @@ ${result.problems.map((p) => `- ${p}`).join('\n')}`;
       const second = await runClaude(retry, body, call);
       const secondParsed = second.structured ?? parseJsonLoosely(second.text);
       const reparsed = validateExtraction(input, secondParsed);
-      // A corrective answer may fix the named date and forget every card that
-      // was already valid. Fewer problems is better only when it preserves at
-      // least as many survivors; otherwise the first partial answer is the
-      // more useful one.
+      // A corrective answer may fix the named date and forget valid cards or
+      // calendar verdicts. Fewer problems is better only when it preserves both
+      // kinds of survivor; otherwise the first partial answer is more useful.
       if (
         reparsed.problems.length < result.problems.length &&
-        reparsed.cards.length >= result.cards.length
+        reparsed.cards.length >= result.cards.length &&
+        reparsed.personalEvents.length >= result.personalEvents.length
       ) {
         result = reparsed;
         parsed = secondParsed;

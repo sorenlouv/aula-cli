@@ -1,12 +1,10 @@
 /**
- * The page, built locally from the model's cards.
+ * The page, built locally from the model's cards and calendar verdicts.
  *
- * The model decides what the cards are — title, summary, date, whether they
- * ask something — and which sources to keep off the page. This file decides
- * nothing about content. It draws the cards in the order `rank.ts` gave them,
- * puts every source a card rests on one tap away, and keeps the sections in
- * the same places every morning, because a page read in twenty seconds over
- * breakfast is one where knowing where things live beats variety.
+ * The model decides what the Aula cards are and which personal appointments
+ * are relevant. This file decides nothing about content. It draws full and
+ * compact cards in the order `rank.ts` gave them, keeps every source one tap
+ * away, and keeps the sections in the same places every morning.
  *
  * There used to be a second model call here that ordered and reworded the
  * cards. It went when the first call started writing them finished: ordering
@@ -15,10 +13,16 @@
  */
 
 import { escapeHtml } from '../html.ts';
-import { localIsoDate } from '../integrations/types.ts';
-import { DA_MONTHS, DA_WEEKDAYS, intervalLabel, shortDayMonth } from './dates.ts';
+import { DA_MONTHS, DA_WEEKDAYS, intervalLabel } from './dates.ts';
 import { doneKeys } from './done.ts';
-import type { ConversationMessage, RankedBrief, RankedCard, SourceItem } from './types.ts';
+import type {
+  ConversationMessage,
+  RankedBrief,
+  RankedCard,
+  RankedPersonalEvent,
+  RankedTimelineEntry,
+  SourceItem,
+} from './types.ts';
 
 function danishDate(isoDay: string): string {
   const date = new Date(`${isoDay}T00:00:00`);
@@ -42,15 +46,6 @@ function chipLabel(isoDay: string, today: string): string {
   if (offset === 0) return 'I dag';
   if (offset === 1) return 'I morgen';
   return capitalise(danishDate(isoDay));
-}
-
-/** "i dag", "i morgen", otherwise "onsdag 26/8" — short enough to sit in a summary line. */
-function summaryDayLabel(isoDay: string, today: string): string {
-  const offset = daysFrom(today, isoDay);
-  if (offset === 0) return 'i dag';
-  if (offset === 1) return 'i morgen';
-  const date = new Date(`${isoDay}T00:00:00`);
-  return `${DA_WEEKDAYS[date.getDay()]} ${shortDayMonth(isoDay)}`;
 }
 
 /**
@@ -220,91 +215,6 @@ function whenLabel(source: SourceItem): string {
   });
 }
 
-/**
- * How many days from today the calendar fold's summary always names —
- * today only. Anything further out is named only when it shares a day with
- * something the school asked for. Raising this to 2 names tomorrow as well.
- */
-const CALENDAR_SUMMARY_DAYS = 1;
-
-/**
- * The family's own appointments: one collapsed section, rows inside.
- *
- * An appointment is one line — title, time, which calendar — and a card would
- * be six lines of chrome around it. Rows grouped by day, folded shut by default,
- * is the shape that matches the information: the family already has a calendar
- * app, and what this page adds is the school's week beside it, not a second
- * copy of it.
- *
- * The summary is what makes the fold useful *closed*. It names today's
- * appointments, and those on any day that also carries a card — so "Viggo
- * gymnastik 17:10" appears beside the Wednesday the forældremøde is on, without
- * the page computing a clash or claiming the absence of one. `anchoredDays` is
- * that set of days. The reader draws the conclusion, and knows what the
- * arithmetic never could: how far the dentist is, and whether a grandparent can
- * fetch.
- *
- * Rows carry the same `data-*` as a card, so `validate.ts` holds them to the
- * same invariants and `done.ts` lets them be ticked off.
- */
-function calendarSection(
-  rows: SourceItem[],
-  anchoredDays: ReadonlySet<string>,
-  today: string,
-  isNew: ((key: string) => boolean) | undefined,
-): string {
-  if (rows.length === 0) return '';
-  const dayOf = (s: SourceItem) => (s.at ?? '').slice(0, 10);
-  const sorted = [...rows].sort(
-    (a, b) => (a.at ?? '').localeCompare(b.at ?? '') || a.title.localeCompare(b.title),
-  );
-
-  const byDay = new Map<string, SourceItem[]>();
-  for (const s of sorted) {
-    const day = dayOf(s);
-    byDay.set(day, [...(byDay.get(day) ?? []), s]);
-  }
-
-  const named = new Set<string>(anchoredDays);
-  for (let offset = 0; offset < CALENDAR_SUMMARY_DAYS; offset++) {
-    const day = new Date(`${today}T00:00:00`);
-    day.setDate(day.getDate() + offset);
-    named.add(localIsoDate(day));
-  }
-  const clauses = [...named]
-    .sort()
-    .filter((day) => byDay.has(day))
-    .map((day) => {
-      const items = (byDay.get(day) ?? []).map((s) => {
-        const start = s.allDay ? '' : (s.at ?? '').slice(11, 16);
-        return start ? `${s.title} ${start}` : s.title;
-      });
-      return `${summaryDayLabel(day, today)}: ${items.join(', ')}`;
-    });
-  const summary = clauses.length ? capitalise(clauses.join(' · ')) : 'Alle aftaler i perioden';
-
-  const row = (s: SourceItem) => `
-      <div class="cal-row" data-signal-id="${escapeHtml(s.key)}" data-source-id="${escapeHtml(s.key)}" data-done-keys="${escapeHtml(doneKeys({ sourceKeys: [s.key], date: dayOf(s) || null }).join(' '))}">
-        <span class="cal-when">${escapeHtml(whenLabel(s))}</span>
-        <span class="cal-title">${escapeHtml(s.title)}</span>
-        ${isNew?.(s.key) ? '<span class="chip new">Ny</span>' : ''}
-        <span class="cal-src">${escapeHtml(s.author ?? '')}${s.url ? ` · <a href="${escapeHtml(s.url)}">åbn i kalender</a>` : ''}</span>
-        <button class="tick" type="button" aria-pressed="false" aria-label="Markér som klaret"></button>
-      </div>`;
-
-  const body = [...byDay.entries()]
-    .map(
-      ([day, items]) =>
-        `<div class="cal-day">${escapeHtml(capitalise(danishDate(day)))}</div>${items.map(row).join('')}`,
-    )
-    .join('');
-
-  return `<section data-section="calendar"><h2>Egen kalender <span class="count" data-count>${rows.length}</span></h2>
-    <details class="cal"><summary>${escapeHtml(summary)}</summary><div class="cal-body">${body}</div></details>
-    <button class="done-toggle" type="button" aria-expanded="false" data-done-toggle hidden></button>
-  </section>`;
-}
-
 export type PageOptions = {
   topline?: string | null;
   summaries?: Record<string, string>;
@@ -334,32 +244,55 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
       <button class="tick" type="button" aria-pressed="false" aria-label="Markér som klaret"></button>
     </div>`;
 
+  /**
+   * A personal appointment is a card in the timeline, but not a full Aula card.
+   * Its closed face keeps the source's title and interval intact; the model's
+   * summary and relevance reason stay behind the individual fold.
+   */
+  const personal = (event: RankedPersonalEvent) => {
+    const source = event.source;
+    const meta = [source.location, source.author].filter(Boolean).join(' · ');
+    return `
+    <div class="card calendar-card" data-signal-id="${escapeHtml(event.id)}" data-source-id="${escapeHtml(event.sourceKey)}" data-done-keys="${escapeHtml(doneKeys({ sourceKeys: [event.sourceKey], date: event.date }).join(' '))}">
+      <details class="calendar-details">
+        <summary><span class="calendar-face">
+          ${event.date ? `<span class="chip ${event.date === today ? 'now' : 'soon'}">${escapeHtml(chipLabel(event.date, today))}</span>` : ''}
+          <span class="calendar-when">${escapeHtml(whenLabel(source))}</span>
+          <span class="calendar-title">${escapeHtml(event.title)}</span>
+          ${opts.isNew?.(event.sourceKey) ? '<span class="chip new">Ny</span>' : ''}
+          <span class="calendar-origin">Egen kalender</span>
+        </span></summary>
+        <div class="calendar-body">
+          ${event.summary ? `<p class="calendar-copy">${escapeHtml(event.summary)}</p>` : ''}
+          ${event.reason ? `<p class="reason"><b>Vist fordi:</b> ${escapeHtml(event.reason)}</p>` : ''}
+          <div class="calendar-meta">${escapeHtml(meta)}${source.url ? `${meta ? ' · ' : ''}<a href="${escapeHtml(source.url)}">åbn i kalender</a>` : ''}</div>
+        </div>
+      </details>
+      <button class="tick" type="button" aria-pressed="false" aria-label="Markér som klaret"></button>
+    </div>`;
+  };
+
   // One list, by date. A divider separates the tails; it never heads a list
   // that is all one kind.
   const groups = [
-    { label: null, cards: brief.cards.filter((c) => c.placement === 'upcoming') },
-    { label: 'Uden fast dato', cards: brief.cards.filter((c) => c.placement === 'undated') },
-    { label: 'Tidligere', cards: brief.cards.filter((c) => c.placement === 'past') },
-  ].filter((group) => group.cards.length > 0);
-  const cards = groups
+    { label: null, entries: brief.timeline.filter((entry) => entry.placement === 'upcoming') },
+    {
+      label: 'Uden fast dato',
+      entries: brief.timeline.filter((entry) => entry.placement === 'undated'),
+    },
+    { label: 'Tidligere', entries: brief.timeline.filter((entry) => entry.placement === 'past') },
+  ].filter((group) => group.entries.length > 0);
+  const timeline = groups
     .map((group, index) =>
       [
         index > 0 && group.label ? `<div class="divider">${group.label}</div>` : '',
-        ...group.cards.map(card),
+        ...group.entries.map((entry: RankedTimelineEntry) =>
+          entry.entryType === 'card' ? card(entry) : personal(entry),
+        ),
       ].join(''),
     )
     .join('');
   const actions = brief.cards.filter((c) => c.needsAction).length;
-  const anchoredDays = new Set(
-    brief.cards
-      .filter((c) => c.placement === 'upcoming')
-      .map((c) => c.date)
-      .filter((d): d is string => Boolean(d)),
-  );
-  const hiddenKeys = new Set(brief.hidden.map((item) => item.key));
-  const appointments = input.items.filter(
-    (item) => item.kind === 'personal' && !hiddenKeys.has(item.key),
-  );
 
   // A failed fetch must never look like a quiet week, so a day where something
   // could not be *fetched* puts this panel right under the topline: the reader
@@ -403,13 +336,11 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
 
   ${fetchFailed ? `<section><h2>Datastatus</h2>${datastatus}</section>` : ''}
 
-  <section data-section="cards"><h2>Kommende <span class="count" data-count>${brief.cards.length}</span></h2>
-    ${cards}
-    <div class="panel" data-empty${brief.cards.length ? ' hidden' : ''}>Ingen kort i dag. Det, der blev læst, står nederst under Øvrigt fra Aula.</div>
+  <section data-section="cards"><h2>Kommende <span class="count" data-count>${brief.timeline.length}</span></h2>
+    ${timeline}
+    <div class="panel" data-empty${brief.timeline.length ? ' hidden' : ''}>Ingen punkter i dag. Det, der blev læst, står nederst under Øvrigt fra Aula.</div>
     <button class="done-toggle" type="button" aria-expanded="false" data-done-toggle hidden></button>
   </section>
-
-  ${calendarSection(appointments, anchoredDays, today, opts.isNew)}
 
   <section><h2>Per barn</h2><div class="grid">
     ${input.family.children

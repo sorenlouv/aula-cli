@@ -2,9 +2,8 @@
  * Ticking something off.
  *
  * A brief that keeps asking for something you did last Tuesday is worse than
- * one that never asked: you stop reading the section. So every card in the two
- * action sections, and every row in the calendar fold, carries a tick, and a
- * ticked one stays ticked tomorrow.
+ * one that never asked: you stop reading the section. So every full or compact
+ * card in the timeline carries a tick, and a ticked one stays ticked tomorrow.
  *
  * **The store is the browser's, not the pipeline's.** The page is read on a
  * phone, and nothing on a phone can write to `~/.aula`. So the record lives in
@@ -83,8 +82,8 @@ export function doneKeys(card: Pick<Card, 'sourceKeys' | 'date'>): string[] {
  * convenience of building the ticks here. Everything this touches — the tick
  * buttons, the done-toggle, the empty-state panel — is rendered by the
  * renderer and simply wired up here. What makes something tickable is the
- * `data-done-keys` attribute, not its class: a card and a calendar row are
- * different shapes with the same contract.
+ * `data-done-keys` attribute, not its class: full and compact cards share the
+ * same contract.
  *
  * `var` and `function` throughout, and no template literals: this string is
  * carried inside one, and the fewer characters that need escaping on the way

@@ -1,26 +1,34 @@
 /**
  * From cards to a page order.
  *
- * The model chooses the cards and puts them in priority order. Code keeps the
- * first `CARD_CAP`, folds the rest, then sorts the kept cards by date for a
- * page a reader can scan for "what is next" without learning a layout. An earlier version
- * scored every signal on audience, kind, urgency and relevance and tiered the
- * page from the arithmetic; it produced consistent briefs and unreadable ones,
- * and the consistency came from the sort, not from the numbers.
+ * The model chooses the Aula cards, puts them in priority order, and gives every
+ * personal appointment a relevance verdict. Code keeps the first `CARD_CAP`
+ * full cards, folds the rest, turns relevant appointments into compact entries,
+ * then sorts both shapes into one chronological timeline.
  *
  * Two things stay deterministic here:
  *
- * - **The cap.** `CARD_CAP` cards render; anything after them is folded. If
- *   everything is a card, nothing is.
+ * - **The cap.** `CARD_CAP` full Aula cards render; anything after them is
+ *   folded. Compact personal cards do not crowd an Aula card out.
  * - **The rules fallback.** Without a model the Danish extractors make the
  *   cards: weaker titles, the matched sentence for a summary, but a page.
  */
 
 import { localIsoDate } from '../integrations/types.ts';
 import { extractHits } from './rules.ts';
-import type { BriefInput, Card, Placement, RankedBrief, RankedCard } from './types.ts';
+import type {
+  BriefInput,
+  Card,
+  PersonalEventVerdict,
+  Placement,
+  RankedBrief,
+  RankedCard,
+  RankedPersonalEvent,
+  RankedTimelineEntry,
+  SourceItem,
+} from './types.ts';
 
-/** At most this many cards on the page. The rest are folded, not dropped. */
+/** At most this many full Aula cards render. Compact calendar cards are separate. */
 export const CARD_CAP = 12;
 
 function isoOf(value: string | null): string | null {
@@ -43,8 +51,8 @@ function firstName(full: string): string {
  * the specifics as the summary.
  *
  * The family's own appointments are skipped: a calendar entry is already the
- * structured thing the extractors exist to recover from a sentence, and the
- * page lists appointments in a fold of their own.
+ * structured thing the extractors exist to recover from a sentence. Its model
+ * verdict and compact fallback are handled separately below.
  */
 export function cardsFromRules(input: BriefInput, now = new Date()): Card[] {
   const cards: Card[] = [];
@@ -100,19 +108,65 @@ function placementOf(date: string | null, today: string): Placement {
   return date < today ? 'past' : 'upcoming';
 }
 
+/** Exact start only where a structured Aula calendar source supplies it. */
+function cardSortAt(date: string | null, sources: SourceItem[]): string | null {
+  if (!date) return null;
+  const starts = new Set(
+    sources
+      .filter(
+        (source) => source.kind === 'event' && !source.allDay && source.at?.slice(0, 10) === date,
+      )
+      .map((source) => source.at)
+      .filter((at): at is string => Boolean(at)),
+  );
+  return starts.size === 1 ? ([...starts][0] ?? null) : null;
+}
+
+const placementOrder: Record<Placement, number> = { upcoming: 0, undated: 1, past: 2 };
+
 /**
- * `model` is the model's cards, or null when it did not run. `hidden` is its
- * list of sources to keep off the page; `rules` are the extractors' cards,
- * which are the page only when there is no model.
+ * Shared page order. Different days are always chronological. On one day,
+ * all-day/date-only entries come first and entries with known starts follow by
+ * clock time; equal or unknowable times keep their stable model order.
+ */
+function compareTimeline(a: RankedTimelineEntry, b: RankedTimelineEntry): number {
+  if (placementOrder[a.placement] !== placementOrder[b.placement]) {
+    return placementOrder[a.placement] - placementOrder[b.placement];
+  }
+  const ad = a.date ?? '';
+  const bd = b.date ?? '';
+  if (a.placement === 'past' && ad !== bd) return bd.localeCompare(ad);
+  if (ad !== bd) return ad.localeCompare(bd);
+  if (a.sortAt && b.sortAt && a.sortAt !== b.sortAt) return a.sortAt.localeCompare(b.sortAt);
+  if (Boolean(a.sortAt) !== Boolean(b.sortAt)) return a.sortAt ? 1 : -1;
+  return 0;
+}
+
+/**
+ * `model` is the model's Aula cards, or null when it did not run. `personalEvents`
+ * contains the validated verdicts that survived extraction; a missing verdict
+ * fails open to a compact source-only appointment. `hidden` is the model's Aula
+ * hide list; `rules` are the fallback cards when there is no model.
  */
 export function rank(
   input: BriefInput,
-  cards: { model: Card[] | null; rules: Card[]; hidden: string[] },
+  cards: {
+    model: Card[] | null;
+    personalEvents?: PersonalEventVerdict[] | null;
+    rules: Card[];
+    hidden: string[];
+  },
 ): RankedBrief {
   const itemByKey = new Map(input.items.map((item) => [item.key, item]));
   const degraded: string[] = [];
   const hiddenKeys = new Set(cards.hidden.filter((key) => itemByKey.has(key)));
   const modelRanks = new Map(cards.model?.map((card, index) => [card, index + 1]) ?? []);
+  const personalRanks = new Map(
+    cards.personalEvents?.map((verdict, index) => [verdict, index + 1]) ?? [],
+  );
+  const personalByKey = new Map(
+    cards.personalEvents?.map((verdict) => [verdict.sourceKey, verdict]) ?? [],
+  );
 
   // Drop anything citing a source that is not in the input. The schema makes
   // this impossible on the model path; the check stays for the rules path and
@@ -133,12 +187,15 @@ export function rank(
 
   const ranked: RankedCard[] = chosen.map((card) => ({
     ...card,
+    entryType: 'card',
     placement: placementOf(card.date, input.today),
     sources: card.sourceKeys.map((key) => itemByKey.get(key)!),
+    sortAt: null,
     modelRank: modelRanks.get(card) ?? null,
     reasons: [],
   }));
   for (const card of ranked) {
+    card.sortAt = cardSortAt(card.date, card.sources);
     if (card.modelRank !== null) card.reasons.push(`model rank:${card.modelRank}`);
     card.reasons.push(`placement:${card.placement}`);
     if (card.origin === 'rule') card.reasons.push('rule-made');
@@ -151,21 +208,47 @@ export function rank(
   const folded = ranked.slice(CARD_CAP);
   for (const card of folded) card.reasons.push(`over CARD_CAP(${CARD_CAP}) → folded`);
 
+  // ------------------------------------------------------ personal appointments
+  // A missing or invalid verdict must never look like a free afternoon. Show it
+  // with source facts only; extraction has already recorded why the run is
+  // incomplete. An explicit relevant=false is the one route into hidden.
+  const personalEvents: RankedPersonalEvent[] = [];
+  for (const source of input.items.filter((item) => item.kind === 'personal')) {
+    const verdict = personalByKey.get(source.key);
+    if (verdict?.relevant === false) {
+      hiddenKeys.add(source.key);
+      continue;
+    }
+    const date = source.at?.slice(0, 10) || null;
+    const event: RankedPersonalEvent = {
+      entryType: 'personal',
+      id: `personal:${source.key}`,
+      sourceKey: source.key,
+      title: source.title,
+      summary: verdict?.summary ?? '',
+      reason: verdict?.reason ?? null,
+      date,
+      placement: placementOf(date, input.today),
+      source,
+      sortAt: source.allDay ? null : source.at,
+      modelRank: verdict ? (personalRanks.get(verdict) ?? null) : null,
+      reasons: [],
+    };
+    if (event.modelRank !== null) event.reasons.push(`calendar model rank:${event.modelRank}`);
+    else event.reasons.push('calendar verdict missing → shown');
+    event.reasons.push(`placement:${event.placement}`);
+    personalEvents.push(event);
+    hiddenKeys.delete(source.key);
+  }
+
   // ---------------------------------------------------------------- order
   // Upcoming by date, then undated, then past (most recent first — the nearer
   // the day, the more likely it still says something).
-  const order: Record<Placement, number> = { upcoming: 0, undated: 1, past: 2 };
-  const page = ranked
-    .filter((card) => kept.has(card))
-    .sort((a, b) => {
-      if (order[a.placement] !== order[b.placement]) return order[a.placement] - order[b.placement];
-      const ad = a.date ?? '';
-      const bd = b.date ?? '';
-      if (a.placement === 'past') return bd.localeCompare(ad);
-      if (ad !== bd) return ad.localeCompare(bd);
-      // Stable sort: the model's priority survives within the same day.
-      return 0;
-    });
+  const page = ranked.filter((card) => kept.has(card)).sort(compareTimeline);
+  const timeline = [...page, ...personalEvents].sort(compareTimeline);
+  const personalPage = timeline.filter(
+    (entry): entry is RankedPersonalEvent => entry.entryType === 'personal',
+  );
 
   const covered = new Set(ranked.flatMap((card) => card.sourceKeys));
   // A contradictory answer can cite and hide the same source. Showing wins:
@@ -177,7 +260,16 @@ export function rank(
   );
   const hidden = input.items.filter((item) => hiddenKeys.has(item.key));
 
-  return { input, cards: page, folded, rest, hidden, degraded };
+  return {
+    input,
+    cards: page,
+    personalEvents: personalPage,
+    timeline,
+    folded,
+    rest,
+    hidden,
+    degraded,
+  };
 }
 
 /**
@@ -197,7 +289,7 @@ function dedupeRuleCards(cards: Card[]): Card[] {
 /** Human-readable breakdown for `--explain`. */
 export function explain(brief: RankedBrief): string {
   const lines = [
-    `${brief.cards.length} kort, ${brief.folded.length} foldet, ${brief.rest.length} øvrige kilder, ${brief.hidden.length} skjult`,
+    `${brief.cards.length} Aula-kort, ${brief.personalEvents.length} kalenderkort, ${brief.folded.length} foldet, ${brief.rest.length} øvrige kilder, ${brief.hidden.length} skjult`,
   ];
   const line = (card: RankedCard) =>
     `\n[${card.placement}] ${card.needsAction ? '!' : ' '} ${card.title}` +
@@ -206,6 +298,14 @@ export function explain(brief: RankedBrief): string {
     `\n    ${card.reasons.join('  ')}` +
     `\n    kilder: ${card.sourceKeys.join(', ')}`;
   for (const card of brief.cards) lines.push(line(card));
+  for (const event of brief.personalEvents) {
+    lines.push(
+      `\n[${event.placement}] · ${event.title}` +
+        `${event.date ? `  (${event.date})` : ''}` +
+        `\n    ${event.reasons.join('  ')}` +
+        `\n    kilde: ${event.sourceKey}`,
+    );
+  }
   for (const card of brief.folded) lines.push(line(card));
   for (const note of brief.degraded) lines.push(`\n! ${note}`);
   return lines.join('\n');

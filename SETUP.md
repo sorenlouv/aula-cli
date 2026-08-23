@@ -106,9 +106,10 @@ Every later run redeploys to the same URL; `open --web` opens it.
 ### D. Their own calendar
 
 Integrate the user's personal calendars into the Aula overview. Appointments
-appear on the same page as the school's week — as one collapsed *Egen kalender*
-list whose summary names today's, and any that share a day with something the
-school asked for.
+appear as compact, individually collapsed cards directly among the Aula cards
+under *Kommende*. Both shapes are ordered by day, and known calendar times are
+ordered within the day. Opening a personal card shows its model-written summary
+and relevance reason, location, calendar and link.
 
 ```bash
 bun src/cli.ts calendars                 # every calendar Claude can see; the ones being read are marked
@@ -134,15 +135,25 @@ Nothing is read until a calendar is named here, and this can be done at any
 time, not only during setup.
 
 The model-enabled daily overview reads a fixed next-fortnight window, sends
-every appointment through the same model relevance verdicts as every Aula
-source, and reports a model or connector failure in _Datastatus_. It never
-computes clashes or claims that a quiet-looking day has none; it puts the
-appointment beside the school's day and lets the reader see it.
+every appointment through the same model pass as every Aula source, with one
+explicit relevance, summary and reason verdict per appointment. Irrelevant
+appointments stay in the muted hidden count; relevant ones remain visually
+quieter than Aula cards and never consume the full-card cap. A model or
+connector failure appears in _Datastatus_. The overview never computes clashes
+or claims that a quiet-looking day has none; it puts the appointment beside the
+school's day and lets the reader see it.
+
+Personal appointments require positive evidence of child, school/day-care,
+playdate, pickup/drop-off or child-activity context. Cryptic and adult-only
+appointments default to hidden; their time or possible indirect effect on the
+parents' availability does not make them relevant.
 
 ## 5. Hand over
 
 Tell the user it is ready: they can now interact with Aula in natural language.
-The user may want to tune which events are relevant to them specifically. You can call `aula remember` to store their preferences, eg "Always show events from other parents"
+The user may want to tune which events are relevant to them specifically. You
+can call `aula remember` to store their preferences, for example "Always show
+events from other parents".
 
 ## Debugging
 
