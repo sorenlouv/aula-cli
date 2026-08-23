@@ -82,8 +82,17 @@ Sections render only when they have content, and never change order.
    taking up space.
 6. **Godt at vide** — the `context` tier, collapsed.
 7. **Billeder** — the `NewMedia` flood as one line, linked, at the bottom.
-8. **Datastatus** — what was fetched, **what failed**, when, step-up state,
-   next run.
+8. **Datastatus** — what was fetched, **what failed**, step-up state. Its
+   place is the exception to "sections never move", and only one thing moves
+   it: a `health` warning, meaning something could not be *fetched*. Then it
+   sits directly under the topline, because a thin section has to be readable
+   as "Aula refused this" rather than "a quiet week". Otherwise it folds shut
+   at the very foot, below even the hidden list, with a summary that says so
+   unopened. A `degraded` note does **not** hoist it: that says the model's
+   answer was partial and the ranking fell back to the rules, which loses
+   nothing *from Aula* — and a status report standing above the week every
+   ordinary morning is how a reader learns to skip the block that matters on
+   the morning a fetch really did fail.
 
 ### Reading the original
 
@@ -109,7 +118,8 @@ material, and expanding them turns two forwardable pages into twenty.
 - **Nothing is silently dropped.** Anything not promoted still appears in the
   `context` tier. The brief may reorder; it may not hide.
 - **A missing section and a failed fetch look different.** A vendor 500 must
-  read as *"ugeplan for Viggo og Ida kunne ikke hentes"*, never as a quiet week.
+  read as *"ugeplan for Viggo og Ida kunne ikke hentes"*, never as a quiet week,
+  and it takes the panel to the top of the page to say so.
   Same for a thread whose body Aula refuses: without a warning it renders as a
   message card with nothing in it.
 - **Every model-derived claim carries its source** — id, link, the exact quote,

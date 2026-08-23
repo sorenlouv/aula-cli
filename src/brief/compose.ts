@@ -635,14 +635,33 @@ function buildPage(
   const context = brief.signals.filter((s) => s.tier === 'context' && !opts.planned?.has(s.id));
   const hidden = brief.signals.filter((s) => s.tier === 'hidden');
 
-  // A failed fetch must never look like a quiet week, so on a day with
-  // warnings the datastatus panel sits right under the topline instead of at
-  // the bottom.
-  const degradedDay = input.health.some((h) => h.level === 'warn') || brief.degraded.length > 0;
+  // A failed fetch must never look like a quiet week, so a day where something
+  // could not be *fetched* puts this panel right under the topline: the reader
+  // has to know before they trust the page that a section is thin because Aula
+  // refused it, not because the week is quiet.
+  //
+  // Only `health` warnings do that, and the distinction is the point. A
+  // `degraded` note is about the overview itself — the model's answer was
+  // partial, so the ranking fell back to the rules — and nothing is missing
+  // from Aula because of it. Hoisting the whole panel for that put a status
+  // report above the week on an ordinary morning, which is how a reader learns
+  // to skip the block that matters on the morning a fetch really did fail.
+  // Those notes still render, in the same panel, quietly at the foot.
+  const fetchFailed = input.health.some((h) => h.level === 'warn');
   const datastatus = `<div class="panel" data-block="datastatus">
     ${input.health.map((h) => `<div class="st ${h.level === 'warn' ? 'bad' : ''}"><i>${h.level === 'warn' ? '⚠' : '○'}</i><span>${escapeHtml(h.message)}</span></div>`).join('')}
     ${brief.degraded.map((d) => `<div class="st bad"><i>⚠</i><span>${escapeHtml(d)}</span></div>`).join('')}
   </div>`;
+
+  // Shut, it still has to say what it holds — a fold labelled only "Datastatus"
+  // is a question rather than an answer. The count names the notes about the
+  // overview itself, so the one case that is not simply "everything worked"
+  // reads as such without being opened.
+  const quibbles = brief.degraded.length;
+  const datastatusSummary =
+    quibbles > 0
+      ? `Datastatus · alle kilder blev hentet · ${quibbles} bemærkning${quibbles === 1 ? '' : 'er'} om oversigten`
+      : 'Datastatus · alle kilder blev hentet';
 
   return `<div class="wrap">
   <header>
@@ -661,7 +680,7 @@ function buildPage(
   </header>
   <p class="topline">${escapeHtml(opts.topline ?? (act.length === 0 ? 'Intet kræver handling lige nu.' : `${act.length} ting kræver din opmærksomhed.`))}</p>
 
-  ${degradedDay ? `<section><h2>Datastatus</h2>${datastatus}</section>` : ''}
+  ${fetchFailed ? `<section><h2>Datastatus</h2>${datastatus}</section>` : ''}
 
   <section data-section="act"><h2>Kræver handling <span class="count" data-count>${act.length}</span></h2>
     ${act.map(card).join('')}
@@ -724,9 +743,9 @@ function buildPage(
       : ''
   }
 
-  ${degradedDay ? '' : `<section><h2>Datastatus</h2>${datastatus}</section>`}
-
   ${hidden.length ? `<details class="muted"><summary>${hidden.length} skjult efter jeres ønsker</summary>${hidden.map((s) => `<div class="di"><b>${escapeHtml(s.title)}</b><p>${escapeHtml(s.source.author ?? s.source.groups.join(', '))}</p></div>`).join('')}</details>` : ''}
+
+  ${fetchFailed ? '' : `<details class="muted"><summary>${escapeHtml(datastatusSummary)}</summary>${datastatus}</details>`}
 
   <footer>Genereret lokalt af aula-cli · kun modelkald til Claude forlader maskinen</footer>
 </div>`;

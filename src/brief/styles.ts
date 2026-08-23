@@ -195,6 +195,11 @@ details[open]>summary::after{content:"⌃"}
 .di .more .body p{font-size:14px}
 details.muted{margin-top:30px;background:transparent;border-style:dashed;box-shadow:none;opacity:.62}
 details.muted summary{font-size:12.5px;font-weight:500;color:var(--ink-3);padding:11px 16px}
+/* The datastatus panel lives in two places — hoisted as its own section on a
+   day something failed to fetch, and inside this fold on a day nothing did.
+   Inside, it drops the card it draws elsewhere; a panel within a panel reads
+   as two things. */
+details.muted .panel{background:transparent;border:0;border-radius:0;box-shadow:none;padding:0 16px 13px}
 .chips{display:flex;gap:9px;flex-wrap:wrap}
 .tile{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:11px 14px;
   font-size:13px;box-shadow:var(--shadow);min-width:172px}

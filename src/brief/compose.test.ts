@@ -607,16 +607,58 @@ describe('fallbackPage', () => {
     expect(html.indexOf('data-block="datastatus"')).toBeLessThan(html.indexOf('Kræver handling'));
   });
 
-  test('a clean day keeps datastatus at the bottom', () => {
+  test('a clean day folds datastatus away at the very foot of the page', () => {
     const clean: RankedBrief = {
       ...BRIEF,
       input: { ...INPUT, health: [{ level: 'ok', message: 'Alle kilder svarede.' }] },
     };
     const html = fallbackPage(clean);
+    const at = html.indexOf('data-block="datastatus"');
+    expect(at).toBeGreaterThan(html.indexOf('Kræver handling'));
+    // Below even the hidden foot: it is reference material, not news.
+    expect(at).toBeGreaterThan(html.indexOf('skjult efter jeres ønsker'));
+    expect(html).toContain('<summary>Datastatus · alle kilder blev hentet</summary>');
+    expect(html).not.toContain('<h2>Datastatus</h2>');
+    expect(validatePage(html, clean)).toEqual([]);
+  });
+
+  test('a note about the overview itself does not hoist the block — only a failed fetch does', () => {
+    // The distinction that matters: nothing is missing *from Aula* because the
+    // model answered partially, so this must not outrank the week. It is still
+    // on the page, and the fold says so without being opened.
+    const partial: RankedBrief = {
+      ...BRIEF,
+      input: { ...INPUT, health: [{ level: 'ok', message: 'Alle kilder svarede.' }] },
+      degraded: ['Modellens vurdering var ufuldstændig (1 fejl).'],
+    };
+    const html = fallbackPage(partial);
     expect(html.indexOf('data-block="datastatus"')).toBeGreaterThan(
       html.indexOf('Kræver handling'),
     );
-    expect(validatePage(html, clean)).toEqual([]);
+    expect(html).toContain(
+      '<summary>Datastatus · alle kilder blev hentet · 1 bemærkning om oversigten</summary>',
+    );
+    expect(html).toContain('Modellens vurdering var ufuldstændig (1 fejl).');
+    expect(validatePage(html, partial)).toEqual([]);
+  });
+
+  test('two notes are counted in the plural', () => {
+    const partial: RankedBrief = {
+      ...BRIEF,
+      input: { ...INPUT, health: [] },
+      degraded: ['En ting.', 'En anden ting.'],
+    };
+    expect(fallbackPage(partial)).toContain('· 2 bemærkninger om oversigten</summary>');
+  });
+
+  test('a failed fetch still hoists it, even beside a note about the overview', () => {
+    const both: RankedBrief = { ...BRIEF, degraded: ['Modellen svarede delvist.'] };
+    const html = fallbackPage(both); // INPUT carries a warn-level health note
+    expect(html.indexOf('data-block="datastatus"')).toBeLessThan(html.indexOf('Kræver handling'));
+    expect(html).toContain('<h2>Datastatus</h2>');
+    expect(html).not.toContain('alle kilder blev hentet');
+    expect(html).toContain('Modellen svarede delvist.');
+    expect(validatePage(html, both)).toEqual([]);
   });
 });
 
