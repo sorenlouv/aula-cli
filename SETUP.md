@@ -105,7 +105,10 @@ Every later run redeploys to the same URL; `open --web` opens it.
 
 ### D. Their own calendar
 
-Integrate the user's personal calendars into the Aula overview, to show both types of events in a unified view.
+Integrate the user's personal calendars into the Aula overview. Appointments
+appear on the same page as the school's week — as one collapsed *Egen kalender*
+list whose summary names today's, and any that share a day with something the
+school asked for.
 
 ```bash
 bun src/cli.ts calendars                 # every calendar Claude can see; the ones being read are marked
@@ -133,7 +136,8 @@ time, not only during setup.
 The model-enabled daily overview reads a fixed next-fortnight window, sends
 every appointment through the same model relevance verdicts as every Aula
 source, and reports a model or connector failure in _Datastatus_. It never
-computes clashes or claims that a quiet-looking day has none.
+computes clashes or claims that a quiet-looking day has none; it puts the
+appointment beside the school's day and lets the reader see it.
 
 ## 5. Hand over
 

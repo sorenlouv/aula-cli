@@ -1,7 +1,7 @@
 /**
  * The `aula brief` pipeline.
  *
- *   collect → extract (rules ∪ model) → rank → compose → validate → publish → deploy
+ *   collect → extract (model, or rules fallback) → rank → render → validate → publish → deploy
  *
  * Every stage after `collect` degrades rather than throws. A brief that is
  * missing the model's phrasing is still useful; a brief that failed to appear
@@ -10,12 +10,12 @@
 
 import type { AulaClient } from '../client.ts';
 import { isoWeekString } from '../integrations/types.ts';
-import { collect } from './collect.ts';
-import { composePage, fallbackPage } from './compose.ts';
+import { collect, HISTORY_DAYS } from './collect.ts';
 import { deployArtifact, type DeployResult } from './deploy.ts';
-import { extractSignals } from './llm.ts';
+import { extractCards } from './llm.ts';
 import { publish, type PublishResult } from './publish.ts';
-import { rank, signalsFromRules } from './rank.ts';
+import { cardsFromRules, rank } from './rank.ts';
+import { renderPage, type PageOptions } from './render.ts';
 import {
   loadState,
   markSeen,
@@ -25,8 +25,8 @@ import {
   saveState,
   whichAreNew,
 } from './state.ts';
-import type { RankedBrief, Relevance } from './types.ts';
-import { validatePage } from './validate.ts';
+import type { Card, RankedBrief } from './types.ts';
+import { validatePage, type Violation } from './validate.ts';
 import { errorMessage } from '../validation.ts';
 
 export type BriefOptions = {
@@ -63,38 +63,54 @@ export type BriefRun = {
  */
 export const BRIEF_TITLE = 'Aula AI oversigt';
 
+export function isBriefRunComplete(opts: {
+  modelWasRequested: boolean;
+  extractionRan: boolean;
+  origin: BriefRun['origin'];
+  deploymentFailed: boolean;
+  violations: readonly Violation[];
+}): boolean {
+  return (
+    (!opts.modelWasRequested || (opts.extractionRan && opts.origin === 'model')) &&
+    !opts.deploymentFailed &&
+    opts.violations.length === 0
+  );
+}
+
+export function pageViolationMessages(violations: readonly Violation[]): string[] {
+  return violations.map((violation) => `Sidekontrol: ${violation.rule} — ${violation.detail}`);
+}
+
 export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Promise<BriefRun> {
   const now = opts.now ?? new Date();
-  const days = opts.days ?? 14;
+  const days = opts.days ?? HISTORY_DAYS;
   const isoWeek = opts.isoWeek ?? isoWeekString(now);
   const notes: string[] = [];
 
   const input = await collect(client, { days, isoWeek, now });
 
-  // ------------------------------------------------------------- extraction
+  // ------------------------------------------------------------- the model
   let topline: string | null = null;
   let summaries: Record<string, string> = {};
-  let conversations: Record<string, string> = {};
-  let modelSignals: ReturnType<typeof signalsFromRules> = [];
-  // The family's list, as the model read it per source. Empty on the
-  // rules-only path, which then hides nothing — see `rank`.
-  let relevance: Record<string, Relevance> = {};
+  // null until the model has answered: the rules are then the cards, not a
+  // supplement to them — see `rank`.
+  let modelCards: Card[] | null = null;
+  let hidden: string[] = [];
   let extractionRan = opts.useModel === false;
   let extractionStatus: string | null = null;
 
   if (opts.useModel !== false) {
     try {
-      const extracted = await extractSignals(input, { useCache: opts.useCache !== false });
+      const extracted = await extractCards(input, { useCache: opts.useCache !== false });
       topline = extracted.topline;
       summaries = extracted.childSummaries;
-      conversations = extracted.conversationSummaries;
-      modelSignals = extracted.signals;
-      relevance = extracted.relevance;
+      modelCards = extracted.cards;
+      hidden = extracted.hidden;
       extractionRan = extracted.problems.length === 0;
       if (extracted.problems.length > 0) {
         extractionStatus =
-          `Modellens vurdering var ufuldstændig (${extracted.problems.length} fejl), ` +
-          'så siden bruger de validerede dele og reglerne som reserve.';
+          `Modellens svar var ufuldstændigt (${extracted.problems.length} fejl), ` +
+          'så siden bruger de validerede kort og reglerne som reserve for resten.';
       }
       for (const problem of extracted.problems) {
         notes.push(`Udtræk afvist: ${problem}`);
@@ -105,10 +121,10 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
     }
   }
 
-  const brief = rank(input, [...modelSignals, ...signalsFromRules(input, now)], relevance);
+  const brief = rank(input, { model: modelCards, rules: cardsFromRules(input, now), hidden });
   if (extractionStatus) brief.degraded.push(extractionStatus);
 
-  // ---------------------------------------------------------------- compose
+  // ----------------------------------------------------------------- render
   const state = loadState();
   const newKeys = whichAreNew(
     state,
@@ -117,38 +133,24 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   );
   const isNew = (key: string) => newKeys.has(key);
 
-  let body = '';
-  let origin: BriefRun['origin'] = 'fallback';
-
-  if (opts.useModel !== false) {
-    try {
-      const composed = await composePage(brief, { topline, summaries, conversations, isNew });
-      for (const problem of composed.problems) {
-        notes.push(`Layoutplan: ${problem}`);
-      }
-      const found = validatePage(composed.html, brief);
-      if (found.length === 0) {
-        body = composed.html;
-        origin = 'model';
-      } else {
-        notes.push(`Layout afvist: ${found.map((v) => `${v.rule} (${v.detail})`).join('; ')}`);
-      }
-    } catch (err) {
-      notes.push(`Layout fejlede: ${errorMessage(err)}`);
-    }
+  const origin: BriefRun['origin'] = modelCards === null ? 'fallback' : 'model';
+  const pageOptions: PageOptions = {
+    topline,
+    summaries,
+    isNew,
+    ...(origin === 'fallback' && opts.useModel !== false ? { note: 'kun reglerne' } : {}),
+  };
+  let body = renderPage(brief, pageOptions);
+  // The page is held to its invariants whoever wrote the cards.
+  const violations = validatePage(body, brief);
+  for (const v of violations) {
+    notes.push(`Siden: ${v.rule} (${v.detail})`);
   }
-
-  if (!body) {
-    body = fallbackPage(brief, {
-      topline,
-      summaries,
-      conversations,
-      ...(opts.useModel === false ? {} : { note: 'reservelayout' }),
-    });
-    // The fallback is held to the same standard as the model's output.
-    for (const v of validatePage(body, brief)) {
-      notes.push(`Reservelayout: ${v.rule} (${v.detail})`);
-    }
+  brief.degraded.push(...pageViolationMessages(violations));
+  if (violations.length > 0) {
+    // Publish the usable page, but make its own validation failure visible in
+    // Datastatus. The scheduler will retry because completion is gated below.
+    body = renderPage(brief, pageOptions);
   }
 
   // ---------------------------------------------------------------- publish
@@ -177,9 +179,13 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   // model's extraction ran, its layout passed validation, and the hosted copy
   // — where one is configured — was actually refreshed. With `--no-llm` the
   // rules-only page is what was asked for, so it is complete on its own terms.
-  const complete =
-    (opts.useModel === false || (extractionRan && origin === 'model')) &&
-    deployment.status !== 'failed';
+  const complete = isBriefRunComplete({
+    modelWasRequested: opts.useModel !== false,
+    extractionRan,
+    origin,
+    deploymentFailed: deployment.status === 'failed',
+    violations,
+  });
 
   // Recorded only once the page exists, so a crash re-shows rather than hides.
   markSeen(

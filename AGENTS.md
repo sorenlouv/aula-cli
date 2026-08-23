@@ -41,8 +41,9 @@ sentinel values, comments and test names are English.
   `activityType`, `commonFiles`, `institutionProfileId` where the screen says
   "Henteform", "Fælles Filer". Name code after the wire; mention the Danish
   label only where it helps someone find the feature.
-- **Our own vocabulary is English.** The tiers are `act`, `week`, `context`,
-  `hidden`, never the headings they render as. Where both must exist, keep them
+- **Our own vocabulary is English.** A card's placement is `upcoming`,
+  `undated`, `past`; what the page shows is *Kommende*, *Uden fast dato*,
+  *Tidligere* — never the headings in code. Where both must exist, keep them
   side by side — `cli-helpers.ts` maps presence codes through `{ da, en }`.
 - Danish quoted as a *specimen* of input is not a name: `rules.ts` matches
   literal "på mandag", so the comment showing it stays Danish.

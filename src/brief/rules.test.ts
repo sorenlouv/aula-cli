@@ -37,6 +37,19 @@ describe('extractDates', () => {
     expect(extractDates('Mødet er fredag d. 18 sep kl 13-14', TODAY)).toEqual(['2026-09-18']);
   });
 
+  test('range starts and named dates without spaces', () => {
+    expect(extractDates('Lejrskole 24.-28. august', TODAY)).toEqual(['2026-08-24', '2026-08-28']);
+    expect(extractDates('Lejr 24.–28. august', TODAY)).toEqual(['2026-08-24', '2026-08-28']);
+    expect(extractDates('Lejrskole 24. til 28. august', TODAY)).toEqual([
+      '2026-08-24',
+      '2026-08-28',
+    ]);
+    expect(extractDates('Husk 25.august og fest 1.sep', TODAY)).toEqual([
+      '2026-08-25',
+      '2026-09-01',
+    ]);
+  });
+
   test('slashed dates from a subject line', () => {
     expect(extractDates('Møde ang. Alma d. 18/9', TODAY)).toEqual(['2026-09-18']);
   });

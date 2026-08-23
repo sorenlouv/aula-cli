@@ -1,843 +1,297 @@
 import { describe, expect, test } from 'bun:test';
-import { DEFAULT_PREFERENCES } from '../preferences.ts';
-import { briefInput, sourceItem } from '../testing/brief-fixtures.ts';
+import { briefInput, card, sourceItem } from '../testing/brief-fixtures.ts';
 import { classifyAudience } from './collect.ts';
-import { ACT_CAP, rank, signalsFromRules } from './rank.ts';
-import type { BriefInput, Relevance, Signal, SourceItem } from './types.ts';
+import { CARD_CAP, cardsFromRules, explain, rank } from './rank.ts';
+import type { BriefInput, Card, SourceItem } from './types.ts';
 
-const TODAY = new Date(2026, 7, 13);
+const TODAY = new Date(2026, 7, 13); // Thursday 13 August 2026
 
 function item(partial: Partial<SourceItem> & Pick<SourceItem, 'key'>): SourceItem {
   return sourceItem({ title: 'Titel', at: null, author: null, ...partial });
 }
 
-/**
- * A real installation, which always has the shipped opinions on its list —
- * `preferences.md` is seeded on first use. The ranker never reads the prose
- * itself (the model's verdicts are passed to `rank` directly), but the list
- * travels in `BriefInput`, and a fixture without it would be an install nobody
- * has.
- */
-function input(items: SourceItem[], preferences: string[] = []): BriefInput {
-  return briefInput({ items, preferences: [...DEFAULT_PREFERENCES, ...preferences] });
+function input(items: SourceItem[]): BriefInput {
+  return briefInput({ today: '2026-08-13', items });
 }
 
+const POST = item({ key: 'post:1', title: 'Skolefoto', text: 'Tilmeld jeres barn senest 17/8.' });
+const THREAD = item({ key: 'thread:2', kind: 'thread', title: 'Møde om Alma' });
+const PLAN = item({ key: 'plan:x:0', kind: 'plan', title: 'Idræt', at: '2026-08-14T08:00:00' });
+const DIARY = item({ key: 'post:3', title: 'Tirsdag på stuen', text: 'Vi malede sten.' });
+const DENTIST = item({
+  key: 'cal:far@eksempel.dk:dentist:2026-08-14T13:30:00+02:00',
+  kind: 'personal',
+  title: 'Tandlæge',
+  at: '2026-08-14T13:30:00',
+  audience: 'family',
+});
+
 describe('classifyAudience', () => {
-  const classGroups = new Set(['Myretuen', 'Troldeungerne', '2E']);
-
-  test('a childs own stue is class-level', () => {
-    expect(classifyAudience(['Myretuen', 'Regnbuen'], classGroups)).toBe('class');
+  const classes = new Set(['Sommerfuglene', '1B']);
+  test("a child's own stue or class is `class`", () => {
+    expect(classifyAudience(['Sommerfuglene', 'Mariehønsene'], classes)).toBe('class');
   });
-
-  test('the whole institution is institution-level, not class-level', () => {
-    // Every child belongs to this group, which is what makes membership alone
-    // useless as a filter.
-    expect(classifyAudience(['Børnehuset Eksemplet'], classGroups)).toBe('institution');
+  test('the whole house or school is `institution`', () => {
+    expect(classifyAudience(['Børnehuset Eksemplet'], classes)).toBe('institution');
   });
-
-  test('a year band is institution-level', () => {
-    expect(classifyAudience(['Indskoling Eksempel 26-27'], classGroups)).toBe(
-      'institution',
-    );
+  test('every parent in the municipality is `municipal`', () => {
+    expect(classifyAudience(['Alle forældre alle skoler'], classes)).toBe('municipal');
   });
-
-  test('the school photo lists stay institution-level', () => {
-    // Sent school-wide, and genuinely relevant — the whole point of keeping
-    // `institution` separate from `municipal`.
-    expect(
-      classifyAudience(
-        [
-          'PERSONALE (Alle)',
-          'Gruppeordningen (elever+forældre+personale) 26-27',
-          'Eksempelskolen (elever+forældre+medarbejdere) 26-27',
-        ],
-        classGroups,
-      ),
-    ).toBe('institution');
-  });
-
-  test('cross-institution distribution lists are municipal', () => {
-    expect(
-      classifyAudience(
-        ['Alle forældre alle skoler', 'Alle forældre i alle dagtilbud'],
-        classGroups,
-      ),
-    ).toBe('municipal');
-  });
-
-  test('one non-municipal group is enough to keep it institution-level', () => {
-    expect(classifyAudience(['Alle forældre alle skoler', 'Eksempelskolen'], classGroups)).toBe(
-      'institution',
-    );
-  });
-
-  test('an unknown audience is not a municipal one', () => {
-    // Aula leaves sharedWithGroups off often enough that this decides whether
-    // real school content is shown. `every` on an empty list says yes to
-    // anything, which put these posts in the one tier that is never rendered.
-    expect(classifyAudience([], classGroups)).toBe('institution');
+  test('no groups at all is not municipal — absence of evidence fails towards showing', () => {
+    expect(classifyAudience([], classes)).toBe('institution');
   });
 });
 
-describe('rank', () => {
-  const municipalOffer = () =>
-    item({
-      key: 'post:1',
-      title: 'Tilbud om forældrekursus',
-      text: 'Ansøgningsfristen er tirsdag den 1. september 2026.',
-      audience: 'municipal',
-    });
+describe('rank: placement', () => {
+  const cards: Card[] = [
+    card({ id: 'a', title: 'Senere', date: '2026-08-20', sourceKeys: ['post:1'] }),
+    card({ id: 'b', title: 'Snart', date: '2026-08-14', sourceKeys: ['thread:2'] }),
+    card({ id: 'c', title: 'Udateret', date: null, sourceKeys: ['post:3'] }),
+    card({ id: 'd', title: 'Forbi', date: '2026-08-11', sourceKeys: ['plan:x:0'] }),
+  ];
+  const brief = rank(input([POST, THREAD, DIARY, PLAN]), { model: cards, rules: [], hidden: [] });
 
-  test('a municipal offer with a real deadline is never a card', () => {
-    // The exact case that was wrong in the first mockup: the deadline is
-    // genuine, and it must not buy the item a place at the top. With no
-    // verdict from the model — the rules-only path — breadth alone keeps it
-    // in the context tier: shown, not promoted, not hidden.
-    const items = [municipalOffer()];
-    const brief = rank(input(items), signalsFromRules(input(items), TODAY));
-    expect(brief.signals).toHaveLength(1);
-    expect(brief.signals[0]?.tier).toBe('context');
-    expect(brief.signals[0]?.mustShow).toBe(false);
-  });
-
-  test("a municipal offer is hidden when the family's list says so — which the model reports as a verdict", () => {
-    const items = [municipalOffer()];
-    const brief = rank(input(items), signalsFromRules(input(items), TODAY), { 'post:1': 'hide' });
-    expect(brief.signals).toHaveLength(1);
-    expect(brief.signals[0]?.tier).toBe('hidden');
-    expect(brief.signals[0]?.mustShow).toBe(false);
-  });
-
-  test('a broad item Aula itself flagged important is not buried', () => {
-    const items = [
-      item({
-        key: 'post:2',
-        title: 'Skolen er lukket',
-        text: 'Husk at skolen er lukket på mandag.',
-        audience: 'municipal',
-        important: true,
-      }),
-    ];
-    const brief = rank(input(items), signalsFromRules(input(items), TODAY));
-    // A closure the school deliberately flagged is something to act on, not
-    // something to file away — the content carries it past its broad address.
-    expect(brief.signals[0]?.tier).toBe('act');
-  });
-
-  test('an important item no signal covered still reaches the page', () => {
-    // The model-benchmark failure: mid-tier models read the vigtig-marked
-    // photo sign-up as background noise and produced nothing for it.
-    const items = [
-      item({
-        key: 'post:3',
-        title: 'Skolefoto - uge 35!',
-        text: 'Det er vigtigt at hver elev bliver oprettet.',
-        audience: 'institution',
-        important: true,
-      }),
-    ];
-    const brief = rank(input(items), []); // no model, no rule signals at all
-    expect(brief.signals).toHaveLength(1);
-    expect(brief.signals[0]?.tier).toBe('week');
-    expect(brief.signals[0]?.mustShow).toBe(true);
-    expect(brief.signals[0]?.origin).toBe('rule');
-    expect(brief.unusedSources).toHaveLength(0);
-  });
-
-  test('an important signal under-read as background is promoted to week', () => {
-    const items = [
-      item({
-        key: 'post:4',
-        title: 'Skolefoto',
-        text: 'Hver elev skal oprettes.',
-        audience: 'institution',
-        important: true,
-      }),
-    ];
-    const underRead: Signal = {
-      id: 'model:0',
-      kind: 'info',
-      title: 'Skolefoto er på vej',
-      child: null,
-      dueAt: null,
-      urgency: 'fyi',
-      quote: null,
-      why: null,
-      sourceKey: 'post:4',
-      origin: 'model',
-      concernsChild: false,
-    };
-    const brief = rank(input(items), [underRead]);
-    expect(brief.signals[0]?.tier).toBe('week');
-    expect(brief.signals[0]?.mustShow).toBe(true);
-    expect(brief.signals[0]?.reasons).toContain('aula-important floor → week');
-  });
-
-  test('an unimportant background item is not floored', () => {
-    const items = [
-      item({
-        key: 'post:5',
-        title: 'Nyt fra køkkenet',
-        text: 'Vi bager i næste uge.',
-        audience: 'institution',
-      }),
-    ];
-    const brief = rank(input(items), []);
-    expect(brief.signals).toHaveLength(0);
-    expect(brief.unusedSources).toHaveLength(1);
-  });
-
-  test('a gear reminder for one child reaches the action tier', () => {
-    const items = [
-      item({
-        key: 'plan:easyiq:2026-W33:0',
-        kind: 'plan',
-        title: 'Idræt',
-        text: 'Husk skiftetøj og badeting til efter timen.',
-        at: '2026-08-13T08:00:00',
-        childNames: ['Alma Signe Eksempelsen'],
-        audience: 'child',
-      }),
-    ];
-    const brief = rank(input(items), signalsFromRules(input(items), TODAY));
-    expect(brief.signals[0]?.tier).toBe('act');
-    expect(brief.signals[0]?.child).toBe('Alma');
-    expect(brief.signals[0]?.dueAt).toBe('2026-08-13');
-    expect(brief.signals[0]?.mustShow).toBe(true);
-  });
-
-  test('the same offer sent by two institutions is merged, not shown twice', () => {
-    const items = [
-      item({
-        key: 'post:10',
-        title: 'Forældrekurset Trivsel i familien',
-        text: 'Ansøgningsfristen er tirsdag den 1. september 2026.',
-        audience: 'municipal',
-      }),
-      item({
-        key: 'post:11',
-        title: 'Forældrekurset Trivsel i familien',
-        text: 'Ansøgningsfristen er tirsdag den 1. september 2026.',
-        audience: 'municipal',
-      }),
-    ];
-    const brief = rank(input(items), signalsFromRules(input(items), TODAY));
-    expect(brief.signals).toHaveLength(1);
-    expect(brief.signals[0]?.mergedSourceKeys).toHaveLength(1);
-  });
-
-  test('an item Aula flagged important is never merged away into one it did not', () => {
-    // The loser of a cross-source merge survives only as a bare key in
-    // `mergedSourceKeys`, which counts as covered everywhere downstream: no
-    // card, no context tier, no muted foot, and not even `unusedSources`.
-    // The vigtig floor only ever inspects the winner, so once the flagged item
-    // has lost there is nothing left to rescue it. The class-level copy
-    // outscores it here — breadth beats the +12 — which is exactly when the
-    // flag matters most.
-    const items = [
-      item({
-        key: 'post:30',
-        title: 'Sommerfest',
-        text: 'Husk at tilmelde jer senest d. 20/8.',
-        audience: 'class',
-      }),
-      item({
-        key: 'post:31',
-        title: 'Sommerfest',
-        text: 'Husk at tilmelde jer senest d. 20/8.',
-        audience: 'institution',
-        important: true,
-      }),
-    ];
-    const brief = rank(input(items), signalsFromRules(input(items), TODAY));
-    const flagged = brief.signals.find((s) => s.sourceKey === 'post:31');
-    expect(flagged).toBeDefined();
-    expect(flagged?.tier === 'context' || flagged?.tier === 'hidden').toBe(false);
-    // And it stands on its own rather than being absorbed by the other copy.
-    expect(brief.signals.flatMap((s) => s.mergedSourceKeys)).not.toContain('post:31');
-  });
-
-  test('two obligations in one post both survive, on their own dates', () => {
-    // Every rule hit inherits the item's title, so a title-only dedupe key
-    // collapsed these into one and the 25/8 deadline disappeared — not even
-    // into unusedSources, because the source counted as used.
-    const items = [
-      item({
-        key: 'post:20',
-        title: 'Nyt fra Myretuen',
-        text: 'Husk at tilmelde jer sommerfesten senest d. 20/8. I skal også udfylde kontaktsedlen d. 25/8.',
-        audience: 'class',
-      }),
-    ];
-    const brief = rank(input(items), signalsFromRules(input(items), TODAY));
-    expect(brief.signals.map((s) => s.dueAt).sort()).toEqual(['2026-08-20', '2026-08-25']);
-  });
-
-  test('an event and its application deadline are two dates, not one', () => {
-    // rules.ts deliberately emits the second date in a sentence so the later
-    // one is not lost; the ranker has to keep that promise.
-    const items = [
-      item({
-        key: 'post:21',
-        title: 'Informationsaften',
-        text: 'Vi holder informationsaften d. 25. august og ansøgningsfrist d. 1. september.',
-        audience: 'class',
-      }),
-    ];
-    const brief = rank(input(items), signalsFromRules(input(items), TODAY));
-    expect(brief.signals.map((s) => s.dueAt).sort()).toEqual(['2026-08-25', '2026-09-01']);
-  });
-
-  test('action tier is capped, and the overflow drops a tier rather than vanishing', () => {
-    // Distinct subjects and no dates, so these are genuinely different things
-    // rather than one thing said several times.
-    const items = Array.from({ length: ACT_CAP + 3 }, (_, i) =>
-      item({
-        key: `plan:x:${i}`,
-        title: `Opgave ${i}`,
-        text: `Husk ${i} madpakke.`,
-        childNames: ['Viggo Birk Eksempelsen'],
-        audience: 'child',
-      }),
-    );
-    const brief = rank(input(items), signalsFromRules(input(items), TODAY));
-    expect(brief.signals.filter((s) => s.tier === 'act')).toHaveLength(ACT_CAP);
-    expect(brief.signals.filter((s) => s.tier === 'week')).toHaveLength(3);
-    // Nothing was dropped.
-    expect(brief.signals).toHaveLength(ACT_CAP + 3);
-  });
-
-  test('a signal citing an unknown source is refused, and says so', () => {
-    const orphan: Signal = {
-      id: 'x',
-      kind: 'action',
-      title: 'Opdigtet',
-      child: null,
-      dueAt: '2026-08-20',
-      urgency: 'week',
-      quote: null,
-      why: null,
-      sourceKey: 'post:does-not-exist',
-      origin: 'model',
-      concernsChild: false,
-    };
-    const brief = rank(input([]), [orphan]);
-    expect(brief.signals).toHaveLength(0);
-    expect(brief.degraded[0] ?? '').toContain('ukendt kilde');
-  });
-
-  test('a municipal message is judged on content, not just on its address', () => {
-    // Every school being shut still shuts ours. Breadth is a prior, not a veto.
-    const items = [
-      item({
-        key: 'post:30',
-        title: 'Lærerstrejke',
-        text: 'Alle skoler er lukket på mandag. Eleverne skal blive hjemme.',
-        audience: 'municipal',
-      }),
-    ];
-    const brief = rank(input(items), signalsFromRules(input(items), TODAY));
-    expect(brief.signals[0]?.concernsChild).toBe(true);
-    expect(brief.signals[0]?.tier).not.toBe('hidden');
-  });
-
-  test('a school-wide message about our own child is shown', () => {
-    // School photo day: sent to the whole school, and it needs doing. Breadth
-    // alone must not bury it.
-    const items = [
-      item({
-        key: 'post:20',
-        title: 'Skolefoto - uge 35',
-        text: 'Fotografen kommer i uge 35. I bedes tilmelde jeres barn senest fredag.',
-        audience: 'institution',
-      }),
-    ];
-    const brief = rank(input(items), signalsFromRules(input(items), TODAY));
-    expect(brief.signals[0]?.concernsChild).toBe(true);
-    expect(brief.signals[0]?.tier).not.toBe('hidden');
-    expect(brief.signals[0]?.tier).not.toBe('context');
-  });
-
-  test('a school-wide offer for the parents is folded away', () => {
-    // Same breadth, same deadline, different thing entirely.
-    const items = [
-      item({
-        key: 'post:21',
-        title: 'Tilbud om forældrekursus',
-        text: 'Kurset er målrettet forældre til børn, der oplever uro i hverdagen. Ansøgningsfristen er senest 1. september 2026.',
-        audience: 'institution',
-      }),
-    ];
-    const brief = rank(input(items), signalsFromRules(input(items), TODAY));
-    expect(brief.signals[0]?.concernsChild).toBe(false);
-    expect(brief.signals[0]?.tier).toBe('context');
-  });
-
-  test('sources that produced no signal are reported, never silently dropped', () => {
-    const items = [item({ key: 'post:99', title: 'Hyggedag', text: 'Vi malede sten i dag.' })];
-    const brief = rank(input(items), signalsFromRules(input(items), TODAY));
-    expect(brief.signals).toHaveLength(0);
-    expect(brief.unusedSources.map((s) => s.key)).toEqual(['post:99']);
-  });
-});
-
-describe("the family's list, as the model read it", () => {
-  // One verdict per source, from the extraction call. The ranker never reads
-  // `preferences.md` itself — it used to, with a regex over sender names, and
-  // floored a teacher called Hjalte on a wish about Hjaltes far.
-  const backgroundNote: Signal = {
-    id: 'model:0',
-    kind: 'info',
-    title: 'John skriver om legeaftalen',
-    child: null,
-    dueAt: null,
-    urgency: 'fyi',
-    quote: null,
-    why: null,
-    sourceKey: 'thread:7',
-    origin: 'model',
-    concernsChild: false,
-  };
-  const johnsThread = (key = 'thread:7') =>
-    item({
-      key,
-      kind: 'thread',
-      title: 'Legeaftale',
-      author: 'Esben Bille',
-      audience: 'institution',
-    });
-
-  test('high lifts a source read as background to week', () => {
-    const brief = rank(input([johnsThread()]), [backgroundNote], { 'thread:7': 'high' });
-    expect(brief.signals[0]?.tier).toBe('week');
-    expect(brief.signals[0]?.mustShow).toBe(true);
-    expect(brief.signals[0]?.relevance).toBe('high');
-    expect(brief.signals[0]?.reasons).toContain('relevance:high floor → week');
-  });
-
-  test('high never manufactures an action', () => {
-    // A wish makes something wanted, not something to do: the act tier
-    // stays for actionable kinds.
-    const brief = rank(input([johnsThread()]), [backgroundNote], { 'thread:7': 'high' });
-    expect(brief.signals[0]?.tier).not.toBe('act');
-  });
-
-  test('a high source no signal covered still reaches the page', () => {
-    // The promise is "sig altid til når John skriver". A model that extracted
-    // nothing from his message is exactly the day that promise is tested.
-    const items = [
-      item({
-        key: 'thread:8',
-        kind: 'thread',
-        title: 'Hej igen',
-        text: 'Vi ses på fredag.',
-        author: 'Esben Bille',
-      }),
-    ];
-    const brief = rank(input(items), [], { 'thread:8': 'high' });
-    expect(brief.signals).toHaveLength(1);
-    expect(brief.signals[0]?.tier).toBe('week');
-    expect(brief.signals[0]?.mustShow).toBe(true);
-    expect(brief.signals[0]?.origin).toBe('rule');
-    expect(brief.unusedSources).toHaveLength(0);
-  });
-
-  test('high outranks the audience prior', () => {
-    // Municipal breadth is the strongest suppressor there is, and a family's
-    // own wish is the one thing allowed past it.
-    const items = [
-      item({
-        key: 'post:10',
-        title: 'Fra forvaltningen',
-        author: 'Esben Bille',
-        audience: 'municipal',
-      }),
-    ];
-    const brief = rank(input(items), [{ ...backgroundNote, sourceKey: 'post:10' }], {
-      'post:10': 'high',
-    });
-    expect(brief.signals[0]?.tier).toBe('week');
-  });
-
-  test('low keeps it off the cards, not off the page', () => {
-    // A class-level sign-up the family said they care less about: still under
-    // the context tier, never a card — so a verdict the model got wrong costs a
-    // fold, not the item.
-    const items = [
-      item({
-        key: 'post:40',
-        title: 'Forældrenetværk',
-        text: 'Tilmeld jer forældrenetværket senest mandag d. 17/8.',
-        audience: 'class',
-      }),
-    ];
-    const plain = rank(input(items), signalsFromRules(input(items), TODAY));
-    expect(plain.signals[0]?.tier).toBe('act');
-    const theirs = rank(input(items), signalsFromRules(input(items), TODAY), { 'post:40': 'low' });
-    expect(theirs.signals[0]?.tier).toBe('context');
-    expect(theirs.signals[0]?.mustShow).toBe(false);
-    expect(theirs.unusedSources).toHaveLength(0);
-  });
-
-  test("Aula's own vigtig flag beats hide and low alike", () => {
-    // The school shouting is not something a preference can mute.
-    const closure = () =>
-      item({
-        key: 'post:2',
-        title: 'Skolen er lukket',
-        text: 'Husk at skolen er lukket på mandag.',
-        audience: 'municipal',
-        important: true,
-      });
-    for (const verdict of ['hide', 'low'] as const) {
-      const items = [closure()];
-      const brief = rank(input(items), signalsFromRules(input(items), TODAY), {
-        'post:2': verdict,
-      });
-      expect(brief.signals[0]?.tier).toBe('act');
-    }
-  });
-
-  test('a hide source no signal covered is accounted for in the hidden tier, not the context tier', () => {
-    // Listed in the muted foot with the rest of what was hidden; surfacing it
-    // as an "unused source" would be the opposite of what the family asked.
-    const items = [
-      item({
-        key: 'post:31',
-        title: 'Nyt fra forvaltningen',
-        text: 'Kære forældre.',
-        audience: 'municipal',
-      }),
-    ];
-    const brief = rank(input(items), [], { 'post:31': 'hide' });
-    expect(brief.signals).toHaveLength(1);
-    expect(brief.signals[0]?.tier).toBe('hidden');
-    expect(brief.signals[0]?.mustShow).toBe(false);
-    expect(brief.signals[0]?.origin).toBe('rule');
-    expect(brief.unusedSources).toHaveLength(0);
-  });
-
-  test('a hide verdict on something that asks us about our own child is demoted, not hidden', () => {
-    // "Fællesbeskeder til alle forældre i kommunen er aldrig relevante" is a
-    // fair thing to want and a bad thing to apply to "alle skoler er lukket på
-    // mandag". The wish still keeps it off the cards; the item stays findable.
-    const items = [
-      item({
-        key: 'post:closure',
-        title: 'Lærerstrejke',
-        text: 'Alle skoler er lukket på mandag. Eleverne skal blive hjemme.',
-        audience: 'municipal',
-      }),
-    ];
-    const brief = rank(input(items), signalsFromRules(input(items), TODAY), {
-      'post:closure': 'hide',
-    });
-    expect(brief.signals[0]?.concernsChild).toBe(true);
-    expect(brief.signals[0]?.tier).toBe('context');
-    // …while the same verdict on an offer, which asks nothing of us, still hides.
-    const offer = [
-      item({
-        key: 'post:course',
-        title: 'Tilbud om forældrekursus',
-        text: 'Ansøgningsfristen er tirsdag den 1. september 2026.',
-        audience: 'municipal',
-      }),
-    ];
-    const hidden = rank(input(offer), signalsFromRules(input(offer), TODAY), {
-      'post:course': 'hide',
-    });
-    expect(hidden.signals[0]?.concernsChild).toBe(false);
-    expect(hidden.signals[0]?.tier).toBe('hidden');
-  });
-
-  test('a hidden signal never merges with a visible one — in either direction', () => {
-    // Merging keeps the higher scorer and reduces the loser to a count, which
-    // is right for two tellings of one story and wrong the moment the family
-    // weighs them differently. The merged-away source is `covered` everywhere
-    // downstream, so it would land in no card, no context tier and no muted
-    // foot: the one way a source can leave the page without being counted.
-    const sameOfferTwice = () => [
-      item({
-        key: 'post:60',
-        title: 'Forældrekurset Trivsel i familien',
-        text: 'Ansøgningsfristen er tirsdag den 1. september 2026.',
-        audience: 'institution',
-      }),
-      item({
-        key: 'post:61',
-        title: 'Forældrekurset Trivsel i familien',
-        text: 'Ansøgningsfristen er tirsdag den 1. september 2026.',
-        audience: 'municipal',
-      }),
-    ];
-    for (const hiddenKey of ['post:61', 'post:60']) {
-      const verdicts: Record<string, Relevance> = { [hiddenKey]: 'hide' };
-      const items = sameOfferTwice();
-      const brief = rank(input(items), signalsFromRules(input(items), TODAY), verdicts);
-      const keys = brief.signals.map((s) => s.sourceKey).sort();
-      expect(keys).toEqual(['post:60', 'post:61']);
-      expect(brief.signals.every((s) => s.mergedSourceKeys.length === 0)).toBe(true);
-      expect(brief.signals.filter((s) => s.tier === 'hidden')).toHaveLength(1);
-      expect(brief.unusedSources).toHaveLength(0);
-    }
-  });
-
-  test('two tellings of one story still merge when the family weighs them the same', () => {
-    // The behaviour the boundary above must not break.
-    const items = [
-      item({
-        key: 'post:70',
-        title: 'Forældrekurset',
-        text: 'Ansøgningsfristen er tirsdag den 1. september 2026.',
-        audience: 'municipal',
-      }),
-      item({
-        key: 'post:71',
-        title: 'Forældrekurset',
-        text: 'Ansøgningsfristen er tirsdag den 1. september 2026.',
-        audience: 'municipal',
-      }),
-    ];
-    const both: Record<string, Relevance> = { 'post:70': 'hide', 'post:71': 'hide' };
-    const brief = rank(input(items), signalsFromRules(input(items), TODAY), both);
-    expect(brief.signals).toHaveLength(1);
-    expect(brief.signals[0]?.mergedSourceKeys).toHaveLength(1);
-    expect(brief.signals[0]?.tier).toBe('hidden');
-  });
-
-  test('no verdict is normal: nothing moves, nothing hides', () => {
-    // The rules-only path, and a source the model skipped. Fails towards
-    // showing more, never less.
-    const items = [johnsThread('thread:11')];
-    const brief = rank(input(items), [{ ...backgroundNote, sourceKey: 'thread:11' }]);
-    expect(brief.signals[0]?.tier).toBe('context');
-    expect(brief.signals[0]?.relevance).toBe('normal');
-    expect(brief.signals[0]?.reasons.join(' ')).not.toContain('relevance');
-  });
-
-  test('an emptied list hides nothing at all', () => {
-    // The model is told an empty list means everything is normal; the ranker
-    // holds the same line when no verdicts arrive.
-    const items = [
-      item({
-        key: 'post:30',
-        title: 'Tilbud om forældrekursus',
-        text: 'Ansøgningsfristen er tirsdag den 1. september 2026.',
-        audience: 'municipal',
-      }),
-    ];
-    const theirs = briefInput({ items, preferences: [] });
-    const brief = rank(theirs, signalsFromRules(theirs, TODAY));
-    expect(brief.signals[0]?.tier).not.toBe('hidden');
-  });
-
-  test('the verdict moves the score, so high survives the cap', () => {
-    // Same kind, same date, same audience: the last one in is the one that
-    // overflows — unless the family's word puts it ahead of the rest.
-    const items = Array.from({ length: ACT_CAP + 1 }, (_, i) =>
-      item({
-        key: `plan:x:${i}`,
-        title: `Opgave ${i}`,
-        text: `Husk ${i} madpakke.`,
-        childNames: ['Viggo Birk Eksempelsen'],
-        audience: 'child',
-      }),
-    );
-    const last = `plan:x:${ACT_CAP}`;
-    const plain = rank(input(items), signalsFromRules(input(items), TODAY));
-    expect(plain.signals.filter((s) => s.tier === 'week').map((s) => s.sourceKey)).toEqual([last]);
-
-    const theirs = rank(input(items), signalsFromRules(input(items), TODAY), { [last]: 'high' });
-    expect(theirs.signals.filter((s) => s.tier === 'week').map((s) => s.sourceKey)).toEqual([
-      `plan:x:${ACT_CAP - 1}`,
+  test('upcoming by date, then undated, then past', () => {
+    expect(brief.cards.map((c) => c.id)).toEqual(['b', 'a', 'c', 'd']);
+    expect(brief.cards.map((c) => c.placement)).toEqual([
+      'upcoming',
+      'upcoming',
+      'undated',
+      'past',
     ]);
-    const high = theirs.signals.find((s) => s.sourceKey === last);
-    const normal = theirs.signals.find((s) => s.sourceKey === 'plan:x:1');
-    expect((high?.score ?? 0) > (normal?.score ?? 0)).toBe(true);
-    expect(high?.reasons).toContain('relevance:high +25');
   });
 
-  test('low sinks the score as well as the tier', () => {
-    const items = [
-      item({
-        key: 'post:50',
-        title: 'Fællesspisning',
-        text: 'Vi holder fællesspisning i næste uge.',
-        audience: 'class',
-      }),
-      item({
-        key: 'post:51',
-        title: 'Fællesspisning',
-        text: 'Vi holder fællesspisning i næste uge.',
-        audience: 'class',
-      }),
-    ];
-    const note = (key: string): Signal => ({
-      ...backgroundNote,
-      id: `model:${key}`,
-      title: `Fællesspisning ${key}`,
-      sourceKey: key,
-    });
-    const brief = rank(input(items), [note('post:50'), note('post:51')], { 'post:51': 'low' });
-    const plain = brief.signals.find((s) => s.sourceKey === 'post:50');
-    const low = brief.signals.find((s) => s.sourceKey === 'post:51');
-    expect((plain?.score ?? 0) > (low?.score ?? 0)).toBe(true);
-    expect(low?.reasons).toContain('relevance:low -25');
+  test('today counts as upcoming, not past', () => {
+    const today = card({ id: 't', date: '2026-08-13', sourceKeys: ['post:1'] });
+    const b = rank(input([POST]), { model: [today], rules: [], hidden: [] });
+    expect(b.cards[0]?.placement).toBe('upcoming');
+  });
+
+  test("on the same day, the model's order survives", () => {
+    const info = card({ id: 'i', date: '2026-08-14', sourceKeys: ['post:1'] });
+    const act = card({ id: 'x', date: '2026-08-14', needsAction: true, sourceKeys: ['thread:2'] });
+    const b = rank(input([POST, THREAD]), { model: [info, act], rules: [], hidden: [] });
+    expect(b.cards.map((c) => c.id)).toEqual(['i', 'x']);
+  });
+
+  test('among past cards the most recent comes first', () => {
+    const older = card({ id: 'o', date: '2026-08-01', sourceKeys: ['post:1'] });
+    const newer = card({ id: 'n', date: '2026-08-10', sourceKeys: ['thread:2'] });
+    const b = rank(input([POST, THREAD]), { model: [older, newer], rules: [], hidden: [] });
+    expect(b.cards.map((c) => c.id)).toEqual(['n', 'o']);
+  });
+
+  test('the sources a card rests on are resolved onto it', () => {
+    expect(brief.cards.find((c) => c.id === 'a')?.sources.map((s) => s.key)).toEqual(['post:1']);
   });
 });
 
-describe("the family's own appointments", () => {
-  function appointment(partial: Partial<SourceItem> = {}): SourceItem {
-    return item({
-      key: 'cal:far@eksempel.dk:evt1:2026-08-14T13:30:00+02:00',
-      kind: 'personal',
-      title: 'Tandlæge kl. 13:30',
-      text: 'Tandlæge · Fra kalenderen «Familien»',
-      at: '2026-08-14T13:30:00',
-      author: 'Familien',
-      audience: 'family',
-      ...partial,
-    });
-  }
-
-  test("an appointment is a dated thing to know, beside the school's own", () => {
-    // Shown, not analysed: it lands in "Kommende" with the week's other dated
-    // items, and the page never says whether anything clashed — see `collectPersonal`.
-    const source = appointment();
-    const brief = rank(input([source]), signalsFromRules(input([source]), TODAY));
-    const signal = brief.signals[0];
-    expect(signal?.tier).toBe('week');
-    expect(signal?.kind).toBe('event');
-    expect(signal?.why).toBeNull();
+describe('rank: the cap', () => {
+  test('the first CARD_CAP model cards stay, regardless of date or action', () => {
+    const items: SourceItem[] = [];
+    const cards: Card[] = [];
+    for (let i = 0; i < CARD_CAP + 3; i++) {
+      items.push(item({ key: `post:${i}` }));
+      const shape = i % 3;
+      cards.push(
+        card({
+          id: `c${i}`,
+          title: `Kort ${i}`,
+          date: shape === 2 ? null : `2026-08-${String(14 + (i % 10)).padStart(2, '0')}`,
+          needsAction: shape === 0,
+          sourceKeys: [`post:${i}`],
+        }),
+      );
+    }
+    const brief = rank(input(items), { model: cards, rules: [], hidden: [] });
+    expect(brief.cards).toHaveLength(CARD_CAP);
+    expect(brief.folded).toHaveLength(3);
+    expect(new Set(brief.cards.map((c) => c.id))).toEqual(
+      new Set(cards.slice(0, CARD_CAP).map((c) => c.id)),
+    );
+    expect(brief.folded.map((c) => c.id)).toEqual(cards.slice(CARD_CAP).map((c) => c.id));
+    expect(brief.folded.every((c) => c.reasons.some((r) => r.includes('CARD_CAP')))).toBe(true);
+    // The kept cards are still in page order.
+    const dated = brief.cards.filter((c) => c.placement === 'upcoming').map((c) => c.date);
+    expect(dated).toEqual([...dated].sort());
   });
 
-  test('our own calendar can never reach Kræver handling', () => {
-    // The cap there is five. Nobody asked us for this appointment, so it must
-    // not be able to push a real school deadline off the page.
-    const sources = Array.from({ length: 8 }, (_, i) =>
-      appointment({ key: `cal:far@eksempel.dk:evt${i}:2026-08-14`, title: `Aftale ${i}` }),
-    );
-    const brief = rank(input(sources), signalsFromRules(input(sources), TODAY));
-    expect(brief.signals.filter((s) => s.tier === 'act')).toHaveLength(0);
+  test('a folded card is neither a card nor lost: its sources are covered', () => {
+    const items = Array.from({ length: CARD_CAP + 1 }, (_, i) => item({ key: `post:${i}` }));
+    const cards = items.map((s, i) => card({ id: `c${i}`, sourceKeys: [s.key] }));
+    const brief = rank(input(items), { model: cards, rules: [], hidden: [] });
+    expect(brief.folded).toHaveLength(1);
+    expect(brief.rest).toHaveLength(0);
+  });
+});
+
+describe('rank: what is not a card', () => {
+  test('sources no card covers are the rest; the family calendar is neither', () => {
+    const brief = rank(input([POST, DIARY, DENTIST]), {
+      model: [card({ id: 'a', sourceKeys: ['post:1'] })],
+      rules: [],
+      hidden: [],
+    });
+    expect(brief.rest.map((s) => s.key)).toEqual(['post:3']);
+    expect(brief.hidden).toEqual([]);
+  });
+
+  test('hidden sources are listed as hidden, never as rest', () => {
+    const brief = rank(input([POST, DIARY]), {
+      model: [card({ id: 'a', sourceKeys: ['post:1'] })],
+      rules: [],
+      hidden: ['post:3'],
+    });
+    expect(brief.hidden.map((s) => s.key)).toEqual(['post:3']);
+    expect(brief.rest).toEqual([]);
+  });
+
+  test('a source cited by a card is shown, even when the model also hid it', () => {
+    const brief = rank(input([POST, THREAD]), {
+      model: [card({ id: 'a', sourceKeys: ['post:1', 'thread:2'] })],
+      rules: [],
+      hidden: ['thread:2'],
+    });
+
+    expect(brief.cards[0]?.sourceKeys).toEqual(['post:1', 'thread:2']);
+    expect(brief.hidden).toEqual([]);
+  });
+
+  test('a hidden key that names no source is ignored', () => {
+    const brief = rank(input([POST]), { model: [], rules: [], hidden: ['post:404'] });
+    expect(brief.hidden).toEqual([]);
+  });
+
+  test('a card citing a source that is not in the input is dropped and reported', () => {
+    const brief = rank(input([POST]), {
+      model: [card({ id: 'ghost', title: 'Opdigtet', sourceKeys: ['post:404'] })],
+      rules: [],
+      hidden: [],
+    });
+    expect(brief.cards).toEqual([]);
+    expect(brief.degraded.some((d) => d.includes('Opdigtet'))).toBe(true);
+  });
+});
+
+describe('rank: without a model', () => {
+  test('the rule cards are the cards', () => {
+    const rules = cardsFromRules(input([POST, PLAN]), TODAY);
+    const brief = rank(input([POST, PLAN]), { model: null, rules, hidden: [] });
+    expect(brief.cards.length).toBe(rules.length);
+    expect(brief.cards.every((c) => c.origin === 'rule')).toBe(true);
+  });
+
+  test('when the model ran, rule cards for uncovered, unflagged sources are not added', () => {
+    // The model chose not to make a card of it; that is a choice, not a gap.
+    const rules = cardsFromRules(input([POST]), TODAY);
+    const brief = rank(input([POST, THREAD]), {
+      model: [card({ id: 'a', sourceKeys: ['thread:2'] })],
+      rules,
+      hidden: [],
+    });
+    expect(brief.cards.map((c) => c.id)).toEqual(['a']);
+    expect(brief.rest.map((s) => s.key)).toEqual(['post:1']);
+  });
+});
+
+describe('cardsFromRules', () => {
+  test('a gear reminder in a weekly plan lands on the plan’s day and asks for action', () => {
+    const plan = item({
+      key: 'plan:easyiq:2026-W33:0',
+      kind: 'plan',
+      title: 'Idræt',
+      text: 'Husk skiftetøj og badeting til efter timen.',
+      at: '2026-08-13T08:00:00',
+      childNames: ['Alma Signe Eksempelsen'],
+    });
+    const [rule] = cardsFromRules(input([plan]), TODAY);
+    expect(rule?.date).toBe('2026-08-13');
+    expect(rule?.needsAction).toBe(true);
+    expect(rule?.children).toEqual(['Alma']);
+    expect(rule?.summary).toBe('Husk skiftetøj og badeting til efter timen.');
+  });
+
+  test('a dateless reminder in a thread is not dated to the day it was sent', () => {
+    // Real case: an unread thread from 11 August reminding us of a meeting in
+    // September. The rules found "minde om" but no date in that sentence, and
+    // the card used to borrow the thread's timestamp as its date.
+    const thread = item({
+      key: 'thread:1',
+      kind: 'thread',
+      title: 'Møde ang. Alma',
+      text: 'Jeg har lovet Merete fra kontoret at minde om netværksmødet.',
+      at: '2026-08-11T20:19:00',
+    });
+    const [rule] = cardsFromRules(input([thread]), TODAY);
+    expect(rule?.date).toBeNull();
+  });
+
+  test('a thread rule resolves relative language from the message that contains it', () => {
+    const thread = item({
+      key: 'thread:relative',
+      kind: 'thread',
+      title: 'Aftale',
+      text: 'Husk at vi ses i morgen.\n\nTak for aftalen.',
+      at: '2026-08-22T09:00:00+00:00',
+      conversation: {
+        messages: [
+          {
+            from: 'Palle',
+            at: '2026-08-10T09:00:00+00:00',
+            text: 'Husk at vi ses i morgen.',
+          },
+          { from: 'Yrsa', at: '2026-08-22T09:00:00+00:00', text: 'Tak for aftalen.' },
+        ],
+        total: 2,
+        truncated: false,
+      },
+    });
+
+    expect(cardsFromRules(input([thread]), TODAY)[0]?.date).toBe('2026-08-11');
   });
 
   test('the Danish extractors are not run over a calendar title', () => {
-    // "Frist" in an appointment somebody wrote for themselves is not a school
-    // deadline, and a calendar entry already carries the date the extractors
-    // exist to recover from prose. One appointment, one signal.
-    const source = appointment({ title: 'Frist for tilmelding d. 18/9 kl. 09:00' });
-    const signals = signalsFromRules(input([source]), TODAY);
-    expect(signals).toHaveLength(1);
-    expect(signals[0]?.kind).toBe('event');
-    expect(signals[0]?.dueAt).toBe('2026-08-14');
+    const source = { ...DENTIST, title: 'Frist for tilmelding d. 18/9 kl. 09:00' };
+    expect(cardsFromRules(input([source]), TODAY)).toEqual([]);
   });
 
-  test('a school obligation still outranks our own appointment', () => {
-    // `family` sits just under `child` on purpose: both belong on the page, but
-    // the thing the school is asking for takes the contested slot.
-    const mine = appointment();
-    const school = item({
-      key: 'post:1',
-      kind: 'post',
-      audience: 'child',
-      title: 'Skolefoto',
-      text: 'Husk tilmelding til skolefoto senest fredag.',
-      at: '2026-08-13T09:00:00',
-      childNames: ['Ida'],
+  test('the same sentence matched twice is one card; two obligations are two', () => {
+    const post = item({
+      key: 'post:5',
+      text: 'Tilmeld jeres barn senest 20/8. Udfyld kontaktsedlen senest 25/8.',
+      at: '2026-08-12T09:00:00',
     });
-    const brief = rank(input([mine, school]), signalsFromRules(input([mine, school]), TODAY));
-    const order = brief.signals.map((s) => s.sourceKey);
-    expect(order.indexOf('post:1')).toBeLessThan(order.indexOf(mine.key));
+    const brief = rank(input([post]), {
+      model: null,
+      rules: cardsFromRules(input([post]), TODAY),
+      hidden: [],
+    });
+    expect(brief.cards.map((c) => c.date).sort()).toEqual(['2026-08-20', '2026-08-25']);
   });
+});
 
-  test('two private appointments on the same day both survive', () => {
-    const dentist = appointment();
-    const playDate = appointment({
-      key: 'cal:far@eksempel.dk:evt2:2026-08-14T15:00:00+02:00',
-      title: 'Legeaftale kl. 15:00–17:00',
-      at: '2026-08-14T15:00:00',
+describe('explain', () => {
+  test('names every card with its placement and sources', () => {
+    const brief = rank(input([POST, THREAD]), {
+      model: [
+        card({
+          id: 'a',
+          title: 'Skolefoto',
+          date: '2026-08-17',
+          needsAction: true,
+          sourceKeys: ['post:1'],
+        }),
+        card({ id: 'b', title: 'Møde', sourceKeys: ['thread:2'] }),
+      ],
+      rules: [],
+      hidden: [],
     });
-    const sources = [dentist, playDate];
-    const brief = rank(input(sources), signalsFromRules(input(sources), TODAY), {
-      [dentist.key]: 'normal',
-      [playDate.key]: 'normal',
-    });
-    expect(brief.signals.map((signal) => signal.sourceKey).sort()).toEqual(
-      [dentist.key, playDate.key].sort(),
-    );
-  });
-
-  test('a private appointment and a school event on the same day both survive', () => {
-    const mine = appointment();
-    const school = item({
-      key: 'event:school-meeting',
-      kind: 'event',
-      title: 'Forældremøde',
-      text: 'Forældremøde fredag den 14. august.',
-      at: '2026-08-14T17:00:00+02:00',
-      audience: 'class',
-    });
-    const schoolSignal: Signal = {
-      id: 'model:school-meeting',
-      kind: 'event',
-      title: school.title,
-      child: null,
-      dueAt: '2026-08-14',
-      urgency: 'week',
-      quote: 'Forældremøde',
-      why: null,
-      sourceKey: school.key,
-      origin: 'model',
-      concernsChild: false,
-    };
-    const sources = [mine, school];
-    const brief = rank(input(sources), [...signalsFromRules(input([mine]), TODAY), schoolSignal], {
-      [mine.key]: 'normal',
-      [school.key]: 'normal',
-    });
-    expect(brief.signals.map((signal) => signal.sourceKey).sort()).toEqual(
-      [mine.key, school.key].sort(),
-    );
-  });
-
-  test('the model relevance verdict ranks each appointment through the shared path', () => {
-    const hidden = appointment({ key: 'cal:family:hidden:2026-08-14' });
-    const low = appointment({ key: 'cal:family:low:2026-08-14' });
-    const high = appointment({ key: 'cal:family:high:2026-08-14' });
-    const sources = [hidden, low, high];
-    const brief = rank(input(sources), signalsFromRules(input(sources), TODAY), {
-      [hidden.key]: 'hide',
-      [low.key]: 'low',
-      [high.key]: 'high',
-    });
-    expect(brief.signals.find((signal) => signal.sourceKey === hidden.key)?.tier).toBe('hidden');
-    expect(brief.signals.find((signal) => signal.sourceKey === low.key)?.tier).toBe('context');
-    expect(brief.signals.find((signal) => signal.sourceKey === high.key)?.tier).toBe('week');
-  });
-
-  test('model interpretation cannot turn a private appointment into a clash or action', () => {
-    const source = appointment();
-    const invented: Signal = {
-      id: 'model:calendar',
-      kind: 'action',
-      title: 'Løs sammenstød for Ida',
-      child: 'Ida',
-      dueAt: '2026-08-14',
-      urgency: 'now',
-      quote: 'Tandlæge',
-      why: 'Kan kollidere med skoledagen',
-      sourceKey: source.key,
-      origin: 'model',
-      concernsChild: true,
-    };
-    const result = rank(input([source]), [invented], { [source.key]: 'normal' }).signals[0];
-    expect(result).toMatchObject({
-      kind: 'event',
-      title: source.title,
-      child: null,
-      why: null,
-      concernsChild: false,
-      tier: 'week',
-    });
+    const text = explain(brief);
+    expect(text).toContain('2 kort');
+    expect(text).toContain('[upcoming] ! Skolefoto  (2026-08-17)');
+    expect(text).toContain('[undated]   Møde');
+    expect(text).toContain('model rank:1');
+    expect(text).toContain('model rank:2');
+    expect(text).toContain('kilder: post:1');
   });
 });

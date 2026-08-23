@@ -14,6 +14,7 @@
  *   FAKE_CLAUDE_MODE         ok | error | denied | stall | stall-ignore-term | stall-then-ok
  *   FAKE_CLAUDE_RESULT_JSON  the `result` field for `ok`, already JSON-encoded (default "OK")
  *   FAKE_CLAUDE_LOG          append one line per call (the argv), and count calls from it
+ *                            `<log>.results` may hold one JSON result per call
  *
  * `stall` sleeps as a child of the script, so killing the script leaves an
  * orphan holding the stdout pipe — the exact hostage situation spawnClaude is
@@ -51,7 +52,11 @@ case "$mode" in
     exit 0
     ;;
   *)
-    printf '{"type":"result","subtype":"success","is_error":false,"result":%s,"permission_denials":[]}\\n' "\${FAKE_CLAUDE_RESULT_JSON:-\\"OK\\"}"
+    result_json="\${FAKE_CLAUDE_RESULT_JSON:-\\"OK\\"}"
+    if [ -n "$FAKE_CLAUDE_LOG" ] && [ -f "$FAKE_CLAUDE_LOG.results" ]; then
+      result_json=$(sed -n "\${n}p" "$FAKE_CLAUDE_LOG.results")
+    fi
+    printf '{"type":"result","subtype":"success","is_error":false,"result":%s,"permission_denials":[]}\\n' "$result_json"
     ;;
 esac
 `;

@@ -8,7 +8,7 @@
  * heading with nothing under it, so without it the forwarded PDF silently loses
  * whole sections — which was caught the first time a PDF was actually made.
  *
- * Both scripts are inlined here rather than in the body, because `compose.ts`
+ * Both scripts are inlined here rather than in the body, because `render.ts`
  * owns the markup and `validate.ts` checks that body for external references.
  * Putting behaviour in the document wrapper keeps that separation intact and
  * gets it onto the fallback layout for free.

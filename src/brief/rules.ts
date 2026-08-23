@@ -12,7 +12,14 @@
 
 import { localIsoDate } from '../integrations/types.ts';
 import { isValidCalendarDate } from '../validation.ts';
-import type { SignalKind, Urgency } from './types.ts';
+/**
+ * What a matched sentence asks for. `bring`, `action` and `deadline` are the
+ * kinds that make a rule-made card `needsAction`; the rest are things to know.
+ */
+export type RuleKind = 'action' | 'deadline' | 'event' | 'bring' | 'info' | 'social';
+
+/** How soon, by the date alone — `urgencyFor`. Kept for the rules' own tests. */
+export type Urgency = 'now' | 'week' | 'later' | 'fyi';
 
 /**
  * Full and abbreviated month names. The abbreviations are not optional: the
@@ -66,7 +73,7 @@ const WEEKDAYS: Record<string, number> = {
  * Ordered most-specific first; the first match decides the signal kind, so
  * "husk at aflevere senest fredag" is a `bring`, not a `deadline`.
  */
-const MARKERS: Array<{ re: RegExp; kind: SignalKind; urgency: Urgency }> = [
+const MARKERS: Array<{ re: RegExp; kind: RuleKind; urgency: Urgency }> = [
   // Danish compounds mean a `\b`-anchored keyword misses most real uses:
   // "ansøgningsfristen" contains "frist", "Mødet" contains "møde". So these
   // deliberately match inside words.
@@ -162,8 +169,29 @@ export function extractDates(sentence: string, today: Date): string[] {
     if (!found.includes(value)) found.push(value);
   };
 
-  // "1. september 2026", "den 25. august", "d. 24. august", "d. 18 sep"
-  const named = new RegExp(`(\\d{1,2})\\.?\\s+(${MONTH_PATTERN})\\.?(?:\\s+(\\d{4}))?`, 'gi');
+  // "24.-28. august" / "24.–28. august" / "24. til 28. august". Read the
+  // start before the ordinary named-date pass reads the end, because the first
+  // date is what a rule-made event card sorts on.
+  const rangeStart = new RegExp(
+    `\\b(\\d{1,2})\\.?\\s*(?:til\\s*|[-–]\\s*)\\d{1,2}\\.?\\s*(${MONTH_PATTERN})\\.?(?:\\s+(\\d{4}))?`,
+    'gi',
+  );
+  for (const match of sentence.matchAll(rangeStart)) {
+    const day = Number(match[1]);
+    const month = MONTHS[(match[2] ?? '').toLowerCase()];
+    if (!month) continue;
+    const year = match[3] ? Number(match[3]) : inferYear(day, month, today);
+    if (!isValidCalendarDate(year, month, day)) continue;
+    push(new Date(year, month - 1, day));
+  }
+
+  // "1. september 2026", "25.august", "d. 24. august", "d. 18 sep".
+  // A dot may stand in for the whitespace; one of them is required so a word
+  // ending in digits is not mistaken for a date.
+  const named = new RegExp(
+    `\\b(\\d{1,2})(?:\\.\\s*|\\s+)(${MONTH_PATTERN})\\.?(?:\\s+(\\d{4}))?`,
+    'gi',
+  );
   for (const match of sentence.matchAll(named)) {
     const day = Number(match[1]);
     const month = MONTHS[(match[2] ?? '').toLowerCase()];
@@ -221,7 +249,7 @@ export function extractDates(sentence: string, today: Date): string[] {
 }
 
 export type RuleHit = {
-  kind: SignalKind;
+  kind: RuleKind;
   quote: string;
   dueAt: string | null;
   urgency: Urgency;

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { briefInput, sourceItem } from '../testing/brief-fixtures.ts';
-import { fallbackPage } from './compose.ts';
-import type { BriefInput, RankedBrief, RankedSignal, SourceItem } from './types.ts';
+import { briefInput, card, rankedBrief, sourceItem } from '../testing/brief-fixtures.ts';
+import { renderPage } from './render.ts';
+import type { BriefInput, SourceItem } from './types.ts';
 import { validatePage } from './validate.ts';
 
 const SOURCE: SourceItem = sourceItem({
@@ -16,45 +16,13 @@ const SOURCE: SourceItem = sourceItem({
   url: 'https://www.aula.dk/portal/#/ugeplan',
 });
 
-const MUST_SHOW: RankedSignal = {
-  id: 'plan:x:0#0',
-  kind: 'bring',
-  title: 'Send skiftetøj og badeting med',
-  child: 'Alma',
-  dueAt: '2026-08-13',
-  urgency: 'now',
-  quote: 'Husk skiftetøj og badeting til efter timen.',
-  why: null,
-  sourceKey: 'plan:x:0',
-  origin: 'model',
-  concernsChild: false,
-  score: 123,
-  tier: 'act',
-  mustShow: true,
-  audience: 'child',
-  relevance: 'normal',
-  reasons: [],
-  source: SOURCE,
-  mergedSourceKeys: [],
-};
-
-const HIDDEN: RankedSignal = {
-  ...MUST_SHOW,
-  id: 'post:9#0',
-  title: 'Forældrekurset',
-  tier: 'hidden',
-  mustShow: false,
+const COURSE: SourceItem = sourceItem({
+  key: 'post:9',
+  title: 'Forældrekursus',
+  text: 'Tilbud om kursus for forældre i kommunen.',
   audience: 'municipal',
-  relevance: 'hide',
-  sourceKey: 'post:9',
-  source: {
-    ...SOURCE,
-    key: 'post:9',
-    title: 'Forældrekursus',
-    audience: 'municipal',
-    groups: ['Alle forældre'],
-  },
-};
+  groups: ['Alle forældre'],
+});
 
 const INPUT: BriefInput = briefInput({
   family: {
@@ -69,51 +37,62 @@ const INPUT: BriefInput = briefInput({
     ],
     isSteppedUp: true,
   },
-  items: [SOURCE],
+  items: [SOURCE, COURSE],
   health: [
     { level: 'warn', message: 'Ugeplan for Viggo kunne ikke hentes — EasyIQ svarede HTTP 500.' },
   ],
 });
 
-const BRIEF: RankedBrief = {
-  input: INPUT,
-  signals: [MUST_SHOW, HIDDEN],
-  unusedSources: [],
-  degraded: [],
-};
+const CARD = card({
+  id: 'model:0',
+  title: 'Send skiftetøj og badeting med til Alma',
+  summary: 'Idræt i dag; alle skal i bad bagefter.',
+  children: ['Alma'],
+  date: '2026-08-13',
+  needsAction: true,
+  sourceKeys: ['plan:x:0'],
+});
+
+const BRIEF = rankedBrief(INPUT, [CARD], { hidden: ['post:9'] });
 
 describe('validatePage', () => {
-  test('the fallback layout satisfies every invariant', () => {
-    // The fallback is held to exactly the same standard as the model's output;
-    // it is the thing that ships on a bad day.
-    expect(validatePage(fallbackPage(BRIEF), BRIEF)).toEqual([]);
+  test('the page satisfies every invariant', () => {
+    expect(validatePage(renderPage(BRIEF), BRIEF)).toEqual([]);
   });
 
-  test('catches a page that quietly dropped a required item', () => {
+  test('catches a page that quietly dropped a card', () => {
     // The dangerous failure: it looks fine and the meeting is simply gone.
-    const html = fallbackPage(BRIEF).replace(`data-signal-id="${MUST_SHOW.id}"`, 'data-x="1"');
-    const rules = validatePage(html, BRIEF).map((v) => v.rule);
-    expect(rules).toContain('must-show');
+    const html = renderPage(BRIEF).replace(`data-signal-id="${CARD.id}"`, 'data-x="1"');
+    expect(validatePage(html, BRIEF).map((v) => v.rule)).toContain('must-show');
   });
 
   test('catches a claim with no source attached', () => {
-    const html = fallbackPage(BRIEF).replace(`data-source-id="${MUST_SHOW.sourceKey}"`, '');
+    const html = renderPage(BRIEF).replace(`data-source-id="${CARD.sourceKeys[0]}"`, '');
     expect(validatePage(html, BRIEF).map((v) => v.rule)).toContain('attribution');
   });
 
   test('catches a missing datastatus block', () => {
-    const html = fallbackPage(BRIEF).replace('data-block="datastatus"', 'data-block="andet"');
+    const html = renderPage(BRIEF).replace('data-block="datastatus"', 'data-block="andet"');
     expect(validatePage(html, BRIEF).map((v) => v.rule)).toContain('datastatus');
   });
 
   test('catches a fetch failure that was not reported', () => {
-    const html = fallbackPage(BRIEF).replace(/Ugeplan for Viggo[^<]*/, 'Alt er hentet');
+    const html = renderPage(BRIEF).replace(/Ugeplan for Viggo[^<]*/, 'Alt er hentet');
     expect(validatePage(html, BRIEF).map((v) => v.rule)).toContain('datastatus');
   });
 
-  test('catches a suppressed broadcast promoted to a card', () => {
-    const html = `${fallbackPage(BRIEF)}<div class="card" data-signal-id="${HIDDEN.id}" data-source-id="post:9">Forældrekursus</div>`;
+  test('catches a hidden source drawn as a card', () => {
+    const html = `${renderPage(BRIEF)}<div class="card" data-signal-id="x" data-source-id="post:9" data-done-keys="post:9|-">Forældrekursus</div>`;
     expect(validatePage(html, BRIEF).map((v) => v.rule)).toContain('noise');
+  });
+
+  test("checks every source a card cites, not only the card's first", () => {
+    const ranked = rankedBrief(INPUT, [{ ...CARD, sourceKeys: [SOURCE.key, COURSE.key] }]);
+    const inconsistent = { ...ranked, hidden: [COURSE] };
+
+    expect(validatePage(renderPage(inconsistent), inconsistent).map((v) => v.rule)).toContain(
+      'noise',
+    );
   });
 
   test('catches external resources, which break the file and the PDF', () => {
@@ -124,12 +103,12 @@ describe('validatePage', () => {
       '<style>@import url(https://x/y.css)</style>',
       '<iframe src="https://x/y"></iframe>',
     ]) {
-      const rules = validatePage(fallbackPage(BRIEF) + bad, BRIEF).map((v) => v.rule);
+      const rules = validatePage(renderPage(BRIEF) + bad, BRIEF).map((v) => v.rule);
       expect(rules).toContain('self-contained');
     }
   });
 
-  // The page now carries verbatim Aula prose behind its more-block toggles, and
+  // The page carries verbatim Aula prose behind its more-block toggles, and
   // this check cannot tell a tag it rendered from one a parent typed. Tags are
   // safe to match because `escapeHtml` neuters them; the CSS patterns this rule
   // used to carry were not, and would have failed the whole layout over a
@@ -139,16 +118,12 @@ describe('validatePage', () => {
       '<p>Se @import url(https://x/y.css) i vejledningen</p>',
       '<p>Skriv &lt;img src="foo"&gt; for at indsætte et billede</p>',
     ]) {
-      expect(validatePage(fallbackPage(BRIEF) + prose, BRIEF)).toEqual([]);
+      expect(validatePage(renderPage(BRIEF) + prose, BRIEF)).toEqual([]);
     }
   });
 
-  test('allows ordinary links back into Aula', () => {
-    expect(validatePage(fallbackPage(BRIEF), BRIEF)).toEqual([]);
-  });
-
   test('catches a full document where a fragment was required', () => {
-    const html = `<!doctype html><html><body>${fallbackPage(BRIEF)}</body></html>`;
+    const html = `<!doctype html><html><body>${renderPage(BRIEF)}</body></html>`;
     expect(validatePage(html, BRIEF).map((v) => v.rule)).toContain('fragment');
   });
 

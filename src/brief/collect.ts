@@ -12,10 +12,11 @@ import {
   type PersonalEvent,
 } from '../calendar/index.ts';
 import { readConfig } from '../config.ts';
-import { localIsoDate } from '../integrations/types.ts';
+import { localIsoDate, type WeekPlan } from '../integrations/types.ts';
 import { buildDigest, collectAlbums, type ChildGroups, loadGroups } from './../digest.ts';
 import { resolveFamily } from './../family.ts';
 import { loadPreferences } from './../preferences.ts';
+import { intervalLabel } from './dates.ts';
 import type { Audience, BriefInput, HealthNote, PresenceRow, SourceItem } from './types.ts';
 
 const AULA_PORTAL = 'https://www.aula.dk/portal/#';
@@ -25,6 +26,9 @@ export type CollectOptions = {
   isoWeek: string;
   now?: Date;
 };
+
+/** How far back the brief reads. Every source in that window reaches the model. */
+export const HISTORY_DAYS = 60;
 
 /**
  * How narrowly a piece of content was addressed.
@@ -68,29 +72,90 @@ function childrenForGroups(groups: string[], childGroups: ChildGroups[]): string
     .map((cg) => cg.child);
 }
 
+/** Flatten vendor plan entries into the same source shape as Aula content. */
+export function sourcesFromPlans(plans: WeekPlan[]): SourceItem[] {
+  const items: SourceItem[] = [];
+  for (const plan of plans) {
+    const dateOccurrences = new Map<string, number>();
+    for (const [index, entry] of plan.items.entries()) {
+      const childName = entry.childName ?? null;
+      const identity = (() => {
+        if (!entry.date) return `position:${index}`;
+        const occurrence = dateOccurrences.get(entry.date) ?? 0;
+        dateOccurrences.set(entry.date, occurrence + 1);
+        return `date:${encodeURIComponent(entry.date)}:${occurrence}`;
+      })();
+      items.push({
+        key: `plan:${plan.provider}:${plan.capability}:${plan.isoWeek}:${identity}`,
+        kind: 'plan',
+        title: entry.title ?? entry.subject ?? 'Ugeplan',
+        text: [
+          entry.subject ? `Fag/hold: ${entry.subject}` : null,
+          entry.title ? `Titel: ${entry.title}` : null,
+          entry.content,
+          entry.kind ? `Type: ${planKindLabel(entry.kind)}` : null,
+        ]
+          .filter((part): part is string => Boolean(part))
+          .join('\n'),
+        at: entry.date ?? null,
+        author: plan.provider,
+        groups: [],
+        childNames: childName ? [childName] : [],
+        // A weekly plan is produced for one child's class; it is as specific as
+        // content gets, and it is where "husk badetøj" lives.
+        audience: 'child',
+        important: false,
+        url: `${AULA_PORTAL}/ugeplan`,
+      });
+    }
+  }
+  return items;
+}
+
+function planKindLabel(kind: string): string {
+  const labels: Record<string, string> = {
+    assignment: 'Aflevering',
+    assignments: 'Afleveringer',
+    comment: 'Kommentar',
+    event: 'Begivenhed',
+    note: 'Note',
+    task: 'Opgave',
+    'weekly-letter': 'Ugebrev',
+  };
+  return labels[kind] ?? kind;
+}
+
 export async function collect(client: AulaClient, opts: CollectOptions): Promise<BriefInput> {
   const now = opts.now ?? new Date();
   const family = await resolveFamily(client);
 
-  const [digest, childGroups, albums, notifications] = await Promise.all([
+  const [digest, childGroups, albums] = await Promise.all([
     buildDigest(client, { days: opts.days, isoWeek: opts.isoWeek, family, now }),
     loadGroups(client, family.children).catch((): ChildGroups[] => []),
     collectAlbums(client, family, {
       limit: 12,
       since: new Date(now.getTime() - opts.days * 86_400_000),
     }).catch(() => []),
-    client.getNotifications().catch(() => []),
   ]);
-
-  // Badges are a terrible priority signal here — in the live account 152 of 159
-  // were photo uploads — so the count is split rather than shown as one number.
-  const newMediaCount = notifications.filter((n) => n.notificationEventType === 'NewMedia').length;
 
   const classGroupNames = new Set(
     childGroups.map((cg) => cg.className).filter((n): n is string => Boolean(n)),
   );
   const health: HealthNote[] = [];
   const items: SourceItem[] = [];
+
+  if (digest.collectionLimits.posts !== null) {
+    health.push({
+      level: 'warn',
+      message: `Kun de nyeste ${digest.collectionLimits.posts} opslag blev læst.`,
+    });
+  }
+  if (digest.collectionLimits.threads !== null) {
+    health.push({
+      level: 'warn',
+      message: `Kun de nyeste ${digest.collectionLimits.threads} beskedtråde blev læst.`,
+    });
+  }
 
   // ------------------------------------------------------------------ posts
   for (const post of digest.posts) {
@@ -162,25 +227,8 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
   }
 
   // ------------------------------------------------------------ weekly plans
+  items.push(...sourcesFromPlans(digest.weeklyPlans));
   for (const plan of digest.weeklyPlans) {
-    for (const [index, entry] of plan.items.entries()) {
-      const childName = entry.childName ?? null;
-      items.push({
-        key: `plan:${plan.provider}:${plan.isoWeek}:${index}`,
-        kind: 'plan',
-        title: entry.subject ?? 'Ugeplan',
-        text: entry.content ?? '',
-        at: entry.date ?? null,
-        author: plan.provider,
-        groups: [],
-        childNames: childName ? [childName] : [],
-        // A weekly plan is produced for one child's class; it is as specific as
-        // content gets, and it is where "husk badetøj" lives.
-        audience: 'child',
-        important: false,
-        url: `${AULA_PORTAL}/ugeplan`,
-      });
-    }
     for (const warning of plan.warnings ?? []) {
       health.push({ level: 'warn', message: summariseWarning(warning) });
     }
@@ -195,6 +243,7 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
       text: [event.title, event.location, event.createdBy].filter(Boolean).join(' · '),
       at: event.start,
       endsAt: event.end,
+      allDay: event.allDay,
       author: event.createdBy,
       groups: [],
       childNames: event.children,
@@ -280,7 +329,6 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
       at: album.createdAt,
       childNames: childrenForGroups(album.groups, childGroups),
     })),
-    newMediaCount,
   };
 }
 
@@ -331,16 +379,10 @@ function summariseWarning(warning: string): string {
  * exact calendars the parent chose.
  *
  * **They are shown, not analysed.** An appointment becomes a dated item like
- * any other, and lands among the week's other dated things on the same day as
- * the school's own events. An earlier version computed clashes here — against
- * each child's registered komme/gå hours and against Aula's calendar — and it
- * was removed: this family has no registered hours at all (33 template rows,
- * none with a date, one with a time) and Aula's own calendar was empty in 7 of
- * 13 briefs, so it could not fire. It could only misfire, and a false clash
- * promotes to `act`, where the cap of five would push a real school deadline
- * off the page. A reader looking at Thursday's dentist beside Thursday's
- * forældremøde draws the conclusion anyway, and knows things the arithmetic
- * never could — how far the dentist is, and whether a grandparent can fetch.
+ * any other; the page folds the lot into one collapsed *Egen kalender* whose
+ * summary names today's and any that share a day with a card (see
+ * `calendarSection` in `render.ts`). This puts the facts beside each other for
+ * the reader; code never infers a clash or the absence of one.
  *
  * The page also never reports the *absence* of a clash. A reassurance is a
  * claim, it would be made every quiet week, and it would train the reader to
@@ -381,21 +423,22 @@ async function collectPersonal(now: Date): Promise<{ items: SourceItem[]; health
 
 /**
  * One appointment as a source, so it travels the same road as everything else —
- * ranked, composed, marked `NY`, tickable — instead of needing a section and a
- * set of rules of its own.
+ * ranked, marked `NY`, tickable — instead of needing a set of rules of its own.
  *
- * The time goes in the title because for a calendar entry the time *is* half of
- * what it says; "Tandlæge" on its own is not the thing the reader needs.
+ * For a calendar entry the time *is* half of what it says, so it goes into
+ * `text` for the model in words. The title stays bare: the page writes the time
+ * itself from `at`/`endsAt`/`allDay`, once as a row and once, start time only,
+ * in the fold's summary — and a title carrying "kl. 13:30–14:15" could not be
+ * shortened to "Tandlæge 13:30" without parsing our own sentence back apart.
  */
 export function toPersonalSourceItem(event: PersonalEvent): SourceItem {
-  const when = personalWhen(event);
   return {
     key: event.key,
     kind: 'personal',
-    title: `${event.title}${when}`,
+    title: event.title,
     text: [
       event.title,
-      when.trim().replace(/^·\s*/, ''),
+      personalWhen(event),
       event.location,
       `Fra kalenderen «${event.calendarName}»`,
     ]
@@ -405,6 +448,7 @@ export function toPersonalSourceItem(event: PersonalEvent): SourceItem {
     // day, and an all-day event has no instant to be faithful to.
     at: `${event.date}T${event.startTime ?? '00:00'}:00`,
     endsAt: `${event.endDate}T${event.endTime ?? '23:59'}:00`,
+    allDay: event.allDay,
     author: event.calendarName,
     groups: [],
     // Nothing here says which child an appointment is about. Guessing from the
@@ -417,21 +461,13 @@ export function toPersonalSourceItem(event: PersonalEvent): SourceItem {
   };
 }
 
+/** The time in words, for the model's copy of the appointment. */
 function personalWhen(event: PersonalEvent): string {
-  if (event.allDay) {
-    return event.date === event.endDate
-      ? ' · hele dagen'
-      : ` · hele dagen ${shortDay(event.date)}–${shortDay(event.endDate)}`;
-  }
-  if (event.date === event.endDate) {
-    return event.endTime && event.endTime !== event.startTime
-      ? ` kl. ${event.startTime}–${event.endTime}`
-      : ` kl. ${event.startTime}`;
-  }
-  return ` fra ${shortDay(event.date)} kl. ${event.startTime} til ${shortDay(event.endDate)} kl. ${event.endTime}`;
-}
-
-function shortDay(iso: string): string {
-  const [, month = '', day = ''] = iso.split('-');
-  return `${Number(day)}/${Number(month)}`;
+  return intervalLabel({
+    startDay: event.date,
+    endDay: event.endDate,
+    startTime: event.startTime,
+    endTime: event.endTime,
+    allDay: event.allDay,
+  });
 }

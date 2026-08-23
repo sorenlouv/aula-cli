@@ -1,11 +1,11 @@
 /**
  * The invariants, checked against the generated HTML.
  *
- * Since the plan-based rework, `buildPage` is the only renderer and satisfies
- * these by construction — so today this is a regression net, not a gate the
- * model can fail. It stays because the invariants are the product: a template
- * edit that drops `data-source-id`, or a plan path that lets a hidden signal
- * through, must fail loudly here rather than ship quietly.
+ * `buildPage` is the only renderer and satisfies these by construction — so
+ * this is a regression net, not a gate the model can fail. It stays because
+ * the invariants are the product: a template edit that drops `data-source-id`,
+ * or a path that lets a hidden source through as a card, must fail loudly here
+ * rather than ship quietly.
  *
  * The dangerous failure is not an ugly page. It is a page that looks perfectly
  * fine and silently left out the meeting.
@@ -14,7 +14,7 @@
 import { escapeHtml } from '../html.ts';
 import type { RankedBrief } from './types.ts';
 
-type Violation = { rule: string; detail: string };
+export type Violation = { rule: string; detail: string };
 
 /**
  * Tags that could pull something in over the network — plus `<style>`, which
@@ -35,12 +35,12 @@ const EXTERNAL_RESOURCE = /<(?:img|script|link|style|iframe|object|embed|base)\b
 export function validatePage(html: string, brief: RankedBrief): Violation[] {
   const violations: Violation[] = [];
 
-  // 1. Nothing required was dropped.
-  for (const signal of brief.signals.filter((s) => s.mustShow)) {
-    if (!html.includes(`data-signal-id="${signal.id}"`)) {
+  // 1. Nothing required was dropped: every card the ranker kept is on the page.
+  for (const card of brief.cards) {
+    if (!html.includes(`data-signal-id="${card.id}"`)) {
       violations.push({
         rule: 'must-show',
-        detail: `"${signal.title}" (${signal.id}) mangler på siden`,
+        detail: `"${card.title}" (${card.id}) mangler på siden`,
       });
     }
   }
@@ -70,7 +70,7 @@ export function validatePage(html: string, brief: RankedBrief): Violation[] {
     violations.push({ rule: 'datastatus', detail: 'datastatus-blokken mangler' });
   } else {
     for (const note of brief.input.health.filter((h) => h.level === 'warn')) {
-      // Match on a distinctive fragment; the composer may reword around it.
+      // Match on a distinctive fragment; the renderer may reword around it.
       // Escaped, because the page carries the escaped form — a vendor error
       // with an `&` in its first characters must not read as a missing warning.
       const stem = escapeHtml(
@@ -82,12 +82,21 @@ export function validatePage(html: string, brief: RankedBrief): Violation[] {
     }
   }
 
-  // 4. Noise stays down: nothing the family's list hid may appear as a card.
-  for (const signal of brief.signals.filter((s) => s.tier === 'hidden')) {
-    if (html.includes(`data-signal-id="${signal.id}"`)) {
+  // 4. Noise stays down: nothing the model hid may appear as a card. The first
+  //    source has its own attribute; every source is also present as the prefix
+  //    of a done key, so a merged card must be checked there too.
+  const cardTags = [...html.matchAll(/<div class="card[^"]*"[^>]*>/g)].map((m) => m[0]);
+  for (const item of brief.hidden) {
+    if (
+      cardTags.some((tag) => {
+        if (tag.includes(`data-source-id="${item.key}"`)) return true;
+        const done = /data-done-keys="([^"]*)"/.exec(tag)?.[1] ?? '';
+        return done.split(' ').some((key) => key.startsWith(`${item.key}|`));
+      })
+    ) {
       violations.push({
         rule: 'noise',
-        detail: `skjult "${signal.title}" er vist som et punkt`,
+        detail: `skjult "${item.title}" er vist som et kort`,
       });
     }
   }

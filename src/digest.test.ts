@@ -11,8 +11,9 @@
 
 import { describe, expect, test } from 'bun:test';
 import type { AulaClient } from './client.ts';
-import { withFullMessages } from './digest.ts';
-import type { Message, ThreadSummary } from './types.ts';
+import { buildDigest, withFullMessages } from './digest.ts';
+import type { Family } from './family.ts';
+import type { Message, Post, ThreadSummary } from './types.ts';
 
 function summary(id: number, subject: string): ThreadSummary {
   return { id, subject, read: true, sensitive: false, startedTime: '2026-08-20T08:00:00+02:00' };
@@ -58,5 +59,59 @@ describe('withFullMessages', () => {
       summary(5003, 'Til alle forældre'),
     ]);
     expect(threads.map((t) => t.messagesUnavailable)).toEqual([false, true, false]);
+  });
+});
+
+describe('buildDigest', () => {
+  test('the brief-sized 60-day window carries all 45 in-window posts', async () => {
+    const posts: Post[] = Array.from({ length: 45 }, (_, index) => ({
+      id: index + 1,
+      title: `Opslag ${index + 1}`,
+      publishAt: `2026-08-${String(13 - Math.floor(index / 10)).padStart(2, '0')}T08:00:00+02:00`,
+      content: { html: `Indhold ${index + 1}` },
+    }));
+    const family: Family = {
+      guardian: {
+        profileId: 1,
+        userId: 'guardian',
+        name: 'Guardian',
+        institutionProfileIds: [10],
+      },
+      children: [],
+      institutions: [],
+      postInstitutionProfileIds: [10],
+      childInstitutionProfileIds: [],
+      institutionCodes: [],
+      widgets: [],
+      isSteppedUp: true,
+      mitidUsername: undefined,
+    };
+    const fake = {
+      async getThreads() {
+        return { threads: [], moreMessagesExist: false };
+      },
+      async getPosts(opts: { index: number; limit: number }) {
+        const page = posts.slice(opts.index, opts.index + opts.limit);
+        return { posts: page, hasMorePosts: opts.index + opts.limit < posts.length };
+      },
+      async getCalendarEvents() {
+        return [];
+      },
+      async getNotifications() {
+        return [];
+      },
+      async getDailyPresence() {
+        return [];
+      },
+    } as unknown as AulaClient;
+
+    const digest = await buildDigest(fake, {
+      days: 60,
+      isoWeek: '2026-W33',
+      family,
+      now: new Date('2026-08-13T06:30:00+02:00'),
+    });
+
+    expect(digest.posts).toHaveLength(45);
   });
 });

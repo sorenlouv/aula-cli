@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { briefInput, sourceItem } from '../testing/brief-fixtures.ts';
 import { installFakeClaude } from '../testing/fake-claude.ts';
 import {
+  extractCards,
+  extractionPayload,
   parseClaudeJson,
   parseJsonLoosely,
   runClaude,
@@ -39,19 +41,40 @@ const INPUT: BriefInput = briefInput({
   items: [SOURCE],
 });
 
-const good = {
-  kind: 'bring',
-  title: 'Løbetøj med på mandag',
-  child: 'Viggo',
-  dueAt: '2026-08-17',
-  urgency: 'week',
-  quote: 'have løbetøj og sko med',
-  why: 'Fast ugentlig løbedag',
-  sourceKey: 'post:1',
-};
+describe('extractionPayload', () => {
+  test("carries Aula's important flag to the model", () => {
+    const [source] = extractionPayload({
+      ...INPUT,
+      items: [{ ...SOURCE, important: true }],
+    }).sources;
 
-/** Every source is owed a verdict; a well-formed answer carries one for post:1. */
-const verdicts = { relevance: { 'post:1': 'normal' } };
+    expect(source?.important).toBe(true);
+  });
+
+  test('keeps an action that appears after the former 4,000-character boundary', () => {
+    const text = `${'Baggrund. '.repeat(500)}Husk at aflevere sedlen senest fredag.`;
+    const [source] = extractionPayload({
+      ...INPUT,
+      items: [{ ...SOURCE, text }],
+    }).sources;
+
+    expect(text.length).toBeGreaterThan(4_000);
+    expect(source?.text).toBe(text);
+    expect(source?.textTruncated).toBe(false);
+    expect(source?.text).toContain('Husk at aflevere sedlen senest fredag.');
+  });
+
+  test('tells the model when an exceptional source was shortened', () => {
+    const text = 'x'.repeat(8_001);
+    const [source] = extractionPayload({
+      ...INPUT,
+      items: [{ ...SOURCE, text }],
+    }).sources;
+
+    expect(source?.textTruncated).toBe(true);
+    expect(source?.text.endsWith('…')).toBe(true);
+  });
+});
 
 describe('withPreferences', () => {
   const BASE = 'Du læser Aula-indhold.';
@@ -72,7 +95,7 @@ describe('withPreferences', () => {
 
   test('they never license invention — the rules above them still stand', () => {
     const out = withPreferences(BASE, ['alt fra skolen er vigtigt']);
-    expect(out).toContain('opfinde kilder, datoer eller citater');
+    expect(out).toContain('opfinde kilder eller datoer');
   });
 });
 
@@ -89,248 +112,183 @@ describe('parseJsonLoosely', () => {
 });
 
 describe('validateExtraction', () => {
-  test('keeps a well-formed signal', () => {
-    const result = validateExtraction(INPUT, {
-      topline: 'Rolig uge.',
-      signals: [good],
-      ...verdicts,
-    });
+  const POST_2: SourceItem = sourceItem({
+    key: 'post:2',
+    title: 'Overnatning for Myretuen d. 11/9',
+    text: 'Vi afholder overnatningen fredag den 11. september efter lukketid.',
+    at: '2026-07-03T08:13:00+00:00',
+    groups: ['Myretuen'],
+  });
+  const DENTIST: SourceItem = sourceItem({
+    key: 'cal:far@eksempel.dk:dentist:2026-08-14T13:30:00+02:00',
+    kind: 'personal',
+    title: 'Tandlæge',
+    text: 'Tandlæge · kl. 13:30–14:15 · Fra kalenderen «Familien»',
+    at: '2026-08-14T13:30:00',
+    audience: 'family',
+  });
+  const input: BriefInput = { ...INPUT, items: [SOURCE, POST_2, DENTIST] };
+
+  const good = {
+    title: 'Løbetøj med til Viggo på mandag',
+    summary: 'Myretuen har fast løbedag om mandagen; tøj og sko skal være til at løbe i.',
+    children: ['Viggo'],
+    date: '2026-08-17',
+    needsAction: true,
+    reason: 'Noget Viggo skal have med; rettet mod hans egen stue.',
+    sourceKeys: ['post:1'],
+  };
+  const answer = (extra: Record<string, unknown> = {}) => ({
+    topline: 'Løbetøj mandag.',
+    cards: [good],
+    childSummaries: { Viggo: 'Løbedag mandag.' },
+    hidden: [],
+    ...extra,
+  });
+
+  test('keeps a well-formed card with every field', () => {
+    const result = validateExtraction(input, answer());
     expect(result.problems).toEqual([]);
-    expect(result.signals).toHaveLength(1);
-    expect(result.signals[0]?.origin).toBe('model');
-    expect(result.topline).toBe('Rolig uge.');
-  });
-
-  test('drops a signal whose title asserts a date no source supports', () => {
-    const result = validateExtraction(INPUT, {
-      signals: [{ ...good, title: 'Løbetøj med — aflever senest søndag 24/9' }],
+    expect(result.cards).toHaveLength(1);
+    expect(result.cards[0]).toMatchObject({
+      id: 'model:0',
+      title: good.title,
+      summary: good.summary,
+      children: ['Viggo'],
+      date: '2026-08-17',
+      needsAction: true,
+      reason: good.reason,
+      sourceKeys: ['post:1'],
+      origin: 'model',
     });
-    expect(result.signals).toHaveLength(0);
-    expect(result.problems[0]).toContain('dato uden kilde');
-    expect(result.problems[0]).toContain('søndag');
+    expect(result.topline).toBe('Løbetøj mandag.');
+    expect(result.childSummaries).toEqual({ Viggo: 'Løbedag mandag.' });
   });
 
-  test('drops a signal whose dueAt nothing grounds', () => {
-    // 2026-08-19 is a Wednesday; the source speaks only of mandag.
-    const result = validateExtraction(INPUT, { signals: [{ ...good, dueAt: '2026-08-19' }] });
-    expect(result.signals).toHaveLength(0);
-    expect(result.problems[0]).toContain('ingen støtte');
-  });
+  test('normalises enum values whose capitalization changed', () => {
+    const result = validateExtraction(
+      input,
+      answer({
+        cards: [{ ...good, sourceKeys: ['POST:1'], children: ['vIGGO'] }],
+        hidden: ['POST:2'],
+      }),
+    );
 
-  test('a title may echo the weekday of its own grounded dueAt', () => {
-    const result = validateExtraction(INPUT, { signals: [good], ...verdicts });
-    expect(result.problems).toEqual([]); // "på mandag" + dueAt on a Monday
-  });
-
-  test('keeps a verdict for a known source', () => {
-    const result = validateExtraction(INPUT, { signals: [good], relevance: { 'post:1': 'high' } });
-    expect(result.relevance).toEqual({ 'post:1': 'high' });
     expect(result.problems).toEqual([]);
+    expect(result.cards[0]?.sourceKeys).toEqual(['post:1']);
+    expect(result.cards[0]?.children).toEqual(['Viggo']);
+    expect(result.hidden).toEqual(['post:2']);
   });
 
-  test('a verdict outside the four words reads as normal and is reported for repair', () => {
-    const result = validateExtraction(INPUT, {
-      signals: [good],
-      relevance: { 'post:1': 'meget', 'post:999': 'high' },
-    });
-    expect(result.relevance).toEqual({ 'post:1': 'normal' });
-    expect(result.problems).toEqual([
-      'relevance.post:1: "meget" er ikke hide|low|normal|high',
-      'relevance: ukendt sourceKey "post:999"',
-    ]);
+  test('a card may gather several sources, and its date may come from any of them', () => {
+    // The July post has the date; the August post has the news. One card.
+    const merged = {
+      ...good,
+      title: 'Overnatning for Myretuen 11/9',
+      date: '2026-09-11',
+      sourceKeys: ['post:1', 'post:2'],
+    };
+    const result = validateExtraction(input, answer({ cards: [merged] }));
+    expect(result.problems).toEqual([]);
+    expect(result.cards[0]?.sourceKeys).toEqual(['post:1', 'post:2']);
+    expect(result.cards[0]?.date).toBe('2026-09-11');
   });
 
-  test('a missing verdict map is a problem worth the retry; an empty input is owed none', () => {
-    // The family's list reaches the ranking through these verdicts and
-    // nothing else, so an answer without them has skipped the question.
-    const without = validateExtraction(INPUT, { signals: [good] });
-    expect(without.relevance).toEqual({});
-    expect(without.problems).toEqual(['relevance: mangler for post:1']);
-    expect(validateExtraction(briefInput({ items: [] }), { signals: [] }).problems).toEqual([]);
+  test('drops a card whose date no source supports', () => {
+    const result = validateExtraction(input, answer({ cards: [{ ...good, date: '2026-09-24' }] }));
+    expect(result.cards).toEqual([]);
+    expect(result.problems.some((p) => p.includes('2026-09-24') && p.includes('belæg'))).toBe(true);
   });
 
-  test('a partial verdict map reports every source the model failed to rank', () => {
-    const two = briefInput({ ...INPUT, items: [SOURCE, { ...SOURCE, key: 'post:2' }] });
-    const result = validateExtraction(two, { signals: [], relevance: { 'post:2': 'hide' } });
-    expect(result.relevance).toEqual({ 'post:2': 'hide' });
-    expect(result.problems).toEqual(['relevance: mangler for post:1']);
+  test('drops a card that names a date in its text that no source supports', () => {
+    const invented = { ...good, summary: 'Husk løbetøj — og tilmelding senest 24/9.' };
+    const result = validateExtraction(input, answer({ cards: [invented] }));
+    expect(result.cards).toEqual([]);
+    expect(result.problems.some((p) => p.includes('24/9'))).toBe(true);
   });
 
-  test('every personal calendar entry is owed its own model verdict', () => {
-    const first = sourceItem({
-      key: 'cal:family:dentist:2026-08-14T13:30:00+02:00',
-      kind: 'personal',
-      title: 'Tandlæge kl. 13:30–14:15',
-      text: 'Tandlæge · 13:30–14:15 · Fra kalenderen «Familie»',
-      at: '2026-08-14T13:30:00',
-      audience: 'family',
-    });
-    const second = { ...first, key: 'cal:family:playdate:2026-08-15T10:00:00+02:00' };
-    const calendarInput = briefInput({ items: [first, second] });
-    const complete = validateExtraction(calendarInput, {
-      signals: [],
-      relevance: { [first.key]: 'high', [second.key]: 'normal' },
-    });
-    expect(complete.problems).toEqual([]);
-    expect(complete.relevance).toEqual({ [first.key]: 'high', [second.key]: 'normal' });
-
-    const partial = validateExtraction(calendarInput, {
-      signals: [],
-      relevance: { [first.key]: 'high' },
-    });
-    expect(partial.problems).toEqual([`relevance: mangler for ${second.key}`]);
+  test('a date in the text is fine when any of the card’s sources carries it', () => {
+    const merged = {
+      ...good,
+      summary: 'Løbedag mandag, og overnatning fredag den 11. september.',
+      sourceKeys: ['post:1', 'post:2'],
+    };
+    expect(validateExtraction(input, answer({ cards: [merged] })).problems).toEqual([]);
   });
 
-  test('nulls a topline with an invented date and reports it', () => {
-    const result = validateExtraction(INPUT, {
-      topline: 'Husk mødet på fredag.',
-      signals: [good],
-    });
+  test('a card may echo its own grounded date as a weekday', () => {
+    // 2026-08-17 is a Monday; "mandag" is exactly what the card is about.
+    const echoed = { ...good, title: 'Løbetøj med mandag' };
+    expect(validateExtraction(input, answer({ cards: [echoed] })).problems).toEqual([]);
+  });
+
+  test('a timestamp is not a date', () => {
+    const result = validateExtraction(
+      input,
+      answer({ cards: [{ ...good, date: '2026-08-17T09:00:00+02:00' }] }),
+    );
+    // The schema enforces `format: date`; this is the belt to its braces.
+    expect(result.cards).toHaveLength(1);
+    expect(result.cards[0]?.date).toBe('2026-08-17');
+  });
+
+  test('refuses a card that cites an unknown source, or none', () => {
+    for (const sourceKeys of [['post:404'], []]) {
+      const result = validateExtraction(input, answer({ cards: [{ ...good, sourceKeys }] }));
+      expect(result.cards).toEqual([]);
+      expect(result.problems.some((p) => p.includes('sourceKeys'))).toBe(true);
+    }
+  });
+
+  test('refuses a card made of an appointment — the page lists those itself', () => {
+    const result = validateExtraction(
+      input,
+      answer({ cards: [{ ...good, sourceKeys: [DENTIST.key] }] }),
+    );
+    expect(result.cards).toEqual([]);
+    expect(result.problems.some((p) => p.includes('kalenderaftale'))).toBe(true);
+  });
+
+  test('a child the family does not have is dropped from the card, not the card', () => {
+    const result = validateExtraction(
+      input,
+      answer({ cards: [{ ...good, children: ['Viggo', 'Ida'] }] }),
+    );
+    expect(result.cards[0]?.children).toEqual(['Viggo']);
+  });
+
+  test('a card with no title is dropped', () => {
+    const result = validateExtraction(input, answer({ cards: [{ ...good, title: '  ' }] }));
+    expect(result.cards).toEqual([]);
+  });
+
+  test('the topline and the per-child lines are checked against every source', () => {
+    const result = validateExtraction(
+      input,
+      answer({ topline: 'Fest 24/9!', childSummaries: { Viggo: 'Ferie i uge 44.' } }),
+    );
     expect(result.topline).toBeNull();
-    expect(result.signals).toHaveLength(1);
-    expect(result.problems.some((p) => p.startsWith('topline'))).toBe(true);
-  });
-
-  test('drops a child summary with an invented date', () => {
-    const result = validateExtraction(INPUT, {
-      signals: [good],
-      childSummaries: { Viggo: 'God uge — husk festen 24/9.' },
-    });
     expect(result.childSummaries).toEqual({});
-    expect(result.problems.some((p) => p.startsWith('childSummaries.Viggo'))).toBe(true);
+    expect(result.problems.filter((p) => p.includes('dato uden belæg'))).toHaveLength(2);
+    // The cards were fine; only the two lines were dropped.
+    expect(result.cards).toHaveLength(1);
   });
 
-  test('drops a signal whose quote is not literally in the source', () => {
-    // The whole point: a plausible sentence the teacher never wrote.
-    const result = validateExtraction(INPUT, {
-      signals: [{ ...good, quote: 'Husk gummistøvler og regntøj på fredag' }],
-    });
-    expect(result.signals).toHaveLength(0);
-    expect(result.problems[0] ?? '').toContain('ordret');
+  test('hidden keeps only keys that name a source', () => {
+    const result = validateExtraction(
+      input,
+      answer({ hidden: ['post:2', DENTIST.key, 'post:404'] }),
+    );
+    expect(result.hidden).toEqual(['post:2', DENTIST.key]);
   });
 
-  test('tolerates whitespace differences in an otherwise literal quote', () => {
-    const result = validateExtraction(INPUT, {
-      signals: [{ ...good, quote: 'have  løbetøj og sko\nmed' }],
-    });
-    expect(result.signals).toHaveLength(1);
-  });
-
-  test('drops a signal citing a source that was never supplied', () => {
-    const result = validateExtraction(INPUT, { signals: [{ ...good, sourceKey: 'post:999' }] });
-    expect(result.signals).toHaveLength(0);
-    expect(result.problems[0] ?? '').toContain('ukendt sourceKey');
-  });
-
-  test('drops an unparseable date rather than guessing', () => {
-    const result = validateExtraction(INPUT, { signals: [{ ...good, dueAt: 'på mandag' }] });
-    expect(result.signals).toHaveLength(0);
-    expect(result.problems[0] ?? '').toContain('ikke en dato');
-  });
-
-  test('drops an impossible ISO date instead of letting JavaScript roll it over', () => {
-    const result = validateExtraction(INPUT, { signals: [{ ...good, dueAt: '2026-02-31' }] });
-    expect(result.signals).toHaveLength(0);
-    expect(result.problems[0] ?? '').toContain('ikke en dato');
-  });
-
-  test('ignores a child name that is not one of ours', () => {
-    const result = validateExtraction(INPUT, { signals: [{ ...good, child: 'Birk' }] });
-    expect(result.signals[0]?.child).toBeNull();
-  });
-
-  test('falls back to safe values for unknown kind and urgency', () => {
-    const result = validateExtraction(INPUT, {
-      signals: [{ ...good, kind: 'panik', urgency: 'straks' }],
-    });
-    expect(result.signals[0]?.kind).toBe('info');
-    expect(result.signals[0]?.urgency).toBe('later');
-  });
-
-  test('keeps only child summaries for real children', () => {
-    const result = validateExtraction(INPUT, {
-      signals: [],
-      childSummaries: { Viggo: 'Har løbedag om mandagen.', Ukendt: 'Findes ikke.' },
-    });
-    expect(Object.keys(result.childSummaries)).toEqual(['Viggo']);
-  });
-
-  test('survives complete rubbish without throwing', () => {
-    expect(validateExtraction(INPUT, null).signals).toEqual([]);
-    expect(validateExtraction(INPUT, { signals: 'nope' }).signals).toEqual([]);
-    expect(validateExtraction(INPUT, { signals: [null] }).signals).toEqual([]);
-  });
-
-  describe('conversation summaries', () => {
-    const message = (from: string, at: string, text: string) => ({ from, at, text });
-    const thread = (count: number) =>
-      sourceItem({
-        key: 'thread:9',
-        kind: 'thread',
-        title: 'Møde om Viggo',
-        text: 'Møde om Viggo\n\nLone: Kan I mødes?\n\nJer: Ja.\n\nLone: Fint.',
-        conversation: {
-          messages: Array.from({ length: count }, (_, i) =>
-            message('Yrsa Storm', `2026-08-1${i}T09:00:00`, `Besked ${i}`),
-          ),
-          total: count,
-          truncated: false,
-        },
-      });
-
-    const withThread = (count: number) => briefInput({ ...INPUT, items: [SOURCE, thread(count)] });
-
-    test('keeps a summary for a thread that is genuinely an exchange', () => {
-      const result = validateExtraction(withThread(4), {
-        signals: [],
-        relevance: { 'post:1': 'normal', 'thread:9': 'normal' },
-        conversationSummaries: { 'thread:9': '  Yrsa foreslår et møde; I har sagt ja.  ' },
-      });
-      expect(result.conversationSummaries).toEqual({
-        'thread:9': 'Yrsa foreslår et møde; I har sagt ja.',
-      });
-      expect(result.problems).toEqual([]);
-    });
-
-    test('refuses to summarise something that is not a conversation', () => {
-      const result = validateExtraction(withThread(1), {
-        signals: [],
-        ...verdicts,
-        conversationSummaries: { 'thread:9': 'Yrsa skrev en besked.' },
-      });
-      expect(result.conversationSummaries).toEqual({});
-      expect(result.problems.join(' ')).toContain('er ikke en samtale');
-    });
-
-    test('refuses a summary for a source that was never supplied', () => {
-      const result = validateExtraction(withThread(4), {
-        signals: [],
-        ...verdicts,
-        conversationSummaries: { 'thread:404': 'Noget helt andet.' },
-      });
-      expect(result.conversationSummaries).toEqual({});
-      expect(result.problems.join(' ')).toContain('ukendt sourceKey');
-    });
-
-    test('drops a summary that asserts a date nothing supports', () => {
-      const result = validateExtraction(withThread(4), {
-        signals: [],
-        ...verdicts,
-        conversationSummaries: { 'thread:9': 'Mødet er aftalt til den 3. november.' },
-      });
-      expect(result.conversationSummaries).toEqual({});
-      expect(result.problems.join(' ')).toContain('dato uden kilde');
-    });
-
-    test('is empty, not absent, when the model said nothing about threads', () => {
-      expect(validateExtraction(INPUT, { signals: [], ...verdicts }).conversationSummaries).toEqual(
-        {},
-      );
-    });
+  test('a non-object answer is one problem, not a crash', () => {
+    expect(validateExtraction(input, 'nej').problems).toEqual(['svaret var ikke et objekt']);
+    expect(validateExtraction(input, { topline: 'x' }).problems).toContain(
+      '"cards" mangler eller er ikke en liste',
+    );
   });
 });
-
-// --------------------------------------------------------------- subprocess
 
 describe('the claude subprocess', () => {
   const VALID = 'https://claude.ai/code/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
@@ -361,14 +319,30 @@ describe('the claude subprocess', () => {
     process.env.FAKE_CLAUDE_MODE = mode;
     process.env.FAKE_CLAUDE_LOG = log;
     if (result !== undefined) process.env.FAKE_CLAUDE_RESULT_JSON = JSON.stringify(result);
-    return { calls: () => readFileSync(log, 'utf8').split('\n').filter(Boolean) };
+    const ownLog = log;
+    return {
+      log: ownLog,
+      calls: () => readFileSync(ownLog, 'utf8').split('\n').filter(Boolean),
+    };
+  }
+
+  function fakeSequence(results: string[]) {
+    const f = fake('ok');
+    const file = `${f.log}.results`;
+    writeFileSync(file, results.map((result) => JSON.stringify(result)).join('\n'));
+    return f;
   }
 
   describe('parseClaudeJson', () => {
     test('reads the result envelope, last JSON line wins', () => {
       const out =
         'some warning first\n{"type":"result","is_error":false,"result":"hello","permission_denials":[{"tool_name":"Bash"}]}\n';
-      expect(parseClaudeJson(out)).toEqual({ text: 'hello', isError: false, denials: ['Bash'] });
+      expect(parseClaudeJson(out)).toEqual({
+        text: 'hello',
+        isError: false,
+        structured: undefined,
+        denials: ['Bash'],
+      });
     });
 
     test('is null when stdout is not an envelope at all', () => {
@@ -416,13 +390,33 @@ describe('the claude subprocess', () => {
   describe('runClaude', () => {
     test('returns the envelope text, tools off', async () => {
       const f = fake('ok', '{"signals":[]}');
-      expect(await runClaude('instr', '{}', { timeoutMs: 5_000 })).toBe('{"signals":[]}');
+      expect((await runClaude('instr', '{}', { timeoutMs: 5_000 })).text).toBe('{"signals":[]}');
       expect(f.calls()[0]).toContain('--tools  --strict-mcp-config --output-format json');
+    });
+
+    test('a schema is handed to the CLI, and its parsed answer is preferred', async () => {
+      // The flag is what makes the answer a forced tool call; `structured_output`
+      // is that call's parameters, already checked against the schema.
+      const f = fake('ok', '{"signals":[]}');
+      const reply = await runClaude('instr', '{}', {
+        timeoutMs: 5_000,
+        schema: { type: 'object' },
+      });
+      expect(f.calls()[0]).toContain('--json-schema');
+      expect(reply.text).toBe('{"signals":[]}');
+    });
+
+    test('no schema means no flag, so the plain call is unchanged', async () => {
+      const f = fake('ok', '{"signals":[]}');
+      await runClaude('instr', '{}', { timeoutMs: 5_000 });
+      expect(f.calls()[0]).not.toContain('--json-schema');
     });
 
     test('tries once more after a stall, and only after a stall', async () => {
       const f = fake('stall-then-ok', 'second');
-      expect(await runClaude('instr', '{}', { timeoutMs: 300, graceMs: 200 })).toBe('second');
+      expect((await runClaude('instr', '{}', { timeoutMs: 300, graceMs: 200 })).text).toBe(
+        'second',
+      );
       expect(f.calls()).toHaveLength(2);
     });
 
@@ -442,7 +436,57 @@ describe('the claude subprocess', () => {
 
     test('the url the fake echoes back survives the envelope untouched', async () => {
       fake('ok', VALID);
-      expect(await runClaude('instr', '{}', { timeoutMs: 5_000 })).toBe(VALID);
+      expect((await runClaude('instr', '{}', { timeoutMs: 5_000 })).text).toBe(VALID);
+    });
+  });
+
+  describe('extractCards corrective retry', () => {
+    const sources = Array.from({ length: 10 }, (_, index) =>
+      sourceItem({ key: `post:${index}`, title: `Opslag ${index}`, text: `Indhold ${index}` }),
+    );
+    const input = briefInput({ items: sources });
+    const modelCard = (index: number) => ({
+      title: `Kort ${index}`,
+      summary: `Indhold ${index}`,
+      children: [],
+      date: null,
+      needsAction: false,
+      reason: 'Relevant.',
+      sourceKeys: [`post:${index}`],
+    });
+    const answer = (cards: unknown[]) => ({
+      topline: 'Kort overblik.',
+      cards,
+      childSummaries: {},
+      hidden: [],
+    });
+
+    test('an empty retry cannot replace nine valid cards', async () => {
+      fakeSequence([
+        JSON.stringify(
+          answer([
+            ...Array.from({ length: 9 }, (_, index) => modelCard(index)),
+            { ...modelCard(9), date: '2026-09-24' },
+          ]),
+        ),
+        JSON.stringify(answer([])),
+      ]);
+
+      const result = await extractCards(input, { useCache: false, timeoutMs: 5_000 });
+
+      expect(result.cards).toHaveLength(9);
+    });
+
+    test('a retry with fewer problems and more valid cards wins', async () => {
+      fakeSequence([
+        JSON.stringify(answer([modelCard(0), { ...modelCard(9), date: '2026-09-24' }])),
+        JSON.stringify(answer([modelCard(0), modelCard(1)])),
+      ]);
+
+      const result = await extractCards(input, { useCache: false, timeoutMs: 5_000 });
+
+      expect(result.cards.map((card) => card.title)).toEqual(['Kort 0', 'Kort 1']);
+      expect(result.problems).toEqual([]);
     });
   });
 });
