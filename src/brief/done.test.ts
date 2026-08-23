@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { briefInput, card, rankedBrief, sourceItem } from '../testing/brief-fixtures.ts';
-import { doneKeys } from './done.ts';
+import { DONE_SCRIPT, doneKeys } from './done.ts';
 import { renderPage } from './render.ts';
 import { validatePage } from './validate.ts';
 
@@ -90,5 +90,58 @@ describe('the rendered page', () => {
     // future one cannot ship a dead tick unnoticed.
     const stripped = html.replace(/ data-done-keys="[^"]*"/g, '');
     expect(validatePage(stripped, brief).map((v) => v.rule)).toContain('dismissible');
+  });
+});
+
+describe('the page behaviour', () => {
+  test('viewing a regrouped done card does not renew or widen its stored keys', () => {
+    const originalStamp = new Date().toISOString();
+    let stored = JSON.stringify({ 'post:13311009|2026-08-17': originalStamp });
+    const listeners = new Map<string, () => void>();
+    const classes = new Set<string>();
+    const classList = {
+      contains: (name: string) => classes.has(name),
+      remove: (name: string) => classes.delete(name),
+      toggle: (name: string, force?: boolean) => {
+        const enabled = force ?? !classes.has(name);
+        if (enabled) classes.add(name);
+        else classes.delete(name);
+        return enabled;
+      },
+    };
+    const tick = {
+      addEventListener: (name: string, listener: () => void) => listeners.set(name, listener),
+      setAttribute: () => undefined,
+    };
+    const card = {
+      classList,
+      getAttribute: () => 'post:13311009|2026-08-17 thread:88|2026-08-17',
+      querySelector: () => tick,
+    };
+    const count = { textContent: '' };
+    const empty = { hidden: true };
+    const section = {
+      classList: {
+        contains: () => false,
+        remove: () => undefined,
+        toggle: () => undefined,
+      },
+      querySelectorAll: () => [card],
+      querySelector: (selector: string) =>
+        selector === '[data-count]' ? count : selector === '[data-empty]' ? empty : null,
+    };
+    const document = { querySelectorAll: () => [section] };
+    const localStorage = {
+      getItem: () => stored,
+      setItem: (_key: string, value: string) => {
+        stored = value;
+      },
+    };
+
+    new Function('document', 'localStorage', DONE_SCRIPT)(document, localStorage);
+
+    expect(JSON.parse(stored)).toEqual({ 'post:13311009|2026-08-17': originalStamp });
+    expect(classes.has('is-done')).toBe(true);
+    expect(listeners.has('click')).toBe(true);
   });
 });

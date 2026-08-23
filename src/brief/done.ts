@@ -121,18 +121,22 @@ export const DONE_SCRIPT = `
     return (card.getAttribute('data-done-keys') || '').split(' ').filter(Boolean);
   }
 
-  function setDone(card, done) {
-    var stamp = new Date().toISOString();
-    keysOf(card).forEach(function (key) {
-      if (done) state[key] = stamp; else delete state[key];
-    });
-    save();
+  function markDone(card, done) {
     card.classList.toggle('is-done', done);
     var tick = card.querySelector('.tick');
     if (tick) {
       tick.setAttribute('aria-pressed', done ? 'true' : 'false');
       tick.setAttribute('aria-label', done ? 'Fortryd — vis igen' : 'Markér som klaret');
     }
+  }
+
+  function setDone(card, done) {
+    var stamp = new Date().toISOString();
+    keysOf(card).forEach(function (key) {
+      if (done) state[key] = stamp; else delete state[key];
+    });
+    save();
+    markDone(card, done);
   }
 
   function refresh(section) {
@@ -160,7 +164,9 @@ export const DONE_SCRIPT = `
 
   [].slice.call(document.querySelectorAll('[data-section]')).forEach(function (section) {
     [].slice.call(section.querySelectorAll('[data-done-keys]')).forEach(function (card) {
-      if (keysOf(card).some(function (key) { return !!state[key]; })) setDone(card, true);
+      // Restoring a visual state must not renew its timestamp or add keys from
+      // a card that the model grouped differently today. Only a click writes.
+      if (keysOf(card).some(function (key) { return !!state[key]; })) markDone(card, true);
       var tick = card.querySelector('.tick');
       if (!tick) return;
       tick.addEventListener('click', function () {
