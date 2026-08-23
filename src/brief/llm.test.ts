@@ -50,6 +50,30 @@ describe('extractionPayload', () => {
 
     expect(source?.important).toBe(true);
   });
+
+  test('keeps an action that appears after the former 4,000-character boundary', () => {
+    const text = `${'Baggrund. '.repeat(500)}Husk at aflevere sedlen senest fredag.`;
+    const [source] = extractionPayload({
+      ...INPUT,
+      items: [{ ...SOURCE, text }],
+    }).sources;
+
+    expect(text.length).toBeGreaterThan(4_000);
+    expect(source?.text).toBe(text);
+    expect(source?.textTruncated).toBe(false);
+    expect(source?.text).toContain('Husk at aflevere sedlen senest fredag.');
+  });
+
+  test('tells the model when an exceptional source was shortened', () => {
+    const text = 'x'.repeat(8_001);
+    const [source] = extractionPayload({
+      ...INPUT,
+      items: [{ ...SOURCE, text }],
+    }).sources;
+
+    expect(source?.textTruncated).toBe(true);
+    expect(source?.text.endsWith('…')).toBe(true);
+  });
 });
 
 describe('withPreferences', () => {

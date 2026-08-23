@@ -399,14 +399,17 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
   return { topline, cards, childSummaries, hidden, problems };
 }
 
-const PROMPT_TEXT_LIMIT = 4000;
+// A 60-day live sample on 2026-08-23 contained 30 posts; the longest was 2,897
+// characters. Eight thousand keeps substantial headroom without letting an
+// anomalous source dominate the prompt.
+const PROMPT_TEXT_LIMIT = 8000;
 
 /**
  * A source's text, trimmed to something a prompt can carry.
  *
  * A conversation is trimmed from the **front**, everything else from the back.
  * Threads are ordered oldest-first (see `collect.ts`), so keeping the first
- * 4000 characters of a long exchange hands the model the opening pleasantries
+ * 8000 characters of a long exchange hands the model the opening pleasantries
  * and hides the question that was asked this morning. A post, by contrast, puts
  * its point at the top.
  *
@@ -444,6 +447,7 @@ export function extractionPayload(input: BriefInput) {
       audience: item.audience,
       important: item.important,
       ...(item.conversation ? { messageCount: item.conversation.messages.length } : {}),
+      textTruncated: item.text.length > PROMPT_TEXT_LIMIT,
       text: promptText(item),
     })),
   };
@@ -559,7 +563,7 @@ Du afgør tre ting:
 Du afgør prioriteringen, men ikke sidens kronologiske visningsrækkefølge eller udseende.
 
 Sådan læser du en kilde:
-- "text" er kildens fulde tekst og den eneste autoritet på, hvad der står. Alt du skriver, skal kunne læses dér; læseren kan altid åbne kilden under kortet.
+- "text" er kildens tekst og den eneste autoritet på, hvad der står. Når "textTruncated" er false, er den fuld; når feltet er true, er teksten forkortet ved ellipsen. Alt du skriver, skal kunne læses i den tekst, du har fået; læseren kan altid åbne den fulde kilde under kortet.
 - "audience" er, hvor bredt kilden er sendt ud: "child" og "class" af nogen, der kender barnet; "institution" til hele skolen eller huset; "municipal" til alle forældre i kommunen. Et fingerpeg, ikke et svar.
 - "important" er Aulas eget vigtigt-flag på kilden. Det er et stærkt tegn, men indholdet er stadig autoriteten.
 - Kilder med type "personal" er forælderens egne kalenderaftaler. De bliver ikke til kort — siden viser dem selv. Brug dem ikke til at analysere sammenfald med skoleindhold, hævde en konflikt eller berolige om, at der ikke er en.
