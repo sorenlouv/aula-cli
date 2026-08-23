@@ -1,23 +1,17 @@
 /**
  * From cards to a page order.
  *
- * The model chooses the cards and says what each one is; this file decides
- * where they go, and it does so from the date alone. There is no score: a
- * list of five to ten cards is the model's ranking, expressed as a selection
- * rather than a number, and a page that sorts those by date is one a reader
- * can scan for "what is next" without learning a layout. An earlier version
+ * The model chooses the cards and puts them in priority order. Code keeps the
+ * first `CARD_CAP`, folds the rest, then sorts the kept cards by date for a
+ * page a reader can scan for "what is next" without learning a layout. An earlier version
  * scored every signal on audience, kind, urgency and relevance and tiered the
  * page from the arithmetic; it produced consistent briefs and unreadable ones,
  * and the consistency came from the sort, not from the numbers.
  *
- * Three things stay deterministic here because a model does not do them well
- * every morning:
+ * Two things stay deterministic here:
  *
- * - **The cap.** `CARD_CAP` cards render; anything past it is folded, least
- *   pressing first. If everything is a card, nothing is.
- * - **The `important` floor.** Aula's own flag is the school shouting. A
- *   flagged source no card covers gets a rule-made one, so a model that skims
- *   the mandatory sign-up cannot lose it.
+ * - **The cap.** `CARD_CAP` cards render; anything after them is folded. If
+ *   everything is a card, nothing is.
  * - **The rules fallback.** Without a model the Danish extractors make the
  *   cards: weaker titles, the matched sentence for a summary, but a page.
  */
@@ -85,20 +79,9 @@ function placementOf(date: string | null, today: string): Placement {
 }
 
 /**
- * How pressing a card is, for the cap only. Page order is chronological; this
- * decides which cards survive when there are too many. Lower is kept first.
- */
-function pressure(card: RankedCard): number {
-  if (card.placement === 'past') return 4;
-  if (card.placement === 'undated') return card.needsAction ? 2 : 3;
-  return card.needsAction ? 0 : 1;
-}
-
-/**
  * `model` is the model's cards, or null when it did not run. `hidden` is its
  * list of sources to keep off the page; `rules` are the extractors' cards,
- * which are the page when there is no model and the `important` floor when
- * there is.
+ * which are the page only when there is no model.
  */
 export function rank(
   input: BriefInput,
@@ -107,6 +90,7 @@ export function rank(
   const itemByKey = new Map(input.items.map((item) => [item.key, item]));
   const degraded: string[] = [];
   const hiddenKeys = new Set(cards.hidden.filter((key) => itemByKey.has(key)));
+  const modelRanks = new Map(cards.model?.map((card, index) => [card, index + 1]) ?? []);
 
   // Drop anything citing a source that is not in the input. The schema makes
   // this impossible on the model path; the check stays for the rules path and
@@ -120,61 +104,29 @@ export function rank(
     return false;
   };
 
-  // The model's cards are the cards. Rule cards fill in only where the model
-  // did not run — or, when it did, for an `important` source it left uncovered.
-  let chosen: Card[];
-  if (cards.model === null) {
-    chosen = dedupeRuleCards(cards.rules.filter(real));
-  } else {
-    chosen = cards.model.filter(real);
-    const covered = new Set(chosen.flatMap((card) => card.sourceKeys));
-    for (const item of input.items) {
-      if (!item.important || covered.has(item.key) || hiddenKeys.has(item.key)) continue;
-      const fromRules = dedupeRuleCards(
-        cards.rules.filter((card) => card.sourceKeys.includes(item.key)),
-      );
-      const floor: Card[] =
-        fromRules.length > 0
-          ? fromRules
-          : [
-              {
-                id: `rule:important:${item.key}`,
-                title: item.title,
-                summary: '',
-                children: item.childNames.map(firstName),
-                date: null,
-                needsAction: false,
-                reason: 'Aula har markeret den som vigtig.',
-                sourceKeys: [item.key],
-                origin: 'rule',
-              },
-            ];
-      chosen.push(...floor);
-      covered.add(item.key);
-    }
-  }
+  // The model's cards are the cards. Rules take over only when the model did
+  // not run; they never second-guess a model answer.
+  const chosen =
+    cards.model === null ? dedupeRuleCards(cards.rules.filter(real)) : cards.model.filter(real);
 
   const ranked: RankedCard[] = chosen.map((card) => ({
     ...card,
     placement: placementOf(card.date, input.today),
     sources: card.sourceKeys.map((key) => itemByKey.get(key)!),
+    modelRank: modelRanks.get(card) ?? null,
     reasons: [],
   }));
   for (const card of ranked) {
+    if (card.modelRank !== null) card.reasons.push(`model rank:${card.modelRank}`);
     card.reasons.push(`placement:${card.placement}`);
     if (card.origin === 'rule') card.reasons.push('rule-made');
     if (card.needsAction) card.reasons.push('needs action');
   }
 
   // ------------------------------------------------------------------ cap
-  // Least pressing first over the edge: past, then undated information, then
-  // undated actions, then dated information. Dated actions go last.
-  const byPressure = [...ranked].sort(
-    (a, b) =>
-      pressure(a) - pressure(b) || (a.date ?? '9999-99-99').localeCompare(b.date ?? '9999-99-99'),
-  );
-  const kept = new Set(byPressure.slice(0, CARD_CAP));
-  const folded = byPressure.slice(CARD_CAP);
+  // Model order is the ranking: code keeps the first N and folds the rest.
+  const kept = new Set(ranked.slice(0, CARD_CAP));
+  const folded = ranked.slice(CARD_CAP);
   for (const card of folded) card.reasons.push(`over CARD_CAP(${CARD_CAP}) → folded`);
 
   // ---------------------------------------------------------------- order
@@ -189,8 +141,8 @@ export function rank(
       const bd = b.date ?? '';
       if (a.placement === 'past') return bd.localeCompare(ad);
       if (ad !== bd) return ad.localeCompare(bd);
-      // Same day: what must be done before what is merely happening.
-      return Number(b.needsAction) - Number(a.needsAction);
+      // Stable sort: the model's priority survives within the same day.
+      return 0;
     });
 
   const covered = new Set(ranked.flatMap((card) => card.sourceKeys));

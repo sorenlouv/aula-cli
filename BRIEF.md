@@ -19,8 +19,8 @@ The model reads every source once and answers in a schema: the cards, finished
 — title, summary, the day to sort by, whether the family must do something, a
 reason, the sources — plus one topline, one line per child, and the sources to
 keep off the page. A local renderer draws that. The model decides **what the
-cards are and which sources matter**; the renderer decides nothing about
-content and the order is by date, in code.
+cards are, which sources matter, and their priority**; the renderer keeps the
+first twelve, folds the rest, and orders the kept cards by date.
 
 There used to be two calls: an extractor returning "signals" with a verbatim
 quote each, a scorer tiering them, and a second call ordering and rewording.
@@ -82,9 +82,8 @@ Sections render only when they have content, and never change order.
    appointment the model did not hide is in it. The fold's summary is what makes
    it useful shut: it names today's appointments, and those on any day that also
    carries a card — so the gymnastics at 17:10 is named beside the Wednesday of
-   the forældremøde. The model may also say so in a card's summary; nothing
-   forbids it. What the page itself never does is compute a clash or claim the
-   absence of one.
+   the forældremøde. Neither the model nor the page computes a clash or claims
+   the absence of one.
 4. **Per barn** — one card per child: check-in state, planned pickup, and the
    model's one calendar-like line for the child.
 5. **Galleri** — album tiles.
@@ -171,9 +170,9 @@ this*; *I never want to see this* is a preference.
 ```
 aula new [--days 60] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 
-  collect   →  BriefInput    reuse buildDigest + galleries; 60 days, old posts admitted only with a day ahead
+  collect   →  BriefInput    reuse buildDigest + galleries; every source in the 60-day window
   extract   →  cards         one model call, answered in a schema, dates grounded
-  rank      →  RankedBrief   by date; cap; the `important` floor; rules as fallback
+  rank      →  RankedBrief   first 12 by model priority; display by date; rules fallback
   render    →  HTML          the page, built locally; invariants checked
   publish   →  files         HTML (+ PDF/PNG), open, update state
 ```
@@ -186,7 +185,7 @@ aula new [--days 60] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 | `brief/rules.ts` | Danish date and obligation extractors |
 | `brief/llm.ts` | `claude -p` transport, the schema and prompt, the validator, retry, content-hash cache |
 | `brief/dates.ts` | Date grounding against the sources |
-| `brief/rank.ts` | Placement by date, the cap, the floors, the rules fallback |
+| `brief/rank.ts` | The model-order cap, placement by date, and the rules fallback |
 | `brief/render.ts` | The page |
 | `brief/validate.ts` | The invariant table above |
 | `brief/styles.ts` | Tokens and components |
@@ -197,24 +196,22 @@ aula new [--days 60] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 
 `AULA_BRIEF_MODEL` and `AULA_BRIEF_EFFORT` override the model for extract and
 deploy alike. Extract is where everything is decided, so a stronger model buys
-real judgment — but the pipeline must stay safe on whatever the user has, which
-is why `rank.ts` keeps a deterministic floor: an Aula-`important` source no card
-covers gets a rule-made card. The model can choose; it cannot lose the flagged.
+real judgment. Aula's `important` flag travels with the source as a strong cue;
+code does not add or reorder a card because of it.
 
 ### The history window
 
 Aula keeps years; a brief that read fourteen days of it missed the one post that
 mattered — the sleepover announced on 3 July, its date still six weeks ahead on
-23 August, and the only place that date stood. So `HISTORY_DAYS` is 60, and the
-question for a post or thread older than `RECENT_DAYS` (14) is not "is it
-recent" but "does it still name a day ahead": the Danish date extractors run
-over it in code, and it is admitted only if a date on or after today comes out.
-Measured on a real account, sixty days held ~30 posts of which the filter
-admitted one. The diary stays out; the date comes in. (`expiresAt` was the
-obvious alternative and is useless: the daycare sets nearly every post to expire
-a year out, so 126 of 145 were "live".) The footer says how many were left out.
+23 August, and the only place that date stood. So `HISTORY_DAYS` is 60 and every
+post and thread fetched inside that window reaches the model. A deterministic
+admission rule missed forms it did not parse — for example *Svar i uge 41* — so
+it could make the wider read silently narrower again. `expiresAt` is no useful
+substitute: the daycare sets nearly every post to expire a year out. Collection
+scales its row guard with the window and says so in *Datastatus* if even that
+guard is reached.
 
-### Extraction: the model writes the cards; the rules are the floor
+### Extraction: the model writes and prioritises the cards; rules are the fallback
 
 The deterministic pass is the fallback *and* the test oracle. It handles the
 forms Danish school communication uses — `d. 18/9`, `tirsdag den 1. september
@@ -222,8 +219,7 @@ forms Danish school communication uses — `d. 18/9`, `tirsdag den 1. september
 `tilmelding`, `medbring`, `forældremøde`, `afleveres` — and makes a card of each
 hit: the source's title, the matched sentence verbatim as the summary. Without a
 model, those are the page. With one, the model's cards are the cards and the
-rules serve the `important` floor only: a flagged source the model left
-uncovered gets its rule card, or a plain one naming the source.
+rules do not add, remove or reorder any of them.
 
 ### The model contract
 
@@ -249,10 +245,10 @@ instructions**, so a prompt edit takes effect on the next run rather than being
 masked by an entry the old wording produced.
 
 The prompt (`INSTRUCTIONS` in `llm.ts`) is in Danish, written with the user,
-and says: who reads and why; the three things the model decides (the cards, the
-topline and per-child lines, what to hide) and the one it does not (order); how
-to read a source (`text` is the only authority, `audience` is a cue not an
-answer, `personal` entries are the family's own and never cards); the built-in
+and says: who reads and why; the three things the model decides (the prioritised
+cards, the topline and per-child lines, what to hide); how
+to read a source (`text` is the only authority, `audience` and Aula's
+`important` flag are cues not answers, `personal` entries are the family's own and never cards); the built-in
 relevance cues in order — it asks something of the family about their child, it
 is addressed to few, the child or parent is named, a hard deadline — and that a
 past date is no longer something to act on; that the family's preferences
@@ -263,18 +259,14 @@ in the schema, not nowhere; `pattern` is undocumented where `format` is
 supported; and a description is written once — repeated per key it put
 thousands of tokens of one sentence into the schema.
 
-### Placement is deterministic
+### The model ranks; placement is deterministic
 
-The model chooses the cards; `rank.ts` decides where they go, from the date
-alone. There is no score. A list of five to ten cards *is* the model's ranking,
-expressed as a selection rather than a number, and a page that sorts those by
-date is one a reader can scan for "what is next" without learning a layout.
-Upcoming by date, then undated, then past (most recent first); on the same day,
-what must be done before what merely happens. `--explain` prints it.
-
-Three things stay in code because a model does not do them well every morning:
-the cap (`CARD_CAP`, 12 — past it the least pressing cards fold into *Øvrigt fra
-Aula*, dated actions last to go), the `important` floor, and the rules fallback.
+The model's list order is the ranking. `rank.ts` keeps the first `CARD_CAP` (12)
+and folds the rest into *Øvrigt fra Aula*. It then sorts the kept cards for
+display: upcoming by date, then undated, then past (most recent first). The sort
+is stable, so cards on the same day retain the model's order. `--explain` prints
+the one-based model rank beside each card. Without a model, rule-made cards are
+the list and code applies the same cap and date placement.
 
 ### Preferences: one list, and the built-in cues it tunes
 
@@ -310,13 +302,13 @@ børnene hører ikke til i oversigten"* works without a line of code — but the
 never become cards: the schema's `sourceKeys` enum leaves them out, and the
 page lists them in the fold described under *The page*.
 
-**The page never computes a clash and never says there is none**: an earlier
+**The brief never computes a clash and never says there is none**: an earlier
 version did, against registered pickup hours the family did not have and an
 Aula calendar that was empty most mornings, so it could only misfire. It puts
 the appointment where the reader can see it beside the school's day — the
 fold's summary names the ones sharing a day with a card — and lets the reader,
-who knows how far the dentist is, draw the conclusion. The model may note a
-same-afternoon overlap in a card's summary; that is its judgment to make.
+who knows how far the dentist is, draw the conclusion. The prompt explicitly
+forbids overlap, conflict and no-conflict claims.
 
 ## Delivery
 
@@ -369,8 +361,8 @@ run.
 ## Risks
 
 - **A miss is worse than the status quo.** Mitigated by never losing a source —
-  a card, the fold, or a counted hide — the datastatus footer, and the
-  `important` floor.
+  a card, the fold, or a counted hide — the datastatus footer, and the model
+  seeing Aula's `important` flag on every source.
 - **A generated layout can regress silently.** The page that looks fine and
   omitted the meeting is the dangerous one, not the ugly page — hence
   machine-checked invariants rather than instructions in a prompt.

@@ -67,11 +67,11 @@ describe('rank: placement', () => {
     expect(b.cards[0]?.placement).toBe('upcoming');
   });
 
-  test('on the same day, what must be done comes before what merely happens', () => {
+  test("on the same day, the model's order survives", () => {
     const info = card({ id: 'i', date: '2026-08-14', sourceKeys: ['post:1'] });
     const act = card({ id: 'x', date: '2026-08-14', needsAction: true, sourceKeys: ['thread:2'] });
     const b = rank(input([POST, THREAD]), { model: [info, act], rules: [], hidden: [] });
-    expect(b.cards.map((c) => c.id)).toEqual(['x', 'i']);
+    expect(b.cards.map((c) => c.id)).toEqual(['i', 'x']);
   });
 
   test('among past cards the most recent comes first', () => {
@@ -87,13 +87,11 @@ describe('rank: placement', () => {
 });
 
 describe('rank: the cap', () => {
-  test('past CARD_CAP the least pressing cards fold, and page order stays by date', () => {
+  test('the first CARD_CAP model cards stay, regardless of date or action', () => {
     const items: SourceItem[] = [];
     const cards: Card[] = [];
     for (let i = 0; i < CARD_CAP + 3; i++) {
       items.push(item({ key: `post:${i}` }));
-      // Alternate: dated actions, dated info, undated info — so the overflow
-      // has something less pressing to take.
       const shape = i % 3;
       cards.push(
         card({
@@ -108,8 +106,10 @@ describe('rank: the cap', () => {
     const brief = rank(input(items), { model: cards, rules: [], hidden: [] });
     expect(brief.cards).toHaveLength(CARD_CAP);
     expect(brief.folded).toHaveLength(3);
-    // Nothing that asks something of the family was folded while information was kept.
-    expect(brief.folded.every((c) => !c.needsAction)).toBe(true);
+    expect(new Set(brief.cards.map((c) => c.id))).toEqual(
+      new Set(cards.slice(0, CARD_CAP).map((c) => c.id)),
+    );
+    expect(brief.folded.map((c) => c.id)).toEqual(cards.slice(CARD_CAP).map((c) => c.id));
     expect(brief.folded.every((c) => c.reasons.some((r) => r.includes('CARD_CAP')))).toBe(true);
     // The kept cards are still in page order.
     const dated = brief.cards.filter((c) => c.placement === 'upcoming').map((c) => c.date);
@@ -159,61 +159,6 @@ describe('rank: what is not a card', () => {
     });
     expect(brief.cards).toEqual([]);
     expect(brief.degraded.some((d) => d.includes('Opdigtet'))).toBe(true);
-  });
-});
-
-describe('rank: the important floor', () => {
-  const flagged = item({
-    key: 'post:7',
-    title: 'Skolefoto — tilmelding',
-    text: 'Husk at tilmelde jeres barn senest fredag d. 14/8.',
-    at: '2026-08-12T09:00:00',
-    important: true,
-  });
-
-  test('an important source no card covers gets a rule card when the rules found something', () => {
-    const rules = cardsFromRules(input([flagged]), TODAY);
-    expect(rules.length).toBeGreaterThan(0);
-    const brief = rank(input([flagged, POST]), {
-      model: [card({ id: 'a', sourceKeys: ['post:1'] })],
-      rules,
-      hidden: [],
-    });
-    const floor = brief.cards.find((c) => c.sourceKeys.includes('post:7'));
-    expect(floor?.origin).toBe('rule');
-    expect(floor?.reasons).toContain('rule-made');
-  });
-
-  test('…and a plain one when they found nothing', () => {
-    const quiet = { ...flagged, text: 'Se vedhæftede.' };
-    const brief = rank(input([quiet, POST]), {
-      model: [card({ id: 'a', sourceKeys: ['post:1'] })],
-      rules: cardsFromRules(input([quiet]), TODAY),
-      hidden: [],
-    });
-    const floor = brief.cards.find((c) => c.sourceKeys.includes('post:7'));
-    expect(floor?.title).toBe('Skolefoto — tilmelding');
-    expect(floor?.reason).toContain('vigtig');
-  });
-
-  test('an important source the model covered needs no floor', () => {
-    const brief = rank(input([flagged]), {
-      model: [card({ id: 'a', sourceKeys: ['post:7'] })],
-      rules: cardsFromRules(input([flagged]), TODAY),
-      hidden: [],
-    });
-    expect(brief.cards).toHaveLength(1);
-    expect(brief.cards[0]?.origin).toBe('model');
-  });
-
-  test('an important source the model hid stays hidden — the flag does not override a hide', () => {
-    const brief = rank(input([flagged]), {
-      model: [],
-      rules: cardsFromRules(input([flagged]), TODAY),
-      hidden: ['post:7'],
-    });
-    expect(brief.cards).toEqual([]);
-    expect(brief.hidden.map((s) => s.key)).toEqual(['post:7']);
   });
 });
 
@@ -310,6 +255,8 @@ describe('explain', () => {
     expect(text).toContain('2 kort');
     expect(text).toContain('[upcoming] ! Skolefoto  (2026-08-17)');
     expect(text).toContain('[undated]   Møde');
+    expect(text).toContain('model rank:1');
+    expect(text).toContain('model rank:2');
     expect(text).toContain('kilder: post:1');
   });
 });

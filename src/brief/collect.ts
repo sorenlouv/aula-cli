@@ -17,7 +17,6 @@ import { buildDigest, collectAlbums, type ChildGroups, loadGroups } from './../d
 import { resolveFamily } from './../family.ts';
 import { loadPreferences } from './../preferences.ts';
 import { intervalLabel } from './dates.ts';
-import { extractDates, splitSentences } from './rules.ts';
 import type { Audience, BriefInput, HealthNote, PresenceRow, SourceItem } from './types.ts';
 
 const AULA_PORTAL = 'https://www.aula.dk/portal/#';
@@ -28,38 +27,8 @@ export type CollectOptions = {
   now?: Date;
 };
 
-/**
- * How far back the brief reads, and what an old post must carry to be shown.
- *
- * Aula keeps years; the brief used to read fourteen days of it and missed the
- * one post that mattered — the sleepover announced on 3 July, its date still
- * six weeks ahead on 23 August, and the only place that date stood. So the
- * read is sixty days, and the question for anything older than
- * `RECENT_DAYS` is not "is it recent" but "does it still name a day ahead".
- * A post from July saying *fredag den 11. september* is admitted; a post from
- * July saying what the children did on a Tuesday is not, and never reaches
- * the model. Measured on a real account: sixty days held ~30 posts, of which
- * the filter admitted one. The diary stays out; the date comes in.
- *
- * `expiresAt` was the obvious alternative and is useless here: the daycare
- * sets nearly every post to expire a year out, so 126 of 145 were "live".
- */
+/** How far back the brief reads. Every source in that window reaches the model. */
 export const HISTORY_DAYS = 60;
-export const RECENT_DAYS = 14;
-
-/** `true` when the text names a date on or after `today` — the admission test for an old post. */
-export function namesADayAhead(
-  item: Pick<SourceItem, 'title' | 'text' | 'at'>,
-  now: Date,
-): boolean {
-  const written = item.at ? new Date(item.at) : now;
-  const reference = Number.isNaN(written.getTime()) ? now : written;
-  const today = localIsoDate(now);
-  for (const sentence of splitSentences(`${item.title}\n\n${item.text}`)) {
-    if (extractDates(sentence, reference).some((iso) => iso >= today)) return true;
-  }
-  return false;
-}
 
 /**
  * How narrowly a piece of content was addressed.
@@ -257,30 +226,6 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
   const personal = await collectPersonal(now);
   items.push(...personal.items);
   health.push(...personal.health);
-
-  // ------------------------------------------------------- the older posts
-  // Posts and threads older than RECENT_DAYS stay only if they still name a
-  // day ahead — see HISTORY_DAYS. Said in the footer, like every other
-  // decision about what was read, so a missing old post is never a mystery.
-  const recentSince = new Date(now.getTime() - RECENT_DAYS * 86_400_000);
-  const isOld = (item: SourceItem) =>
-    (item.kind === 'post' || item.kind === 'thread') &&
-    item.at !== null &&
-    Date.parse(item.at) < recentSince.getTime();
-  const admitted = items.filter((item) => !isOld(item) || namesADayAhead(item, now));
-  const leftOut = items.length - admitted.length;
-  items.length = 0;
-  items.push(...admitted);
-  if (opts.days > RECENT_DAYS) {
-    health.push({
-      level: 'ok',
-      message:
-        `Læst ${opts.days} dage tilbage. ` +
-        (leftOut > 0
-          ? `${leftOut} ældre opslag og beskeder uden en kommende dato er udeladt.`
-          : 'Ingen ældre opslag er udeladt.'),
-    });
-  }
 
   // ------------------------------------------------------------ presence map
   const presenceByChild = new Map<string, PresenceRow>();

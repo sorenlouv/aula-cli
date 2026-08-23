@@ -154,8 +154,8 @@ export type BriefInput = {
  * are one card — and the page lists every one of them under *Læs mere*.
  *
  * The rules layer makes the same shape without a model: title from the source,
- * the matched sentence as the summary. It is the fallback and the floor, never
- * a peer — where the model has spoken, its cards are the cards.
+ * the matched sentence as the summary. It is the fallback, never a peer —
+ * where the model has spoken, its cards are the cards.
  */
 export type Card = {
   id: string;
@@ -191,6 +191,8 @@ export type Placement = 'upcoming' | 'undated' | 'past';
 export type RankedCard = Card & {
   placement: Placement;
   sources: SourceItem[];
+  /** One-based priority in the model's answer; null on the rules fallback. */
+  modelRank: number | null;
   /** Why it sits where it does — `--explain`. */
   reasons: string[];
 };
@@ -200,8 +202,8 @@ export type RankedBrief = {
   /** The cards, in page order: upcoming by date, then undated, then past. */
   cards: RankedCard[];
   /**
-   * Cards over `CARD_CAP`, least pressing first. Listed in the fold with their
-   * title and summary — demoted, never dropped.
+   * Cards after the first `CARD_CAP` in model priority order. Listed in the
+   * fold with their title and summary — demoted, never dropped.
    */
   folded: RankedCard[];
   /** Sources no card covers and the model did not hide: the fold. */

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { briefInput, sourceItem } from '../testing/brief-fixtures.ts';
 import { installFakeClaude } from '../testing/fake-claude.ts';
 import {
+  extractionPayload,
   parseClaudeJson,
   parseJsonLoosely,
   runClaude,
@@ -37,6 +38,17 @@ const INPUT: BriefInput = briefInput({
     isSteppedUp: true,
   },
   items: [SOURCE],
+});
+
+describe('extractionPayload', () => {
+  test("carries Aula's important flag to the model", () => {
+    const [source] = extractionPayload({
+      ...INPUT,
+      items: [{ ...SOURCE, important: true }],
+    }).sources;
+
+    expect(source?.important).toBe(true);
+  });
 });
 
 describe('withPreferences', () => {

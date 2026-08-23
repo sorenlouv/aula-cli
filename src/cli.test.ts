@@ -794,6 +794,7 @@ test('a remembered wish reaches the model that writes the overview', () => {
   const calls = readFileSync(log, 'utf8');
   assert.match(calls, /beskeder fra John \(Hjaltes far\) er altid vigtige/);
   assert.match(calls, /brugerens egen liste/);
+  assert.match(calls, /Brug dem ikke til at analysere sammenfald/);
   // …and so do the opinions the tool ships with, by the same route.
   assert.match(calls, /Fællesbeskeder til alle forældre i kommunen/);
 });
@@ -829,11 +830,10 @@ test("the model's cards and hides reach the page — the whole return leg", () =
 
   const result = box.run('new', '--no-deploy', '--no-open', '--text', '--explain');
   assert.equal(result.code, 0, result.stderr);
-  // The model's card, plus one the `important` floor adds for the fake school's
-  // unread thread that no card covered; one source hidden, as the model said.
-  assert.match(result.stdout, /2 kort, 1 kilde\(r\) skjult — modellen skrev kortene/);
-  assert.match(result.stderr, /2 kort, .* 1 skjult/);
-  assert.match(result.stderr, /rule-made/);
+  // Exactly the model's one card; one source hidden, as the model said.
+  assert.match(result.stdout, /1 kort, 1 kilde\(r\) skjult — modellen skrev kortene/);
+  assert.match(result.stderr, /1 kort, .* 1 skjult/);
+  assert.doesNotMatch(result.stderr, /rule-made/);
   const page = readFileSync(join(box.dir, 'brief', 'latest.html'), 'utf8');
   assert.match(page, /Svar Yrsa om mødet/);
   assert.match(page, /<summary>1 skjult<\/summary>/);

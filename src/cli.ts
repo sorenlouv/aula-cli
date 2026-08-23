@@ -125,8 +125,7 @@ Everyday:
   status                       Whether you are logged in, and for how much longer
 
 Options for new:
-  --days <n>                   How much history to read (default 60; older posts
-                               come along only if they name a date still ahead)
+  --days <n>                   How much history to read (default 60)
   --no-open                    Do not open the page (a pipe or scheduler never opens)
   --no-llm                     Danish rules only — skip the model calls
   --no-deploy                  Do not update the hosted copy this run

@@ -422,7 +422,7 @@ function promptText(item: SourceItem): string {
 }
 
 /** The payload the model sees. Trimmed, but never summarised before it gets there. */
-function extractionPayload(input: BriefInput) {
+export function extractionPayload(input: BriefInput) {
   return {
     today: input.today,
     isoWeek: input.isoWeek,
@@ -442,6 +442,7 @@ function extractionPayload(input: BriefInput) {
       groups: item.groups,
       childNames: item.childNames,
       audience: item.audience,
+      important: item.important,
       ...(item.conversation ? { messageCount: item.conversation.messages.length } : {}),
       text: promptText(item),
     })),
@@ -479,7 +480,7 @@ export function extractionSchema(input: BriefInput) {
       cards: {
         type: 'array',
         description:
-          'Kortene, 5–10 en normal morgen. Hvert kort er én ting, forælderen skal vide eller gøre.',
+          'Kortene i prioriteret rækkefølge, vigtigst først; de sidste foldes sammen, hvis der er flere end siden viser. 5–10 en normal morgen. Hvert kort er én ting, forælderen skal vide eller gøre.',
         items: {
           type: 'object',
           properties: {
@@ -537,7 +538,7 @@ export function extractionSchema(input: BriefInput) {
         type: 'array',
         items: keyEnum(allKeys),
         description:
-          'Kilder, der slet ikke skal vises — irrelevante efter relevans-tegnene, eller noget forælderens præferencer siger aldrig skal med. Alt andet uden kort vises foldet sammen nederst.',
+          'Kilder, der slet ikke skal vises — irrelevante efter relevans-tegnene, eller noget forælderens præferencer siger aldrig skal med. En kilde med important=true bør ikke skjules uden en konkret grund i indholdet. Alt andet uden kort vises foldet sammen nederst.',
       },
     },
     required: ['topline', 'cards', 'childSummaries', 'hidden'],
@@ -549,24 +550,26 @@ const INSTRUCTIONS = `Du læser de seneste ugers indhold fra Aula — opslag, be
 
 Du afgør tre ting:
 
-1. Kortene. En normal morgen giver 5–10. Hvert kort er én ting, forælderen skal vide eller gøre: en titel, der nævner barnet og står i bydeform, når der skal gøres noget; et resumé på én til tre sætninger, der siger det vigtige, uden at læseren behøver kilden; datoen kortet sorteres efter — fristen, hvis der er én, ellers dagen det sker; om det kræver handling af forælderen; en begrundelse for, hvorfor kortet er med; og de kilder, det bygger på. Ét kort må samle flere kilder, og skal gøre det, når de handler om det samme: et opslag fra juli med datoen og en besked fra i dag om samme arrangement er ét kort med juli-datoen og begge kilder. Forælderen har for længst glemt juli-opslaget — når du binder dem sammen, hjælper du forælderen meget.
+1. Kortene. En normal morgen giver 5–10. Skriv kortene i prioriteret rækkefølge — vigtigst først; bliver der for mange, er det de sidste, siden folder sammen. Hvert kort er én ting, forælderen skal vide eller gøre: en titel, der nævner barnet og står i bydeform, når der skal gøres noget; et resumé på én til tre sætninger, der siger det vigtige, uden at læseren behøver kilden; datoen kortet sorteres efter — fristen, hvis der er én, ellers dagen det sker; om det kræver handling af forælderen; en begrundelse for, hvorfor kortet er med; og de kilder, det bygger på. Ét kort må samle flere kilder, og skal gøre det, når de handler om det samme: et opslag fra juli med datoen og en besked fra i dag om samme arrangement er ét kort med juli-datoen og begge kilder. Forælderen har for længst glemt juli-opslaget — når du binder dem sammen, hjælper du forælderen meget.
 
 2. Toplinen: én sætning med det vigtigste først. Og én linje per barn om, hvad der sker for det i den kommende tid.
 
 3. Hvilke øvrige kilder der slet ikke skal vises — enten fordi de ikke er relevante efter relevans-tegnene nedenfor, eller fordi forælderens præferencer siger, at den slags aldrig er relevant. Alt andet, der ikke blev et kort, vises foldet sammen nederst — et fravalg koster aldrig et punkt. Derfor: vær konkret, og lav ikke et kort for en sikkerheds skyld. Fremhæver du alt, fremhæver du intet.
 
-Du afgør ikke rækkefølgen (den er kronologisk og laves af siden) eller udseendet.
+Du afgør prioriteringen, men ikke sidens kronologiske visningsrækkefølge eller udseende.
 
 Sådan læser du en kilde:
 - "text" er kildens fulde tekst og den eneste autoritet på, hvad der står. Alt du skriver, skal kunne læses dér; læseren kan altid åbne kilden under kortet.
 - "audience" er, hvor bredt kilden er sendt ud: "child" og "class" af nogen, der kender barnet; "institution" til hele skolen eller huset; "municipal" til alle forældre i kommunen. Et fingerpeg, ikke et svar.
-- Kilder med type "personal" er forælderens egne kalenderaftaler. De bliver ikke til kort — siden viser dem selv — men brug dem til at forstå ugen.
+- "important" er Aulas eget vigtigt-flag på kilden. Det er et stærkt tegn, men indholdet er stadig autoriteten.
+- Kilder med type "personal" er forælderens egne kalenderaftaler. De bliver ikke til kort — siden viser dem selv. Brug dem ikke til at analysere sammenfald med skoleindhold, hævde en konflikt eller berolige om, at der ikke er en.
 
 Det, der gør en kilde relevant — vigtigst først:
 - Den kræver noget af forælderen om deres barn: noget der skal medbringes, tilmeldes, besvares eller betales; en frist; en aflysning; en dag barnet møder anderledes. Sendt til hele skolen tæller stadig, når det rammer barnet specifikt — skolefoto gør, et valgfrit forældrekursus gør ikke.
 - Den er rettet mod få: barnets egen stue eller klasse, eller en lille gruppe med barnet i.
 - Barnet eller forælderen er nævnt ved navn.
 - En hård deadline.
+- Aulas eget vigtigt-flag på en kilde er et stærkt tegn.
 En dato, der er passeret, er ikke længere noget at handle på. Siger kilden stadig noget — en beslutning, en ny fast aftale — er det et kort, og siden lægger det under "Tidligere"; ellers er det ikke et kort.
 
 Forælderens egne præferencer står nederst. De supplerer det ovenstående, og hvor de siger noget, vinder de.
