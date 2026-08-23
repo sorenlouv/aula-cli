@@ -133,10 +133,35 @@ blockquote{margin:0;padding:9px 14px;background:var(--quote);border-radius:8px;f
 .tick:hover{border-color:var(--c2);color:var(--c2)}
 .tick:focus-visible{outline:2px solid var(--c2);outline-offset:2px}
 .tick[aria-pressed="true"]{background:var(--c2);border-color:var(--c2);color:var(--panel)}
-/* Hidden, never dropped: the toggle below puts them back. */
-.card.is-done{display:none}
+/* Hidden, never dropped: the toggle below puts them back. Two classes on
+   purpose: .cal-row sets its own display further down, and a single-class
+   rule here would lose to it. */
+.card.is-done,.cal-row.is-done{display:none}
 section.reveal .card.is-done{display:block;opacity:.55}
 section.reveal .card.is-done .title{text-decoration:line-through}
+section.reveal .cal-row.is-done{display:flex;opacity:.55}
+section.reveal .cal-row.is-done .cal-title{text-decoration:line-through}
+
+/* Kommende is in date order; the undated tail — mostly Kræver handling's
+   overflow — is set off so it is visible why those carry no date chip. */
+.divider{margin:16px 0 10px;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-3);font-weight:650}
+
+/* The family's own calendar — see calendarSection in compose.ts. One line per
+   appointment, days as plain labels, folded shut: the summary carries what is
+   worth knowing before the fold is opened. */
+.cal>summary{font-weight:500;font-size:14px;color:var(--ink-2);gap:14px;line-height:1.45}
+.cal-body{padding:4px 18px 12px}
+.cal-day{margin:12px 0 4px;font-size:12px;font-weight:650;color:var(--ink-3)}
+.cal-day:first-child{margin-top:4px}
+.cal-row{position:relative;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
+  padding:7px 40px 7px 0;border-top:1px solid var(--line-2);font-size:14px}
+.cal-day+.cal-row{border-top:0}
+.cal-when{flex:none;min-width:7.5em;color:var(--ink-3);font-size:12.5px;font-variant-numeric:tabular-nums}
+.cal-title{flex:1 1 auto;min-width:0;font-weight:600}
+.cal-src{margin-left:auto;font-size:12px;color:var(--ink-3);white-space:nowrap}
+.cal-src a{color:var(--ink-3);text-decoration:underline;text-underline-offset:2px;white-space:nowrap}
+.cal-row .tick{top:50%;right:4px;width:24px;height:24px;margin-top:-12px;font-size:12px}
 /* The empty-state line under two visible cards reads as a contradiction,
    however true the count is. While they are on show, the toggle says it. */
 section.reveal [data-empty]{display:none}
@@ -200,12 +225,18 @@ footer{margin-top:26px;text-align:center;color:var(--ink-3);font-size:12px}
      beforeprint hook in publish.ts, which skips these to match. */
   .more{display:none}
   .card{padding-right:20px}
-  section.reveal .card.is-done{display:none}
+  .cal-row{padding-right:0;break-inside:avoid}
+  section.reveal .card.is-done,section.reveal .cal-row.is-done{display:none}
   .done-toggle{border-style:solid;cursor:auto}
 }
 @media (max-width:680px){
   .wrap{padding:26px 16px 60px}
   h1{font-size:27px}
   .topline{font-size:17.5px}
+  /* A phone has no room for time, title and source on one line: the source
+     drops under the title, indented past the time column, rather than
+     floating right on a line of its own. */
+  .cal-when{min-width:6.5em}
+  .cal-src{flex-basis:100%;margin-left:0;margin-top:-2px;padding-left:calc(6.5em + 10px);white-space:normal}
 }
 `;

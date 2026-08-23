@@ -117,18 +117,23 @@ describe('the bounded calendar window', () => {
 });
 
 describe('appointment presentation', () => {
-  test('keeps the full timed interval in the source the model and page receive', () => {
+  test('the model reads the timed interval in words; the page gets it as fields', () => {
+    // The title stays bare so the page can write "Tandlæge 13:30" in the
+    // calendar fold's summary without parsing its own sentence back apart.
     const source = toPersonalSourceItem(toPersonalEvent(TIMED, CAL)!);
-    expect(source.title).toBe('Tandlæge kl. 13:30–14:15');
-    expect(source.text).toContain('13:30–14:15');
+    expect(source.title).toBe('Tandlæge');
+    expect(source.text).toBe('Tandlæge · kl. 13:30–14:15 · Fra kalenderen «Familien»');
     expect(source.at).toBe('2026-08-27T13:30:00');
     expect(source.endsAt).toBe('2026-08-27T14:15:00');
+    expect(source.allDay).toBe(false);
   });
 
   test('keeps a multi-day all-day interval visible', () => {
     const source = toPersonalSourceItem(toPersonalEvent(ALL_DAY, CAL)!);
-    expect(source.title).toBe('Ferie · hele dagen 25/8–27/8');
+    expect(source.title).toBe('Ferie');
+    expect(source.text).toContain('hele dagen 25/8–27/8');
     expect(source.endsAt).toBe('2026-08-27T23:59:00');
+    expect(source.allDay).toBe(true);
   });
 });
 

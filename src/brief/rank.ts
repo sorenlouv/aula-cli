@@ -127,15 +127,21 @@ export function signalsFromRules(input: BriefInput, now = new Date()): Signal[] 
     const hits = extractHits(item.text, reference, now);
     for (const [index, hit] of hits.entries()) {
       // A weekly-plan entry carries its own date, so "Husk skiftetøj" with no
-      // date in the sentence still lands on the right day.
-      const dueAt = hit.dueAt ?? isoOf(item.at);
+      // date in the sentence still lands on the right day. A post or a thread
+      // does not: its timestamp is when it was written, and a dateless
+      // reminder in one is read as being about that day — urgent if it went up
+      // this morning, background by tomorrow — without the day being *shown* as
+      // a deadline. It used to be, and an unread thread reminding us of a
+      // meeting was sitting in Kommende under the date it was sent, weeks ago.
+      const written = isoOf(item.at);
+      const dueAt = hit.dueAt ?? (item.kind === 'plan' ? written : null);
       signals.push({
         id: `${item.key}#${index}`,
         kind: hit.kind,
         title: item.title,
         child: item.childNames.length === 1 ? firstName(item.childNames[0] ?? '') : null,
         dueAt,
-        urgency: hit.dueAt ? hit.urgency : urgencyFor(dueAt, now, hit.urgency),
+        urgency: hit.dueAt ? hit.urgency : urgencyFor(dueAt ?? written, now, hit.urgency),
         quote: hit.quote,
         why: null,
         sourceKey: item.key,

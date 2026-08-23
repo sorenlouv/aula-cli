@@ -76,6 +76,12 @@ export type SourceItem = {
   text: string;
   /** End of an interval when the source describes one; absent for point-in-time content. */
   endsAt?: string | null;
+  /**
+   * Calendar-shaped sources only — Aula's events and the family's own: the
+   * entry has no clock time, so `at` and `endsAt` name days rather than
+   * instants. The page renders "hele dagen" from this instead of a midnight.
+   */
+  allDay?: boolean;
   at: string | null;
   author: string | null;
   groups: string[];

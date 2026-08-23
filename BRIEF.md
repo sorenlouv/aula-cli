@@ -63,13 +63,26 @@ Sections render only when they have content, and never change order.
 2. **Kræver handling** — the `act` tier, the only one with deadlines. Hard cap
    of five (`ACT_CAP`); overflow drops to `week`. Each row: what to do, which
    child, by when, and the verbatim source phrase.
-3. **Kommende** — the `week` tier: dated things that ask nothing yet.
-4. **Per barn** — one card per child: check-in state, planned pickup, what is
+3. **Kommende** — the `week` tier: the school's dated things that ask nothing
+   yet, in date order. The composer rewords them and orders within a day; it
+   does not reorder the list, because an "upcoming" list the reader cannot scan
+   by date is not answering its own heading. Undated items — mostly `ACT_CAP`
+   overflow — sit last under *Uden fast dato*.
+4. **Egen kalender** — the family's own appointments from the configured
+   calendars, as one-line rows grouped by day inside one collapsed fold. An
+   appointment is one line of information and the card shape was six lines of
+   chrome around it; twenty of those was most of the page. The fold's summary
+   is what makes it useful shut: it names today's appointments, and those on
+   any day that also carries a card in *Kræver handling* or *Kommende* — so
+   the gymnastics at 17:10 is named beside the Wednesday of the forældremøde
+   without the page computing a clash or claiming the absence of one. Never
+   cards, never in the composer's payload (see *The family's own calendar*).
+5. **Per barn** — one card per child: check-in state, planned pickup, what is
    new, their week. Ordered by how much is going on, so a quiet child stops
    taking up space.
-5. **Godt at vide** — the `context` tier, collapsed.
-6. **Billeder** — the `NewMedia` flood as one line, linked, at the bottom.
-7. **Datastatus** — what was fetched, **what failed**, when, step-up state,
+6. **Godt at vide** — the `context` tier, collapsed.
+7. **Billeder** — the `NewMedia` flood as one line, linked, at the bottom.
+8. **Datastatus** — what was fetched, **what failed**, when, step-up state,
    next run.
 
 ### Reading the original
@@ -110,8 +123,8 @@ material, and expanding them turns two forwardable pages into twenty.
 ### Ticking things off
 
 A brief that keeps asking for something you did last Tuesday is worse than one
-that never asked. Both action sections are tickable and the tick survives the
-next morning's regeneration.
+that never asked. Both action sections and the calendar rows are tickable and
+the tick survives the next morning's regeneration.
 
 **The store is the browser's.** The page is read on a phone and nothing there
 can write to `~/.aula`, so the record is `localStorage` on the page's origin
@@ -287,6 +300,27 @@ model day and a bad one produce structurally different briefs:
 No verdict means `normal`, so a rules-only brief hides nothing. `rank.ts`
 consumes the model's typed verdict and structured fields; it does not interpret
 the wording in `preferences.md`.
+
+### The family's own calendar
+
+Opt-in: `aula calendars set …` names the calendars to read (through the Claude
+Google Calendar connector, so it needs `claude`), and nothing is read until it
+does. Each occurrence in the next `PERSONAL_CALENDAR_DAYS` (14) becomes a
+`personal` source with audience `family`, ranked like anything else: always an
+`event`, never `act` — the cap there is five, and an appointment nobody asked us
+about must not push a school deadline off the page — and judged by the model
+against the family's list like any other source, so *"aftaler uden børnene hører
+ikke til i oversigten"* works without a line of code.
+
+**Shown, not analysed.** The page never computes a clash and never says there
+is none: an earlier version did, against registered pickup hours the family did
+not have and an Aula calendar that was empty most mornings, so it could only
+misfire, and a false clash promoted to `act` would displace something real.
+What it does instead is put the appointment where the reader can see it beside
+the school's day — the fold's summary (page section 4) names the ones sharing a
+day with an Aula card — and let the reader, who knows how far the dentist is,
+draw the conclusion. The composer never sees them at all (`composePayload`), so
+it cannot write a clash into a neighbouring card's *why* either.
 
 ## Delivery
 

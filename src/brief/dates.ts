@@ -35,6 +35,41 @@ export const DA_MONTHS = [
   'december',
 ];
 
+/** "25/8" — the short form Danish calendars and messages both use. */
+export function shortDayMonth(isoDay: string): string {
+  const [, month = '', day = ''] = isoDay.split('-');
+  return `${Number(day)}/${Number(month)}`;
+}
+
+/**
+ * A calendar entry's time in words: "kl. 13:30–14:15", "kl. 13:30", "hele
+ * dagen", "hele dagen 25/8–27/8", or a span across days.
+ *
+ * Shared between the model's copy of an appointment (`collect.ts`, where it
+ * goes into the source text) and the page (`compose.ts`, where it sits beside
+ * the title) so the two cannot drift: a row saying one thing and the model
+ * having read another is a small lie the rest of the page would inherit.
+ */
+export function intervalLabel(span: {
+  startDay: string;
+  endDay: string;
+  /** `HH:MM` local; null for an all-day entry. */
+  startTime: string | null;
+  endTime: string | null;
+  allDay: boolean;
+}): string {
+  const { startDay, endDay, startTime, endTime } = span;
+  if (span.allDay || !startTime) {
+    return startDay === endDay
+      ? 'hele dagen'
+      : `hele dagen ${shortDayMonth(startDay)}–${shortDayMonth(endDay)}`;
+  }
+  if (startDay === endDay) {
+    return endTime && endTime !== startTime ? `kl. ${startTime}–${endTime}` : `kl. ${startTime}`;
+  }
+  return `fra ${shortDayMonth(startDay)} kl. ${startTime} til ${shortDayMonth(endDay)} kl. ${endTime ?? startTime}`;
+}
+
 const STEM_TO_DAY: Record<string, number> = {
   søn: 0,
   man: 1,

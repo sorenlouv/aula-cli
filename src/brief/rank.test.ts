@@ -206,6 +206,43 @@ describe('rank', () => {
     expect(brief.signals[0]?.mustShow).toBe(true);
   });
 
+  test('a dateless reminder in a thread is not dated to the day it was sent', () => {
+    // Real case: an unread thread from 11 August reminding us of a meeting in
+    // September. The rules found "minde om" but no date in that sentence, and
+    // the signal used to borrow the thread's timestamp as its due date — so it
+    // sat in Kommende under "Tirsdag 11. august", weeks in the past, floored
+    // there by the unread flag. The write date still decides urgency (old ⇒
+    // background), but it is not a deadline and is not shown as one.
+    const thread = item({
+      key: 'thread:1',
+      kind: 'thread',
+      title: 'Møde ang. Alma',
+      text: 'Jeg har lovet Merete fra kontoret at minde om netværksmødet.',
+      at: '2026-08-11T20:19:00',
+      childNames: ['Alma Signe Eksempelsen'],
+      audience: 'child',
+      important: true,
+    });
+    const brief = rank(input([thread]), signalsFromRules(input([thread]), TODAY));
+    const signal = brief.signals.find((s) => s.sourceKey === 'thread:1');
+    expect(signal?.dueAt).toBeNull();
+    expect(signal?.urgency).toBe('fyi');
+    expect(signal?.tier).toBe('week'); // the important floor, undated
+  });
+
+  test('a dateless reminder posted this morning is still urgent today', () => {
+    const post = item({
+      key: 'post:1',
+      title: 'Husk',
+      text: 'Husk madpakke til turen.',
+      at: '2026-08-13T07:10:00',
+      audience: 'class',
+    });
+    const signals = signalsFromRules(input([post]), TODAY);
+    expect(signals[0]?.dueAt).toBeNull();
+    expect(signals[0]?.urgency).toBe('now');
+  });
+
   test('the same offer sent by two institutions is merged, not shown twice', () => {
     const items = [
       item({

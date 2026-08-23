@@ -87,6 +87,47 @@ const INPUT: BriefInput = briefInput({
   albums: [{ title: 'Skovtur med 2E', at: '2026-08-12', childNames: ['Alma'] }],
 });
 
+/**
+ * One of the family's own appointments — today (2026-08-13), a Thursday. The
+ * source is what `toPersonalSourceItem` produces: bare title, time as fields.
+ */
+function appointment(
+  overrides: Omit<Partial<RankedSignal>, 'source'> & { source?: Partial<SourceItem> } = {},
+): RankedSignal {
+  const { source: sourceOverrides, ...rest } = overrides;
+  const source: SourceItem = sourceItem({
+    key: 'cal:far@eksempel.dk:dentist:2026-08-13T13:30:00+02:00',
+    kind: 'personal',
+    title: 'Tandlæge',
+    text: 'Tandlæge · kl. 13:30–14:15 · Fra kalenderen «Familien»',
+    at: '2026-08-13T13:30:00',
+    endsAt: '2026-08-13T14:15:00',
+    allDay: false,
+    author: 'Familien',
+    audience: 'family',
+    url: 'https://calendar.google.com/calendar/event?eid=abc',
+    ...sourceOverrides,
+  });
+  return {
+    ...UPCOMING,
+    id: `${source.key}#0`,
+    kind: 'event',
+    title: source.title,
+    child: null,
+    dueAt: (source.at ?? '').slice(0, 10),
+    urgency: 'week',
+    quote: null,
+    why: null,
+    sourceKey: source.key,
+    origin: 'rule',
+    audience: 'family',
+    source,
+    ...rest,
+  };
+}
+
+const DENTIST = appointment();
+
 const BRIEF: RankedBrief = {
   input: INPUT,
   signals: [MUST_SHOW, UPCOMING, HIDDEN],
@@ -163,37 +204,24 @@ describe('parsePlan', () => {
     expect(problems.some((p) => p.startsWith('topline'))).toBe(true);
   });
 
-  test('a personal appointment cannot be promoted or interpreted by the composer', () => {
-    const personal: RankedSignal = {
-      ...UPCOMING,
-      id: 'cal:family:dentist#0',
-      sourceKey: 'cal:family:dentist',
-      title: 'Tandlæge kl. 13:30–14:15',
-      source: {
-        ...SOURCE,
-        key: 'cal:family:dentist',
-        kind: 'personal',
-        title: 'Tandlæge kl. 13:30–14:15',
-        audience: 'family',
-        url: 'https://calendar.google.com/calendar/event?eid=abc',
-      },
-    };
-    const brief: RankedBrief = { ...BRIEF, signals: [personal] };
+  test('an appointment is not the composer’s to place, whatever it answers', () => {
+    // The composer never sees the family's calendar, so an id naming an
+    // appointment is a guess. Both placements are refused; the row still
+    // renders, verbatim, in the calendar fold.
+    const brief: RankedBrief = { ...BRIEF, signals: [DENTIST] };
     const { plan, problems } = parsePlan(
       {
-        act: [{ signalId: personal.id, why: 'Kolliderer med skoledagen' }],
-        week: [{ signalId: personal.id, title: 'Flyt tandlægen', why: 'Der er et sammenstød' }],
+        act: [{ signalId: DENTIST.id, why: 'Kolliderer med skoledagen' }],
+        week: [{ signalId: DENTIST.id, title: 'Flyt tandlægen', why: 'Der er et sammenstød' }],
       },
       brief,
     );
     expect(plan.act).toEqual([]);
-    expect(plan.week).toEqual([{ signalId: personal.id }]);
-    expect(problems.some((problem) => problem.includes('kan ikke blive til en handling'))).toBe(
-      true,
-    );
-    expect(problems.some((problem) => problem.includes('blev ikke fortolket'))).toBe(true);
+    expect(plan.week).toEqual([]);
+    expect(problems.filter((p) => p.includes('ikke komponistens at placere'))).toHaveLength(2);
     const html = renderPlan(brief, plan);
-    expect(html).toContain('Tandlæge kl. 13:30–14:15');
+    expect(html).toContain(`data-signal-id="${DENTIST.id}"`);
+    expect(html).toContain('Tandlæge');
     expect(html).not.toContain('Flyt tandlægen');
     expect(html).not.toContain('sammenstød');
     expect(html).toContain('åbn i kalender');
@@ -270,6 +298,160 @@ describe('renderPlan', () => {
     const { plan } = parsePlan({ act: [{ signalId: MUST_SHOW.id }] }, BRIEF);
     const html = renderPlan(BRIEF, plan, { isNew: (key) => key === MUST_SHOW.sourceKey });
     expect(html).toContain('<span class="chip new">Ny</span>');
+  });
+});
+
+describe('the family’s calendar', () => {
+  const football = appointment({
+    source: {
+      key: 'cal:far@eksempel.dk:football:2026-08-19T16:25:00+02:00',
+      title: 'Half fodbold',
+      at: '2026-08-19T16:25:00',
+      endsAt: '2026-08-19T17:45:00',
+    },
+  });
+  const gymnastics = appointment({
+    source: {
+      key: 'cal:far@eksempel.dk:gym:2026-08-20T17:10:00+02:00',
+      title: 'Viggo gymnastik',
+      at: '2026-08-20T17:10:00',
+      endsAt: '2026-08-20T18:10:00',
+    },
+  });
+  const holiday = appointment({
+    source: {
+      key: 'cal:far@eksempel.dk:holiday:2026-08-20',
+      title: 'Ferie',
+      at: '2026-08-20T00:00:00',
+      endsAt: '2026-08-22T23:59:00',
+      allDay: true,
+    },
+  });
+  /** A school card on the 20th, so that day is one the page already shows. */
+  const meeting: RankedSignal = {
+    ...UPCOMING,
+    id: 'post:20#0',
+    title: 'Forældremøde torsdag',
+    dueAt: '2026-08-20',
+    sourceKey: 'post:20',
+    source: { ...SOURCE, key: 'post:20', title: 'Forældremøde' },
+  };
+
+  test('appointments fold into one collapsed section of rows, never cards', () => {
+    const brief: RankedBrief = { ...BRIEF, signals: [MUST_SHOW, DENTIST, football] };
+    const html = fallbackPage(brief);
+    expect(html).toContain('<section data-section="calendar">');
+    expect(html).toContain('<details class="cal">');
+    expect(html).not.toContain('<details class="cal" open');
+    for (const s of [DENTIST, football]) {
+      const open = `<div class="cal-row" data-signal-id="${s.id}"`;
+      expect(html).toContain(open);
+      const row = html.slice(html.indexOf(open), html.indexOf('</div>', html.indexOf(open)));
+      expect(row).toContain(`data-source-id="${s.sourceKey}"`);
+      expect(row).toContain('data-done-keys=');
+      expect(row).toContain('åbn i kalender');
+    }
+    expect(html.match(/class="card /g) ?? []).toHaveLength(1); // MUST_SHOW only
+    expect(html).toContain('Egen kalender <span class="count" data-count>2</span>');
+    // Rows under their day, time beside the title, from the source's fields.
+    expect(html).toContain('<div class="cal-day">Onsdag 19. august</div>');
+    expect(html).toContain('<span class="cal-when">kl. 16:25–17:45</span>');
+    expect(html).toContain('<span class="cal-title">Half fodbold</span>');
+    expect(validatePage(html, brief)).toEqual([]);
+  });
+
+  test('the summary names today, and any day a school card lands on — nothing else', () => {
+    const brief: RankedBrief = {
+      ...BRIEF,
+      signals: [MUST_SHOW, meeting, DENTIST, football, gymnastics, holiday],
+    };
+    const html = fallbackPage(brief);
+    const summary = /<details class="cal"><summary>(.*?)<\/summary>/.exec(html)?.[1];
+    // Today by the constant; the 20th because the forældremøde is that day; an
+    // all-day entry without a clock time. The 19th has nothing from school.
+    expect(summary).toBe('I dag: Tandlæge 13:30 · torsdag 20/8: Ferie, Viggo gymnastik 17:10');
+    expect(summary).not.toContain('fodbold');
+  });
+
+  test('a day Kræver handling lands on counts as a school day too', () => {
+    const act: RankedSignal = { ...MUST_SHOW, dueAt: '2026-08-19' };
+    const brief: RankedBrief = { ...BRIEF, signals: [act, football] };
+    expect(fallbackPage(brief)).toContain('<summary>Onsdag 19/8: Half fodbold 16:25</summary>');
+  });
+
+  test('with nothing to single out the summary says so, and claims nothing', () => {
+    const brief: RankedBrief = { ...BRIEF, signals: [football] };
+    expect(fallbackPage(brief)).toContain('<summary>Alle aftaler i perioden</summary>');
+  });
+
+  test('a low-rated appointment stays in Godt at vide, with its time and no more-block', () => {
+    const low: RankedSignal = { ...DENTIST, tier: 'context', mustShow: false, relevance: 'low' };
+    const html = fallbackPage({ ...BRIEF, signals: [MUST_SHOW, low] });
+    expect(html).not.toContain('data-section="calendar"');
+    expect(html).toContain(
+      `<div class="di" data-source-id="${low.sourceKey}"><b>Tandlæge</b><p>Torsdag 13. august · kl. 13:30–14:15 · Familien</p></div>`,
+    );
+  });
+
+  test('a ticked row carries the same key shape as a card', () => {
+    const html = fallbackPage({ ...BRIEF, signals: [DENTIST] });
+    expect(html).toContain(`data-done-keys="${DENTIST.sourceKey}|2026-08-13"`);
+  });
+});
+
+describe('Kommende order', () => {
+  const on = (day: string | null, id: string): RankedSignal => ({
+    ...UPCOMING,
+    id,
+    title: `Ting ${id}`,
+    dueAt: day,
+    sourceKey: `post:${id}`,
+    source: { ...SOURCE, key: `post:${id}`, title: `Post ${id}` },
+  });
+  const later = on('2026-08-20', 'a');
+  const soon = on('2026-08-14', 'b');
+  const undated = on(null, 'c');
+  const position = (html: string, s: RankedSignal) => html.indexOf(`data-signal-id="${s.id}"`);
+
+  test('is by date whatever the plan said, undated last under a divider', () => {
+    const brief: RankedBrief = { ...BRIEF, signals: [MUST_SHOW, later, soon, undated] };
+    const { plan } = parsePlan(
+      { week: [{ signalId: undated.id }, { signalId: later.id }, { signalId: soon.id }] },
+      brief,
+    );
+    const html = renderPlan(brief, plan);
+    expect(position(html, soon)).toBeLessThan(position(html, later));
+    expect(position(html, later)).toBeLessThan(html.indexOf('Uden fast dato'));
+    expect(html.indexOf('Uden fast dato')).toBeLessThan(position(html, undated));
+    expect(html).toContain('Kommende <span class="count" data-count>3</span>');
+  });
+
+  test('within a day the plan’s order holds', () => {
+    const second = on('2026-08-14', 'd');
+    const brief: RankedBrief = { ...BRIEF, signals: [MUST_SHOW, soon, second] };
+    const { plan } = parsePlan({ week: [{ signalId: second.id }, { signalId: soon.id }] }, brief);
+    const html = renderPlan(brief, plan);
+    expect(position(html, second)).toBeLessThan(position(html, soon));
+  });
+
+  test('a card whose day has passed goes last, under Tidligere — never leading the list', () => {
+    // A floor (`important`, `high`) can keep a past-dated signal in the week
+    // tier; chronological order would otherwise put it first. The chip keeps
+    // its real date; it just does not head a list called "upcoming".
+    const stale = on('2026-08-11', 'e');
+    const brief: RankedBrief = { ...BRIEF, signals: [stale, soon, undated] };
+    const html = fallbackPage(brief);
+    expect(position(html, soon)).toBeLessThan(position(html, undated));
+    expect(position(html, undated)).toBeLessThan(html.indexOf('Tidligere'));
+    expect(html.indexOf('Tidligere')).toBeLessThan(position(html, stale));
+    expect(html).toContain('Tirsdag 11. august');
+    // A stale card on its own is still shown, without a divider to separate it from nothing.
+    expect(fallbackPage({ ...BRIEF, signals: [stale] })).not.toContain('Tidligere');
+  });
+
+  test('no divider when everything is dated, or nothing is', () => {
+    expect(fallbackPage({ ...BRIEF, signals: [soon, later] })).not.toContain('Uden fast dato');
+    expect(fallbackPage({ ...BRIEF, signals: [undated] })).not.toContain('Uden fast dato');
   });
 });
 

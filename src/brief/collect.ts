@@ -16,6 +16,7 @@ import { localIsoDate } from '../integrations/types.ts';
 import { buildDigest, collectAlbums, type ChildGroups, loadGroups } from './../digest.ts';
 import { resolveFamily } from './../family.ts';
 import { loadPreferences } from './../preferences.ts';
+import { intervalLabel } from './dates.ts';
 import type { Audience, BriefInput, HealthNote, PresenceRow, SourceItem } from './types.ts';
 
 const AULA_PORTAL = 'https://www.aula.dk/portal/#';
@@ -195,6 +196,7 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
       text: [event.title, event.location, event.createdBy].filter(Boolean).join(' · '),
       at: event.start,
       endsAt: event.end,
+      allDay: event.allDay,
       author: event.createdBy,
       groups: [],
       childNames: event.children,
@@ -331,8 +333,9 @@ function summariseWarning(warning: string): string {
  * exact calendars the parent chose.
  *
  * **They are shown, not analysed.** An appointment becomes a dated item like
- * any other, and lands among the week's other dated things on the same day as
- * the school's own events. An earlier version computed clashes here — against
+ * any other; the page folds the lot into one collapsed *Egen kalender* whose
+ * summary names today's and any that share a day with something the school
+ * asked for (see `calendarSection` in `compose.ts`). An earlier version computed clashes here — against
  * each child's registered komme/gå hours and against Aula's calendar — and it
  * was removed: this family has no registered hours at all (33 template rows,
  * none with a date, one with a time) and Aula's own calendar was empty in 7 of
@@ -381,21 +384,22 @@ async function collectPersonal(now: Date): Promise<{ items: SourceItem[]; health
 
 /**
  * One appointment as a source, so it travels the same road as everything else —
- * ranked, composed, marked `NY`, tickable — instead of needing a section and a
- * set of rules of its own.
+ * ranked, marked `NY`, tickable — instead of needing a set of rules of its own.
  *
- * The time goes in the title because for a calendar entry the time *is* half of
- * what it says; "Tandlæge" on its own is not the thing the reader needs.
+ * For a calendar entry the time *is* half of what it says, so it goes into
+ * `text` for the model in words. The title stays bare: the page writes the time
+ * itself from `at`/`endsAt`/`allDay`, once as a row and once, start time only,
+ * in the fold's summary — and a title carrying "kl. 13:30–14:15" could not be
+ * shortened to "Tandlæge 13:30" without parsing our own sentence back apart.
  */
 export function toPersonalSourceItem(event: PersonalEvent): SourceItem {
-  const when = personalWhen(event);
   return {
     key: event.key,
     kind: 'personal',
-    title: `${event.title}${when}`,
+    title: event.title,
     text: [
       event.title,
-      when.trim().replace(/^·\s*/, ''),
+      personalWhen(event),
       event.location,
       `Fra kalenderen «${event.calendarName}»`,
     ]
@@ -405,6 +409,7 @@ export function toPersonalSourceItem(event: PersonalEvent): SourceItem {
     // day, and an all-day event has no instant to be faithful to.
     at: `${event.date}T${event.startTime ?? '00:00'}:00`,
     endsAt: `${event.endDate}T${event.endTime ?? '23:59'}:00`,
+    allDay: event.allDay,
     author: event.calendarName,
     groups: [],
     // Nothing here says which child an appointment is about. Guessing from the
@@ -417,21 +422,13 @@ export function toPersonalSourceItem(event: PersonalEvent): SourceItem {
   };
 }
 
+/** The time in words, for the model's copy of the appointment. */
 function personalWhen(event: PersonalEvent): string {
-  if (event.allDay) {
-    return event.date === event.endDate
-      ? ' · hele dagen'
-      : ` · hele dagen ${shortDay(event.date)}–${shortDay(event.endDate)}`;
-  }
-  if (event.date === event.endDate) {
-    return event.endTime && event.endTime !== event.startTime
-      ? ` kl. ${event.startTime}–${event.endTime}`
-      : ` kl. ${event.startTime}`;
-  }
-  return ` fra ${shortDay(event.date)} kl. ${event.startTime} til ${shortDay(event.endDate)} kl. ${event.endTime}`;
-}
-
-function shortDay(iso: string): string {
-  const [, month = '', day = ''] = iso.split('-');
-  return `${Number(day)}/${Number(month)}`;
+  return intervalLabel({
+    startDay: event.date,
+    endDay: event.endDate,
+    startTime: event.startTime,
+    endTime: event.endTime,
+    allDay: event.allDay,
+  });
 }

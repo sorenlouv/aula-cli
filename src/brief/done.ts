@@ -3,7 +3,8 @@
  *
  * A brief that keeps asking for something you did last Tuesday is worse than
  * one that never asked: you stop reading the section. So every card in the two
- * action sections carries a tick, and a ticked card stays ticked tomorrow.
+ * action sections, and every row in the calendar fold, carries a tick, and a
+ * ticked one stays ticked tomorrow.
  *
  * **The store is the browser's, not the pipeline's.** The page is read on a
  * phone, and nothing on a phone can write to `~/.aula`. So the record lives in
@@ -77,7 +78,9 @@ export function doneKeys(signal: RankedSignal): string[] {
  * one place page markup is written and that rule is worth more than the
  * convenience of building the ticks here. Everything this touches — the tick
  * buttons, the done-toggle, the empty-state panel — is rendered by the
- * composer and simply wired up here.
+ * composer and simply wired up here. What makes something tickable is the
+ * `data-done-keys` attribute, not its class: a card and a calendar row are
+ * different shapes with the same contract.
  *
  * `var` and `function` throughout, and no template literals: this string is
  * carried inside one, and the fewer characters that need escaping on the way
@@ -129,7 +132,7 @@ export const DONE_SCRIPT = `
   }
 
   function refresh(section) {
-    var cards = [].slice.call(section.querySelectorAll('.card[data-done-keys]'));
+    var cards = [].slice.call(section.querySelectorAll('[data-done-keys]'));
     var done = cards.filter(function (card) { return card.classList.contains('is-done'); }).length;
     var live = cards.length - done;
 
@@ -152,7 +155,7 @@ export const DONE_SCRIPT = `
   }
 
   [].slice.call(document.querySelectorAll('[data-section]')).forEach(function (section) {
-    [].slice.call(section.querySelectorAll('.card[data-done-keys]')).forEach(function (card) {
+    [].slice.call(section.querySelectorAll('[data-done-keys]')).forEach(function (card) {
       if (keysOf(card).some(function (key) { return !!state[key]; })) setDone(card, true);
       var tick = card.querySelector('.tick');
       if (!tick) return;

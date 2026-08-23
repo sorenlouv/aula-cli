@@ -12,8 +12,16 @@
  */
 
 import { escapeHtml } from '../html.ts';
+import { localIsoDate } from '../integrations/types.ts';
 import { isRecord } from '../validation.ts';
-import { buildDateSupport, DA_MONTHS, DA_WEEKDAYS, unsupportedDateClaims } from './dates.ts';
+import {
+  buildDateSupport,
+  DA_MONTHS,
+  DA_WEEKDAYS,
+  intervalLabel,
+  shortDayMonth,
+  unsupportedDateClaims,
+} from './dates.ts';
 import { doneKeys } from './done.ts';
 import { parseJsonLoosely, runClaude, withPreferences } from './llm.ts';
 import type {
@@ -43,6 +51,9 @@ function messageWhen(iso: string): string {
 }
 
 const flatten = (value: string) => value.replace(/\s+/g, ' ').trim();
+
+/** One of the family's own appointments, as opposed to anything from Aula. */
+const isPersonal = (signal: RankedSignal) => signal.source.kind === 'personal';
 
 /**
  * Source prose as paragraphs.
@@ -114,12 +125,12 @@ function moreBlock(source: SourceItem, shown: string): string {
 }
 
 /**
- * What each kind of source is called on the page.
+ * What each kind of source is called in the composer's payload.
  *
- * `Egen kalender` earns its own label rather than falling in with `Kalender`:
- * the reader has to be able to tell "the school put this in Aula" from "we put
- * this in our own calendar" at a glance, and a private appointment mislabelled
- * as a school event is a small lie the rest of the page would then inherit.
+ * `personal` is here for the type's completeness only: the family's own
+ * appointments never reach the composer (see `composePayload`), and on the page
+ * they have a section of their own, labelled *Egen kalender* in the heading
+ * rather than per entry.
  */
 const SOURCE_LABEL: Record<SourceKind, string> = {
   post: 'Opslag',
@@ -181,11 +192,17 @@ function composePayload(
     })),
     // Keyed by the same words as `Tier`, so a section in the payload and the
     // tier it came from are visibly the same concept.
-    act: brief.signals.filter((s) => s.tier === 'act').map(signal),
-    week: brief.signals.filter((s) => s.tier === 'week').map(signal),
-    context: brief.signals.filter((s) => s.tier === 'context').map(signal),
+    //
+    // The family's own appointments are left out altogether. They are not the
+    // composer's to order or reword: the page folds them into one collapsed
+    // list of their own (see `calendarSection`), so there is nothing for a
+    // plan to decide about them — and a composer that cannot see them cannot
+    // write a clash, or the absence of one, into a neighbouring card's "why".
+    act: brief.signals.filter((s) => s.tier === 'act' && !isPersonal(s)).map(signal),
+    week: brief.signals.filter((s) => s.tier === 'week' && !isPersonal(s)).map(signal),
+    context: brief.signals.filter((s) => s.tier === 'context' && !isPersonal(s)).map(signal),
     hidden: brief.signals
-      .filter((s) => s.tier === 'hidden')
+      .filter((s) => s.tier === 'hidden' && !isPersonal(s))
       .map((s) => ({ title: s.title, source: s.source.title, groups: s.source.groups })),
     unusedSources: brief.unusedSources.map((item) => ({
       sourceId: item.key,
@@ -216,11 +233,10 @@ Svar KUN med ét JSON-objekt. Ingen kodeblok. Ingen forklaring:
 Feltnavnene er engelske; alt indhold du skriver, er dansk.
 
 Regler:
-1. "act" og "week" er signalId'er fra inputtets "act" og "week" — vigtigst først; din rækkefølge ER prioriteringen. "relevance" er familiens egen vægtning af kilden ("high" før "normal" før "low"), og den vejer tungere end din. Alt du udelader, vises alligevel nederst i sin sektion, så udeladelse er nedprioritering, aldrig sletning. Et punkt fra "context" må promoveres, hvis det reelt beder om noget.
+1. "act" og "week" er signalId'er fra inputtets "act" og "week". I "act" ER din rækkefølge prioriteringen — vigtigst først; "relevance" er familiens egen vægtning af kilden ("high" før "normal" før "low"), og den vejer tungere end din. Alt du udelader fra "act", vises alligevel nederst i sektionen, så udeladelse er nedprioritering, aldrig sletning. Skabelonen viser "Kommende" i datorækkefølge, så i "week" bestemmer du ordlyden og kun rækkefølgen mellem punkter på samme dag; et punkt du udelader dér, vises på sin dato med inputtets ordlyd. Et punkt fra "context" må promoveres, hvis det reelt beder om noget.
 2. "topline": behold eller skærp den givne topline. Konklusionen først, detaljen bagefter.
 3. "title"/"why" udelades hvor inputtets formulering allerede er god; omskriv kun for at gøre det kortere, mere konkret eller imperativt.
-4. En kilde mærket "Egen kalender" er kun en aftale, der skal vises ved siden af skolens egne ting. Sæt den aldrig i "act", og skriv ingen ny "title" eller "why" til den. Beregn ikke sammenstød mellem aftaler og skoledagen, og skriv aldrig, at der ikke er sammenstød.
-5. Skriv alt på dansk. Hold det skimbart på 20 sekunder.`;
+4. Skriv alt på dansk. Hold det skimbart på 20 sekunder.`;
 
 type ComposeResult = { html: string; problems: string[] };
 
@@ -282,25 +298,17 @@ export function parsePlan(
         problems.push(`${field}: ${id} er skjult støj og blev ikke vist`);
         continue;
       }
-      if (field === 'act' && signal?.source.kind === 'personal') {
-        problems.push(`${field}: kalenderaftalen ${id} kan ikke blive til en handling`);
+      // The composer never sees the family's appointments (`composePayload`),
+      // so an id naming one is a guess or a stale answer. The page places them
+      // itself, verbatim, in the calendar fold — whatever the plan says.
+      if (signal && isPersonal(signal)) {
+        problems.push(`${field}: kalenderaftalen ${id} er ikke komponistens at placere`);
         continue;
       }
       if (placed.has(id)) continue;
       placed.add(id);
-      const proposedTitle = text(row.title);
-      const proposedWhy = text(row.why);
-      if (signal?.source.kind === 'personal' && (proposedTitle || proposedWhy)) {
-        problems.push(`${field}: kalenderaftalen ${id} vises ordret og blev ikke fortolket`);
-      }
-      const title =
-        signal?.source.kind === 'personal'
-          ? undefined
-          : grounded(proposedTitle, `${field} (${id}) title`, signal);
-      const why =
-        signal?.source.kind === 'personal'
-          ? undefined
-          : grounded(proposedWhy, `${field} (${id}) why`, signal);
+      const title = grounded(text(row.title), `${field} (${id}) title`, signal);
+      const why = grounded(text(row.why), `${field} (${id}) why`, signal);
       out.push({ signalId: id, ...(title ? { title } : {}), ...(why ? { why } : {}) });
     }
     return out;
@@ -358,7 +366,8 @@ export function renderPlan(
   };
   const planned = new Set([...plan.act, ...plan.week].map((e) => e.signalId));
   // An omission in the plan is a deprioritisation, never a deletion: whatever
-  // the ranker put in a visible tier still renders, after the planned cards.
+  // the ranker put in a visible tier still renders — after the planned cards
+  // in Kræver handling, on its own date in Kommende, which `buildPage` orders.
   const restAct = brief.signals.filter((s) => s.tier === 'act' && !planned.has(s.id));
   const restWeek = brief.signals.filter((s) => s.tier === 'week' && !planned.has(s.id));
   return buildPage(
@@ -439,6 +448,124 @@ export function fallbackPage(
   );
 }
 
+/** "kl. 10:00–11:00" or "hele dagen", from the source's own fields. */
+function whenLabel(source: SourceItem): string {
+  const start = source.at ?? '';
+  const end = source.endsAt ?? '';
+  const startDay = start.slice(0, 10);
+  return intervalLabel({
+    startDay,
+    endDay: end.slice(0, 10) || startDay,
+    startTime: start.slice(11, 16) || null,
+    endTime: end.slice(11, 16) || null,
+    allDay: source.allDay ?? false,
+  });
+}
+
+function daysFrom(today: string, isoDay: string): number {
+  return Math.round(
+    (Date.parse(`${isoDay}T00:00:00`) - Date.parse(`${today}T00:00:00`)) / 86_400_000,
+  );
+}
+
+/** "i dag", "i morgen", otherwise "onsdag 26/8" — short enough to sit in a summary line. */
+function summaryDayLabel(isoDay: string, today: string): string {
+  const offset = daysFrom(today, isoDay);
+  if (offset === 0) return 'i dag';
+  if (offset === 1) return 'i morgen';
+  const date = new Date(`${isoDay}T00:00:00`);
+  return `${DA_WEEKDAYS[date.getDay()]} ${shortDayMonth(isoDay)}`;
+}
+
+/**
+ * How many days from today the calendar fold's summary always names —
+ * today only. Anything further out is named only when it shares a day with
+ * something the school asked for. Raising this to 2 names tomorrow as well.
+ */
+const CALENDAR_SUMMARY_DAYS = 1;
+
+/**
+ * The family's own appointments: one collapsed section, rows inside.
+ *
+ * An appointment is one line — title, time, which calendar — and the card
+ * shape (quote, why, a *Læs mere* that could only repeat the line above it)
+ * was six lines of chrome around it. Twenty of those was most of the page.
+ * Rows grouped by day, folded shut by default, is the shape that matches the
+ * information: the family already has a calendar app, and what this page adds
+ * is the school's week beside it, not a second copy of it.
+ *
+ * The summary is what makes the fold useful *closed*. It names today's
+ * appointments, and those on any day that also carries an Aula card in Kræver
+ * handling or Kommende — so "Viggo gymnastik 17:10" appears beside the
+ * Wednesday the forældremøde is on, without the page computing a clash or
+ * claiming the absence of one. `anchoredDays` is that set of days. The reader
+ * draws the conclusion, and knows what the arithmetic never could: how far the
+ * dentist is, and whether a grandparent can fetch.
+ *
+ * Rows carry the same `data-*` as a card, so `validate.ts` holds them to the
+ * same invariants and `done.ts` lets them be ticked off.
+ */
+function calendarSection(
+  rows: RankedSignal[],
+  anchoredDays: ReadonlySet<string>,
+  today: string,
+  isNew: ((key: string) => boolean) | undefined,
+): string {
+  if (rows.length === 0) return '';
+  const dayOf = (s: RankedSignal) => s.dueAt ?? (s.source.at ?? '').slice(0, 10);
+  const sorted = [...rows].sort(
+    (a, b) =>
+      (a.source.at ?? '').localeCompare(b.source.at ?? '') || a.title.localeCompare(b.title),
+  );
+
+  const byDay = new Map<string, RankedSignal[]>();
+  for (const s of sorted) {
+    const day = dayOf(s);
+    byDay.set(day, [...(byDay.get(day) ?? []), s]);
+  }
+
+  // The days the summary names: the first CALENDAR_SUMMARY_DAYS from today,
+  // plus every day the school's own cards land on.
+  const named = new Set<string>(anchoredDays);
+  for (let offset = 0; offset < CALENDAR_SUMMARY_DAYS; offset++) {
+    const day = new Date(`${today}T00:00:00`);
+    day.setDate(day.getDate() + offset);
+    named.add(localIsoDate(day));
+  }
+  const clauses = [...named]
+    .sort()
+    .filter((day) => byDay.has(day))
+    .map((day) => {
+      const items = (byDay.get(day) ?? []).map((s) => {
+        const start = s.source.allDay ? '' : (s.source.at ?? '').slice(11, 16);
+        return start ? `${s.title} ${start}` : s.title;
+      });
+      return `${summaryDayLabel(day, today)}: ${items.join(', ')}`;
+    });
+  const summary = clauses.length ? capitalise(clauses.join(' · ')) : 'Alle aftaler i perioden';
+
+  const row = (s: RankedSignal) => `
+      <div class="cal-row" data-signal-id="${escapeHtml(s.id)}" data-source-id="${escapeHtml(s.sourceKey)}" data-done-keys="${escapeHtml(doneKeys(s).join(' '))}">
+        <span class="cal-when">${escapeHtml(whenLabel(s.source))}</span>
+        <span class="cal-title">${escapeHtml(s.title)}</span>
+        ${isNew?.(s.sourceKey) ? '<span class="chip new">Ny</span>' : ''}
+        <span class="cal-src">${escapeHtml(s.source.author ?? '')}${s.source.url ? ` · <a href="${escapeHtml(s.source.url)}">åbn i kalender</a>` : ''}</span>
+        <button class="tick" type="button" aria-pressed="false" aria-label="Markér som klaret"></button>
+      </div>`;
+
+  const body = [...byDay.entries()]
+    .map(
+      ([day, items]) =>
+        `<div class="cal-day">${escapeHtml(capitalise(danishDate(day)))}</div>${items.map(row).join('')}`,
+    )
+    .join('');
+
+  return `<section data-section="calendar"><h2>Egen kalender <span class="count" data-count>${rows.length}</span></h2>
+    <details class="cal"><summary>${escapeHtml(summary)}</summary><div class="cal-body">${body}</div></details>
+    <button class="done-toggle" type="button" aria-expanded="false" data-done-toggle hidden></button>
+  </section>`;
+}
+
 /** The one place page markup is written. Both layouts come through here. */
 function buildPage(
   brief: RankedBrief,
@@ -466,10 +593,44 @@ function buildPage(
       ${s.quote ? `<blockquote>«${escapeHtml(s.quote)}»</blockquote>` : ''}
       ${gist ? `<p class="gist">${escapeHtml(gist)}</p>` : ''}
       ${moreBlock(s.source, [title ?? s.title, why, s.quote, gist].filter(Boolean).join(' '))}
-      <div class="src">${escapeHtml(s.source.title)}${s.source.author ? ` · ${escapeHtml(s.source.author)}` : ''}${s.source.url ? ` · <a href="${escapeHtml(s.source.url)}">${s.source.kind === 'personal' ? 'åbn i kalender' : 'åbn i Aula'}</a>` : ''}</div>
+      <div class="src">${escapeHtml(s.source.title)}${s.source.author ? ` · ${escapeHtml(s.source.author)}` : ''}${s.source.url ? ` · <a href="${escapeHtml(s.source.url)}">åbn i Aula</a>` : ''}</div>
       <button class="tick" type="button" aria-pressed="false" aria-label="Markér som klaret"></button>
     </div>`;
   };
+
+  // Kommende is the school's dated things, in date order. The plan's order
+  // survives only within a day — a list called "upcoming" that the reader
+  // cannot scan by date is not answering the question its heading asks. The
+  // family's own appointments go to their fold instead. Two tails, each under
+  // its own divider so it is visible why those cards differ: undated items
+  // (mostly Kræver handling overflow), and then the past-dated — a card the
+  // `important` or `high` floor kept on the page after its day went by.
+  // Honest either way: the date stays on the chip, and the list the reader
+  // scans for what is next is not led by what is over.
+  const calendar = week.filter((c) => isPersonal(c.signal)).map((c) => c.signal);
+  const upcoming = week
+    .filter((c) => !isPersonal(c.signal))
+    .sort((a, b) => (a.signal.dueAt ?? '9999-99-99').localeCompare(b.signal.dueAt ?? '9999-99-99'));
+  const dated = upcoming.filter((c) => c.signal.dueAt && c.signal.dueAt >= input.today);
+  const undated = upcoming.filter((c) => !c.signal.dueAt);
+  const past = upcoming.filter((c) => c.signal.dueAt && c.signal.dueAt < input.today);
+  const anchoredDays = new Set(
+    [...act, ...dated].map((c) => c.signal.dueAt).filter((d): d is string => Boolean(d)),
+  );
+  // A divider separates; it does not head a section that is all one kind.
+  const kommende = [
+    { label: null, cards: dated },
+    { label: 'Uden fast dato', cards: undated },
+    { label: 'Tidligere', cards: past },
+  ]
+    .filter((group) => group.cards.length > 0)
+    .map((group, index) =>
+      [
+        index > 0 && group.label ? `<div class="divider">${group.label}</div>` : '',
+        ...group.cards.map(card),
+      ].join(''),
+    )
+    .join('');
 
   const context = brief.signals.filter((s) => s.tier === 'context' && !opts.planned?.has(s.id));
   const hidden = brief.signals.filter((s) => s.tier === 'hidden');
@@ -508,7 +669,13 @@ function buildPage(
     <button class="done-toggle" type="button" aria-expanded="false" data-done-toggle hidden></button>
   </section>
 
-  ${week.length ? `<section data-section="week"><h2>Kommende <span class="count" data-count>${week.length}</span></h2>${week.map(card).join('')}<button class="done-toggle" type="button" aria-expanded="false" data-done-toggle hidden></button></section>` : ''}
+  ${
+    upcoming.length
+      ? `<section data-section="week"><h2>Kommende <span class="count" data-count>${upcoming.length}</span></h2>${kommende}<button class="done-toggle" type="button" aria-expanded="false" data-done-toggle hidden></button></section>`
+      : ''
+  }
+
+  ${calendarSection(calendar, anchoredDays, input.today, opts.isNew)}
 
   <section><h2>Per barn</h2><div class="grid">
     ${input.family.children
@@ -538,6 +705,11 @@ function buildPage(
       ? `<section><h2>Godt at vide</h2><details><summary>${context.length + brief.unusedSources.length} ting uden noget, du skal gøre</summary>
       ${context
         .map((s) => {
+          // An appointment the family's list rated `low`: its whole content
+          // is the line, so no more-block — that would only repeat it.
+          if (isPersonal(s)) {
+            return `<div class="di" data-source-id="${escapeHtml(s.sourceKey)}"><b>${escapeHtml(s.title)}</b><p>${escapeHtml([s.dueAt ? capitalise(danishDate(s.dueAt)) : null, whenLabel(s.source), s.source.author].filter(Boolean).join(' · '))}</p></div>`;
+          }
           const gist = opts.conversations?.[s.sourceKey];
           return `<div class="di" data-source-id="${escapeHtml(s.sourceKey)}"><b>${escapeHtml(s.title)}</b>${s.quote ? `<p>«${escapeHtml(s.quote)}»</p>` : ''}${gist ? `<p class="gist">${escapeHtml(gist)}</p>` : ''}${moreBlock(s.source, [s.title, s.quote, gist].filter(Boolean).join(' '))}</div>`;
         })
