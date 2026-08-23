@@ -12,7 +12,7 @@ import {
   type PersonalEvent,
 } from '../calendar/index.ts';
 import { readConfig } from '../config.ts';
-import { localIsoDate } from '../integrations/types.ts';
+import { localIsoDate, type WeekPlan } from '../integrations/types.ts';
 import { buildDigest, collectAlbums, type ChildGroups, loadGroups } from './../digest.ts';
 import { resolveFamily } from './../family.ts';
 import { loadPreferences } from './../preferences.ts';
@@ -70,6 +70,59 @@ function childrenForGroups(groups: string[], childGroups: ChildGroups[]): string
   return childGroups
     .filter((cg) => cg.className && normalised.has(cg.className.trim().toLowerCase()))
     .map((cg) => cg.child);
+}
+
+/** Flatten vendor plan entries into the same source shape as Aula content. */
+export function sourcesFromPlans(plans: WeekPlan[]): SourceItem[] {
+  const items: SourceItem[] = [];
+  for (const plan of plans) {
+    const dateOccurrences = new Map<string, number>();
+    for (const [index, entry] of plan.items.entries()) {
+      const childName = entry.childName ?? null;
+      const identity = (() => {
+        if (!entry.date) return `position:${index}`;
+        const occurrence = dateOccurrences.get(entry.date) ?? 0;
+        dateOccurrences.set(entry.date, occurrence + 1);
+        return `date:${encodeURIComponent(entry.date)}:${occurrence}`;
+      })();
+      items.push({
+        key: `plan:${plan.provider}:${plan.capability}:${plan.isoWeek}:${identity}`,
+        kind: 'plan',
+        title: entry.title ?? entry.subject ?? 'Ugeplan',
+        text: [
+          entry.subject ? `Fag/hold: ${entry.subject}` : null,
+          entry.title ? `Titel: ${entry.title}` : null,
+          entry.content,
+          entry.kind ? `Type: ${planKindLabel(entry.kind)}` : null,
+        ]
+          .filter((part): part is string => Boolean(part))
+          .join('\n'),
+        at: entry.date ?? null,
+        author: plan.provider,
+        groups: [],
+        childNames: childName ? [childName] : [],
+        // A weekly plan is produced for one child's class; it is as specific as
+        // content gets, and it is where "husk badetøj" lives.
+        audience: 'child',
+        important: false,
+        url: `${AULA_PORTAL}/ugeplan`,
+      });
+    }
+  }
+  return items;
+}
+
+function planKindLabel(kind: string): string {
+  const labels: Record<string, string> = {
+    assignment: 'Aflevering',
+    assignments: 'Afleveringer',
+    comment: 'Kommentar',
+    event: 'Begivenhed',
+    note: 'Note',
+    task: 'Opgave',
+    'weekly-letter': 'Ugebrev',
+  };
+  return labels[kind] ?? kind;
 }
 
 export async function collect(client: AulaClient, opts: CollectOptions): Promise<BriefInput> {
@@ -179,25 +232,8 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
   }
 
   // ------------------------------------------------------------ weekly plans
+  items.push(...sourcesFromPlans(digest.weeklyPlans));
   for (const plan of digest.weeklyPlans) {
-    for (const [index, entry] of plan.items.entries()) {
-      const childName = entry.childName ?? null;
-      items.push({
-        key: `plan:${plan.provider}:${plan.isoWeek}:${index}`,
-        kind: 'plan',
-        title: entry.subject ?? 'Ugeplan',
-        text: entry.content ?? '',
-        at: entry.date ?? null,
-        author: plan.provider,
-        groups: [],
-        childNames: childName ? [childName] : [],
-        // A weekly plan is produced for one child's class; it is as specific as
-        // content gets, and it is where "husk badetøj" lives.
-        audience: 'child',
-        important: false,
-        url: `${AULA_PORTAL}/ugeplan`,
-      });
-    }
     for (const warning of plan.warnings ?? []) {
       health.push({ level: 'warn', message: summariseWarning(warning) });
     }

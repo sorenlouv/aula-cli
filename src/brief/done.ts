@@ -59,6 +59,13 @@ import type { Card } from './types.ts';
  * date share a key, so ticking one hides both. Rare, and recoverable — a ticked
  * card is hidden behind the section's done-toggle, never dropped.
  *
+ * A vendor plan has no item id. Its source key therefore includes provider,
+ * capability and week, then the entry date plus its same-day occurrence when
+ * dated, or its list position when undated. Dates keep an item stable when a
+ * vendor reorders days; two entries on one day, or an undated entry, can still
+ * move when the vendor reorders them. Changing from the older all-positional
+ * key format makes existing plan items appear new once.
+ *
  * The keys go onto the card space-separated, which is safe because a source key
  * cannot contain one: they are built in `collect.ts` from numeric ids, ISO
  * weeks and snake_case provider names.
