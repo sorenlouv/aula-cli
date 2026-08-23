@@ -1,7 +1,7 @@
 /**
  * Grounding for model-authored dates.
  *
- * The quote validator proved the pattern: the cheapest guard against a
+ * Source validation proved the pattern: the cheapest guard against a
  * confidently invented fact is a literal check against the sources. Dates are
  * the other thing the models invent — a "senest søndag" here, a "første gang
  * 24/8" there — so they get the same treatment. Every weekday, calendar date
@@ -49,7 +49,7 @@ export function shortDayMonth(isoDay: string): string {
  * dagen", "hele dagen 25/8–27/8", or a span across days.
  *
  * Shared between the model's copy of an appointment (`collect.ts`, where it
- * goes into the source text) and the page (`compose.ts`, where it sits beside
+ * goes into the source text) and the page (`render.ts`, where it sits beside
  * the title) so the two cannot drift: a row saying one thing and the model
  * having read another is a small lie the rest of the page would inherit.
  */

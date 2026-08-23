@@ -70,7 +70,7 @@ export function validatePage(html: string, brief: RankedBrief): Violation[] {
     violations.push({ rule: 'datastatus', detail: 'datastatus-blokken mangler' });
   } else {
     for (const note of brief.input.health.filter((h) => h.level === 'warn')) {
-      // Match on a distinctive fragment; the composer may reword around it.
+      // Match on a distinctive fragment; the renderer may reword around it.
       // Escaped, because the page carries the escaped form — a vendor error
       // with an `&` in its first characters must not read as a missing warning.
       const stem = escapeHtml(

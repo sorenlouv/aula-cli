@@ -18,7 +18,7 @@
 
 import { localIsoDate } from '../integrations/types.ts';
 import { extractHits } from './rules.ts';
-import type { BriefInput, Card, Placement, RankedBrief, RankedCard, SourceItem } from './types.ts';
+import type { BriefInput, Card, Placement, RankedBrief, RankedCard } from './types.ts';
 
 /** At most this many cards on the page. The rest are folded, not dropped. */
 export const CARD_CAP = 12;
@@ -187,10 +187,4 @@ export function explain(brief: RankedBrief): string {
   for (const card of brief.folded) lines.push(line(card));
   for (const note of brief.degraded) lines.push(`\n! ${note}`);
   return lines.join('\n');
-}
-
-/** Sources the page shows inside the calendar fold. */
-export function appointments(brief: RankedBrief): SourceItem[] {
-  const hidden = new Set(brief.hidden.map((item) => item.key));
-  return brief.input.items.filter((item) => item.kind === 'personal' && !hidden.has(item.key));
 }

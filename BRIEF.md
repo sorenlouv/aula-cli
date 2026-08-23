@@ -72,8 +72,11 @@ from `hidden` before rendering.
 | Failures are visible | the datastatus block exists and names every failed fetch |
 | Noise stays down | no hidden source renders as a card |
 | Portable | HTML parses; zero external resource references |
-| Legible | colours from the token set; contrast passes |
-| Print-safe | `<details>` holding brief content forced open; only *Læs mere* source dumps stay collapsed |
+
+Two further guarantees come from the only renderer rather than `validatePage`:
+legibility uses the tested colour tokens and contrast pairs in `styles.ts`;
+print safety is covered by the print tests, which open brief content and keep
+only the *Læs mere* source dumps collapsed.
 
 ## The page
 

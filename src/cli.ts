@@ -131,7 +131,7 @@ Options for new:
   --no-deploy                  Do not update the hosted copy this run
   --catch-up                   Do nothing if today's overview is already complete
                                (every scheduled trigger passes this)
-  --explain                    Print the score breakdown behind the ranking
+  --explain                    Print model priority, date placement and sources
   --pdf, --png                 Also write a PDF / PNG
   --out <dir>                  Write somewhere other than ~/.aula/brief
 

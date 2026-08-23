@@ -428,7 +428,7 @@ const PROMPT_TEXT_LIMIT = 8000;
  * and hides the question that was asked this morning. A post, by contrast, puts
  * its point at the top.
  *
- * Only the prompt is trimmed. `source.text` stays whole, so quote validation
+ * Only the prompt is trimmed. `source.text` stays whole, so date grounding
  * still checks against everything that was fetched, and the page still shows
  * every message the reader expands.
  */

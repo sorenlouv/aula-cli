@@ -1,7 +1,7 @@
 /**
  * The `aula brief` pipeline.
  *
- *   collect → extract (rules ∪ model) → rank → compose → validate → publish → deploy
+ *   collect → extract (model, or rules fallback) → rank → render → validate → publish → deploy
  *
  * Every stage after `collect` degrades rather than throws. A brief that is
  * missing the model's phrasing is still useful; a brief that failed to appear

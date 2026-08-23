@@ -78,11 +78,11 @@ export function doneKeys(card: Pick<Card, 'sourceKeys' | 'date'>): string[] {
 /**
  * The behaviour half, inlined into the document by `publish.ts`.
  *
- * Written as a plain script rather than as markup, because `compose.ts` is the
+ * Written as a plain script rather than as markup, because `render.ts` is the
  * one place page markup is written and that rule is worth more than the
  * convenience of building the ticks here. Everything this touches — the tick
  * buttons, the done-toggle, the empty-state panel — is rendered by the
- * composer and simply wired up here. What makes something tickable is the
+ * renderer and simply wired up here. What makes something tickable is the
  * `data-done-keys` attribute, not its class: a card and a calendar row are
  * different shapes with the same contract.
  *
@@ -147,7 +147,7 @@ export const DONE_SCRIPT = `
     var count = section.querySelector('[data-count]');
     if (count) count.textContent = String(live);
 
-    // Nothing left to do is a result, not an empty section — the composer
+    // Nothing left to do is a result, not an empty section — the renderer
     // renders the sentence for it and this is where it earns its place.
     var empty = section.querySelector('[data-empty]');
     if (empty) empty.hidden = live > 0;

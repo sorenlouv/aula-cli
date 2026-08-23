@@ -129,19 +129,14 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
   const now = opts.now ?? new Date();
   const family = await resolveFamily(client);
 
-  const [digest, childGroups, albums, notifications] = await Promise.all([
+  const [digest, childGroups, albums] = await Promise.all([
     buildDigest(client, { days: opts.days, isoWeek: opts.isoWeek, family, now }),
     loadGroups(client, family.children).catch((): ChildGroups[] => []),
     collectAlbums(client, family, {
       limit: 12,
       since: new Date(now.getTime() - opts.days * 86_400_000),
     }).catch(() => []),
-    client.getNotifications().catch(() => []),
   ]);
-
-  // Badges are a terrible priority signal here — in the live account 152 of 159
-  // were photo uploads — so the count is split rather than shown as one number.
-  const newMediaCount = notifications.filter((n) => n.notificationEventType === 'NewMedia').length;
 
   const classGroupNames = new Set(
     childGroups.map((cg) => cg.className).filter((n): n is string => Boolean(n)),
@@ -334,7 +329,6 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
       at: album.createdAt,
       childNames: childrenForGroups(album.groups, childGroups),
     })),
-    newMediaCount,
   };
 }
 
@@ -386,16 +380,9 @@ function summariseWarning(warning: string): string {
  *
  * **They are shown, not analysed.** An appointment becomes a dated item like
  * any other; the page folds the lot into one collapsed *Egen kalender* whose
- * summary names today's and any that share a day with something the school
- * asked for (see `calendarSection` in `compose.ts`). An earlier version computed clashes here — against
- * each child's registered komme/gå hours and against Aula's calendar — and it
- * was removed: this family has no registered hours at all (33 template rows,
- * none with a date, one with a time) and Aula's own calendar was empty in 7 of
- * 13 briefs, so it could not fire. It could only misfire, and a false clash
- * promotes to `act`, where the cap of five would push a real school deadline
- * off the page. A reader looking at Thursday's dentist beside Thursday's
- * forældremøde draws the conclusion anyway, and knows things the arithmetic
- * never could — how far the dentist is, and whether a grandparent can fetch.
+ * summary names today's and any that share a day with a card (see
+ * `calendarSection` in `render.ts`). This puts the facts beside each other for
+ * the reader; code never infers a clash or the absence of one.
  *
  * The page also never reports the *absence* of a clash. A reassurance is a
  * claim, it would be made every quiet week, and it would train the reader to

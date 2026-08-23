@@ -150,7 +150,7 @@ section.reveal .cal-row.is-done .cal-title{text-decoration:line-through}
 .divider{margin:16px 0 10px;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
   color:var(--ink-3);font-weight:650}
 
-/* The family's own calendar — see calendarSection in compose.ts. One line per
+/* The family's own calendar — see calendarSection in render.ts. One line per
    appointment, days as plain labels, folded shut: the summary carries what is
    worth knowing before the fold is opened. */
 .cal>summary{font-weight:500;font-size:14px;color:var(--ink-2);gap:14px;line-height:1.45}
@@ -229,7 +229,7 @@ footer{margin-top:26px;text-align:center;color:var(--ink-3);font-size:12px}
      would print as a heading with nothing under it. Not this one: it holds
      verbatim source material rather than brief content, and expanding all of
      it would turn two forwardable pages into twenty. What the brief actually
-     says — title, why, quote, the conversation's summary — is outside the
+     says — title, why and summary — is outside the
      toggle and prints; the original stays one link away in Aula. See the
      beforeprint hook in publish.ts, which skips these to match. */
   .more{display:none}
