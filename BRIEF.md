@@ -226,36 +226,71 @@ one-line summaries, and the topline.
 ### The model contract
 
 `claude -p` gets compact JSON on stdin (ids, dates, authors, child mapping,
-trimmed text — about 20 KB, so one call is cheap) and must return:
+trimmed text — about 20 KB, so one call is cheap). **The answer's shape is a
+schema, not a request.** `extractionSchema` is built per run and passed as
+`--json-schema`, which the CLI turns into a forced tool call whose parameters
+are that schema; the envelope comes back with `stop_reason: "tool_use"` and a
+parsed `structured_output`.
 
-```jsonc
-{
-  "topline": "…",
-  "signals": [{
-    "kind": "action|deadline|event|bring|info|social",
-    "title": "…",            // Danish; imperative for actions
-    "child": "Alma|Viggo|Ida|all",
-    "dueAt": "2026-09-01" | null,
-    "urgency": "now|week|later|fyi",
-    "sourceType": "post|thread|plan|event|presence",
-    "sourceId": 13311009,
-    "quote": "Ansøgningsfristen er tirsdag den 1. september 2026",
-    "why": "…"
-  }],
-  "childSummaries": { "Alma": "…" },
-  "conversationSummaries": { "thread:5001": "…" },  // 3+ messages only
-  "relevance": { "post:13311009": "hide|low|normal|high" }   // one per source
-}
-```
+Because the schema names *this* run's data, three things that used to be prose
+with a validator behind them are now unstateable:
 
-Validated before anything renders: `sourceId` must exist; `quote` must be a
-literal substring of that source (the strongest anti-fabrication guard
-available); `dueAt` must parse and not predate its source; `relevance` keys must
-be supplied sources, and a missing map is retried because the family's list
-reaches ranking through nothing else; a `conversationSummaries` key must name a
-real exchange. Failures are fed back for exactly one retry, then fall through to
-rules-only with the page marked degraded in *Datastatus*. Extraction is cached
-against a hash of the input.
+| Was a rule | Is now |
+| --- | --- |
+| "sourceKey SKAL være en af de kilder du fik" | an `enum` of the supplied keys |
+| "én relevance pr. sourceKey, ingen udeladt" | every key in `required` |
+| "child er barnets fornavn" | an `enum` of the children, plus `null` |
+| `"dueAt": "YYYY-MM-DD eller null"` | `format: "date"` on the string |
+
+The last one is the cautionary tale: it was deleted as redundant when the schema
+arrived, and the next live run returned `writtenAt` verbatim for every calendar
+source — a full ISO timestamp, three signals dropped. A format the prose carried
+has to land *in the schema*, not nowhere.
+
+The compose call is constrained the same way. `composeSchema` names the signals
+the composer may place — every tier but `hidden`, every source but the family's
+calendar — so the two placements `parsePlan` used to refuse cannot be uttered.
+The refusals stay regardless: the schema is a flag on one call, and a renderer
+that reopened what the family hid would fail silently rather than loudly.
+
+**Per-field semantics live in the schema's `description`s, not the prompt.** The
+docs confirm the model reads them, and a rule sitting on the field it governs
+cannot be misapplied to a neighbouring one. So `quote`, `dueAt`, `concernsChild`,
+`urgency`, `kind` and the four `relevance` verdicts are described where they are
+declared, and the prompt shrank by 40% without losing a word of judgment.
+
+Two things stayed in the prompt, and the reason is the same for both: **they are
+not output fields.** `text` and `audience` are properties of the *sources* in the
+payload, so the output schema has nowhere to put them — a schema describes what
+the model writes, never what it reads. Cross-field rules stay too, because they
+belong to no single field: the dedupe rule is about the relationship between
+sources, and "compute no clash" governs what may be written into *any* text field.
+(The calendar rule that used to dictate kind/child/dueAt/concernsChild for an
+appointment is gone: `rank.ts` overwrites all four for a `personal` source, so
+the prose was asking for something the code already guarantees.)
+
+A description is written **once**, on the field it governs. Repeating the four
+`relevance` verdicts on every per-source key put ~6,700 tokens of one sentence
+into the schema on a 45-source morning — more than the source text itself — and
+it went unnoticed because the size was measured on a one-source fixture. The
+verdicts sit on the parent object; each key is a bare enum. Measure schemas at
+the real source count.
+
+`format: "date"` rather than `pattern`: the pattern worked when tested, but
+Anthropic's structured-output docs list `pattern` as unsupported and `format` as
+supported, and a load-bearing guard should not rest on a keyword that happens to
+work.
+
+What a schema cannot check stays prose, and keeps its validator: `quote` must be
+a literal substring of its source (the strongest anti-fabrication guard
+available), and `dueAt` must be grounded in the source text and not predate it —
+a schema can demand a date-shaped string, but only `dates.ts` knows whether that
+date is in the text. Those two are all a retry can still fix; failures fall
+through to rules-only with the page marked degraded in *Datastatus*.
+
+Extraction is cached against a hash of the payload **and the instructions**, so
+editing the prompt takes effect on the next run rather than being masked by an
+entry the old wording produced.
 
 Trimming is direction-aware: threads are cut from the *front*, everything else
 from the back, because threads arrive oldest-first and keeping the opening

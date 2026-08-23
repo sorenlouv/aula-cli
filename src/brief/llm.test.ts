@@ -368,7 +368,12 @@ describe('the claude subprocess', () => {
     test('reads the result envelope, last JSON line wins', () => {
       const out =
         'some warning first\n{"type":"result","is_error":false,"result":"hello","permission_denials":[{"tool_name":"Bash"}]}\n';
-      expect(parseClaudeJson(out)).toEqual({ text: 'hello', isError: false, denials: ['Bash'] });
+      expect(parseClaudeJson(out)).toEqual({
+        text: 'hello',
+        isError: false,
+        structured: undefined,
+        denials: ['Bash'],
+      });
     });
 
     test('is null when stdout is not an envelope at all', () => {
@@ -416,13 +421,33 @@ describe('the claude subprocess', () => {
   describe('runClaude', () => {
     test('returns the envelope text, tools off', async () => {
       const f = fake('ok', '{"signals":[]}');
-      expect(await runClaude('instr', '{}', { timeoutMs: 5_000 })).toBe('{"signals":[]}');
+      expect((await runClaude('instr', '{}', { timeoutMs: 5_000 })).text).toBe('{"signals":[]}');
       expect(f.calls()[0]).toContain('--tools  --strict-mcp-config --output-format json');
+    });
+
+    test('a schema is handed to the CLI, and its parsed answer is preferred', async () => {
+      // The flag is what makes the answer a forced tool call; `structured_output`
+      // is that call's parameters, already checked against the schema.
+      const f = fake('ok', '{"signals":[]}');
+      const reply = await runClaude('instr', '{}', {
+        timeoutMs: 5_000,
+        schema: { type: 'object' },
+      });
+      expect(f.calls()[0]).toContain('--json-schema');
+      expect(reply.text).toBe('{"signals":[]}');
+    });
+
+    test('no schema means no flag, so the plain call is unchanged', async () => {
+      const f = fake('ok', '{"signals":[]}');
+      await runClaude('instr', '{}', { timeoutMs: 5_000 });
+      expect(f.calls()[0]).not.toContain('--json-schema');
     });
 
     test('tries once more after a stall, and only after a stall', async () => {
       const f = fake('stall-then-ok', 'second');
-      expect(await runClaude('instr', '{}', { timeoutMs: 300, graceMs: 200 })).toBe('second');
+      expect((await runClaude('instr', '{}', { timeoutMs: 300, graceMs: 200 })).text).toBe(
+        'second',
+      );
       expect(f.calls()).toHaveLength(2);
     });
 
@@ -442,7 +467,7 @@ describe('the claude subprocess', () => {
 
     test('the url the fake echoes back survives the envelope untouched', async () => {
       fake('ok', VALID);
-      expect(await runClaude('instr', '{}', { timeoutMs: 5_000 })).toBe(VALID);
+      expect((await runClaude('instr', '{}', { timeoutMs: 5_000 })).text).toBe(VALID);
     });
   });
 });

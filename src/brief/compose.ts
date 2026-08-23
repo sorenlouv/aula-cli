@@ -273,25 +273,84 @@ function composePayload(
   };
 }
 
-const INSTRUCTIONS = `Du prioriterer og formulerer en dansk "Aula AI oversigt" til en travl forælder, der sjældent åbner Aula. Selve siden bygges lokalt af en fast skabelon — du bestemmer rækkefølge, sektion og ordlyd.
-
-Input er JSON på stdin med FÆRDIGT VALIDEREDE fakta. Du må omarrangere, omformulere og prioritere — men du må ALDRIG tilføje fakta, datoer eller citater, der ikke står i inputtet. Citater, datoer, kilder, links og "Ny"-markeringer indsætter skabelonen selv.
-
-Svar KUN med ét JSON-objekt. Ingen kodeblok. Ingen forklaring:
-{
-  "topline": "Én-to sætninger: dagens vigtigste konklusion først.",
-  "act": [{"signalId": "…", "title": "kortere omskrivning (valgfri)", "why": "én konkret sætning (valgfri)"}],
-  "week": [{"signalId": "…", "title": "…", "why": "…"}],
-  "emptyAct": "Rolig sætning til når 'act' er tom (valgfri)"
+/**
+ * The plan's shape, built per run so it can name *this* run's signals.
+ *
+ * `signalId` is an enum of the ids the composer is actually allowed to place —
+ * everything the payload showed it, which is every tier except `hidden` and
+ * every source except the family's own calendar. Both exclusions were prose
+ * rules with a refusal in `parsePlan` behind them, and both become unstateable
+ * here: what the family asked to put away cannot be reopened, and an
+ * appointment cannot be promoted into a task, because neither id exists to be
+ * named. `parsePlan` keeps the refusals anyway — they are the guard for the
+ * path where the flag is absent, and they cost nothing when they never fire.
+ *
+ * Optional fields are nullable-and-required rather than absent: a strict schema
+ * is clearest when every key is present, and `text()` already reads null as
+ * "not given". `topline` and `emptyAct` are optional in the same way.
+ */
+export function composeSchema(brief: RankedBrief) {
+  const placeable = brief.signals
+    .filter((s) => s.tier !== 'hidden' && !isPersonal(s))
+    .map((s) => s.id);
+  const entry = {
+    type: 'object',
+    properties: {
+      signalId: placeable.length > 0 ? { enum: placeable } : { type: 'string' },
+      title: {
+        type: ['string', 'null'],
+        description:
+          'Omskrivning af punktets titel — kun for at gøre den kortere, mere konkret eller bydende. Null hvor inputtets formulering allerede er god.',
+      },
+      why: {
+        type: ['string', 'null'],
+        description:
+          'Én konkret sætning om, hvorfor punktet betyder noget for familien. Null hvor inputtets "why" holder, eller titlen siger det hele.',
+      },
+    },
+    required: ['signalId', 'title', 'why'],
+    additionalProperties: false,
+  };
+  return {
+    type: 'object',
+    properties: {
+      topline: {
+        type: ['string', 'null'],
+        description:
+          'Én-to sætninger: dagens vigtigste konklusion først, detaljen bagefter. Behold eller skærp den topline, du har fået; null for at beholde den som den er.',
+      },
+      act: {
+        type: 'array',
+        items: entry,
+        description: 'Sektionen "Kræver handling", vigtigst først — rækkefølgen ER prioriteringen.',
+      },
+      week: {
+        type: 'array',
+        items: entry,
+        description:
+          'Sektionen "Kommende". Skabelonen viser den i datorækkefølge, så her bestemmer du ordlyden og kun rækkefølgen mellem punkter på samme dag.',
+      },
+      emptyAct: {
+        type: ['string', 'null'],
+        description:
+          'Den rolige sætning, der vises, når intet kræver handling. Null for standarden.',
+      },
+    },
+    required: ['topline', 'act', 'week', 'emptyAct'],
+    additionalProperties: false,
+  };
 }
 
-Feltnavnene er engelske; alt indhold du skriver, er dansk.
+const INSTRUCTIONS = `Du prioriterer og formulerer en dansk "Aula AI oversigt" til en travl forælder, der sjældent åbner Aula. Selve siden bygges lokalt af en fast skabelon — du bestemmer rækkefølge og ordlyd. Svarets felter er beskrevet i skemaet; alt indhold du skriver, er dansk.
 
-Regler:
-1. "act" og "week" er signalId'er fra inputtets "act" og "week". I "act" ER din rækkefølge prioriteringen — vigtigst først; "relevance" er familiens egen vægtning af kilden ("high" før "normal" før "low"), og den vejer tungere end din. Alt du udelader fra "act", vises alligevel nederst i sektionen, så udeladelse er nedprioritering, aldrig sletning. Skabelonen viser "Kommende" i datorækkefølge, så i "week" bestemmer du ordlyden og kun rækkefølgen mellem punkter på samme dag; et punkt du udelader dér, vises på sin dato med inputtets ordlyd. Et punkt fra "context" må promoveres, hvis det reelt beder om noget.
-2. "topline": behold eller skærp den givne topline. Konklusionen først, detaljen bagefter.
-3. "title"/"why" udelades hvor inputtets formulering allerede er god; omskriv kun for at gøre det kortere, mere konkret eller imperativt.
-4. Skriv alt på dansk. Hold det skimbart på 20 sekunder.`;
+Input er JSON med færdigt validerede fakta. Du må omarrangere, omformulere og prioritere. Tilføj ikke fakta, datoer eller citater, der ikke står i inputtet — citater, datoer, kilder, links og "Ny"-markeringer indsætter skabelonen selv, og en dato i din tekst, som ingen kilde dækker, bliver fjernet igen.
+
+Tre ting, som går på tværs af felterne:
+- "relevance" er familiens egen vægtning af en kilde ("high" før "normal" før "low"), og den vejer tungere end din.
+- Alt du udelader, vises alligevel — i "act" nederst i sektionen, i "week" på sin dato med inputtets egen ordlyd. Udeladelse er nedprioritering, aldrig sletning.
+- Et punkt fra "context" må placeres i "act" eller "week", hvis det reelt beder om noget.
+
+Hold det skimbart på 20 sekunder.`;
 
 type ComposeResult = { html: string; problems: string[] };
 
@@ -349,6 +408,10 @@ export function parsePlan(
         continue;
       }
       const signal = byId.get(id);
+      // This and the appointment refusal below are now the schema's job too —
+      // neither id is in the enum the model answers with (see `composeSchema`).
+      // They stay because the schema is a flag on one call, and a renderer that
+      // reopened what the family hid would be a silent failure, not a loud one.
       if (signal?.tier === 'hidden') {
         problems.push(`${field}: ${id} er skjult støj og blev ikke vist`);
         continue;
@@ -464,9 +527,12 @@ export async function composePage(
     JSON.stringify(payload),
     {
       timeoutMs: opts.timeoutMs ?? 300_000,
+      schema: composeSchema(brief),
     },
   );
-  const { plan, problems } = parsePlan(parseJsonLoosely(answer), brief);
+  // Schema-checked by the CLI on the ordinary path; the loose parse is what
+  // remains for an envelope that arrives without `structured_output`.
+  const { plan, problems } = parsePlan(answer.structured ?? parseJsonLoosely(answer.text), brief);
   const html = renderPlan(brief, plan, {
     topline: opts.topline ?? null,
     summaries: opts.summaries ?? {},

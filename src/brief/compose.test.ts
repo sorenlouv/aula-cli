@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { briefInput, sourceItem } from '../testing/brief-fixtures.ts';
-import { fallbackPage, parsePlan, renderPlan } from './compose.ts';
+import { composeSchema, fallbackPage, parsePlan, renderPlan } from './compose.ts';
 import type { BriefInput, RankedBrief, RankedSignal, SourceItem } from './types.ts';
 import { validatePage } from './validate.ts';
 
@@ -225,6 +225,53 @@ describe('parsePlan', () => {
     expect(html).not.toContain('Flyt tandlægen');
     expect(html).not.toContain('sammenstød');
     expect(html).toContain('åbn i kalender');
+  });
+});
+
+describe('composeSchema', () => {
+  test('names every placeable signal, and nothing the composer may not place', () => {
+    const brief: RankedBrief = { ...BRIEF, signals: [MUST_SHOW, UPCOMING, HIDDEN, DENTIST] };
+    const schema = composeSchema(brief) as {
+      properties: { act: { items: { properties: { signalId: { enum?: string[] } } } } };
+    };
+    const ids = schema.properties.act.items.properties.signalId.enum;
+    expect(ids).toContain(MUST_SHOW.id);
+    expect(ids).toContain(UPCOMING.id);
+    // What the family hid cannot be named, so it cannot be reopened.
+    expect(ids).not.toContain(HIDDEN.id);
+    // Nor can an appointment be promoted into something to do.
+    expect(ids).not.toContain(DENTIST.id);
+  });
+
+  test('a context signal is placeable, because promoting one is allowed', () => {
+    const context: RankedSignal = { ...UPCOMING, id: 'post:8#0', tier: 'context' };
+    const schema = composeSchema({ ...BRIEF, signals: [context] }) as {
+      properties: { week: { items: { properties: { signalId: { enum?: string[] } } } } };
+    };
+    expect(schema.properties.week.items.properties.signalId.enum).toContain(context.id);
+  });
+
+  test('an empty enum is never emitted — it is not a valid schema', () => {
+    const schema = composeSchema({ ...BRIEF, signals: [HIDDEN] }) as {
+      properties: { act: { items: { properties: { signalId: Record<string, unknown> } } } };
+    };
+    expect(schema.properties.act.items.properties.signalId).toEqual({ type: 'string' });
+  });
+
+  test('optional fields are nullable rather than absent, and null reads as “not given”', () => {
+    const { plan, problems } = parsePlan(
+      {
+        topline: null,
+        emptyAct: null,
+        act: [{ signalId: MUST_SHOW.id, title: null, why: null }],
+        week: [],
+      },
+      BRIEF,
+    );
+    expect(problems).toEqual([]);
+    expect(plan.topline).toBeUndefined();
+    expect(plan.emptyAct).toBeUndefined();
+    expect(plan.act).toEqual([{ signalId: MUST_SHOW.id }]);
   });
 });
 

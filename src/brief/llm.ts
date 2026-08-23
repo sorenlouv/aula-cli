@@ -158,6 +158,12 @@ async function drain<T>(
 export type ClaudeReply = {
   text: string;
   isError: boolean;
+  /**
+   * The answer already parsed and schema-checked by the CLI, present only when
+   * the call passed `--json-schema`. Preferred over `text`: it cannot be a
+   * fenced block, a preamble, or JSON that merely looks close enough.
+   */
+  structured: unknown;
   /** Tools the session wanted and was refused — the deploy's clearest failure signal. */
   denials: string[];
 };
@@ -181,6 +187,7 @@ export function parseClaudeJson(stdout: string): ClaudeReply | null {
     return {
       text: typeof parsed.result === 'string' ? parsed.result : '',
       isError: parsed.is_error === true,
+      structured: parsed.structured_output,
       denials,
     };
   } catch {
@@ -222,8 +229,8 @@ export function parseClaudeJson(stdout: string): ClaudeReply | null {
 export async function runClaude(
   instructions: string,
   stdin: string,
-  opts: { timeoutMs?: number; graceMs?: number } = {},
-): Promise<string> {
+  opts: { timeoutMs?: number; graceMs?: number; schema?: unknown } = {},
+): Promise<{ text: string; structured: unknown }> {
   const timeoutMs = opts.timeoutMs ?? 240_000;
   for (let attempt = 1; attempt <= 2; attempt++) {
     const run = await spawnClaude(
@@ -235,6 +242,13 @@ export async function runClaude(
         '--strict-mcp-config',
         '--output-format',
         'json',
+        // The CLI turns this into a forced tool call whose parameters are the
+        // schema, so the answer is validated against it before we ever see it.
+        // Verified against the installed CLI: the envelope comes back with
+        // `stop_reason: "tool_use"` and a parsed `structured_output`, and a
+        // value outside an enum cannot be produced even when the prompt asks
+        // for one. What the schema can state, the prompt no longer has to.
+        ...(opts.schema === undefined ? [] : ['--json-schema', JSON.stringify(opts.schema)]),
         ...modelEffortArgs(),
       ],
       { stdin, timeoutMs, ...(opts.graceMs !== undefined ? { graceMs: opts.graceMs } : {}) },
@@ -245,7 +259,7 @@ export async function runClaude(
       const detail = reply?.text.trim() || run.stderr.trim() || run.stdout.trim() || '(no stderr)';
       throw new Error(`claude -p exited ${run.code}: ${detail}`);
     }
-    return (reply?.text ?? run.stdout).trim();
+    return { text: (reply?.text ?? run.stdout).trim(), structured: reply?.structured };
   }
   throw new Error(`claude -p timed out after ${Math.round(timeoutMs / 1000)}s (2 attempts)`);
 }
@@ -526,48 +540,161 @@ function extractionPayload(input: BriefInput) {
   };
 }
 
-const INSTRUCTIONS = `Du læser Aula-indhold for en dansk familie og udtrækker de ting, en travl forælder skal vide.
+/**
+ * The answer's shape, built per run so it can name *this* run's sources.
+ *
+ * Everything a schema can state, the prompt no longer says — and three rules
+ * stop being requests and become impossible to break:
+ *
+ * - `sourceKey` is an enum of the keys we supplied, so a citation to a source
+ *   that does not exist cannot be produced. It used to be prose ("opfind
+ *   aldrig et"), checked afterwards, and dropped the signal when violated.
+ * - `relevance` lists every source in `required`, so the map cannot come back
+ *   short. That was the one validation failure worth a whole retry, because
+ *   the family's list reaches ranking through nothing else.
+ * - `child` is an enum of the children's names plus null, so a fourth child
+ *   cannot be invented.
+ *
+ * Field semantics live in `description`s here, on the field they govern, rather
+ * than in the prompt: the docs confirm the model reads them, and a rule beside
+ * its field cannot be misapplied to a neighbour. Cross-field rules and the
+ * meaning of *input* fields stay in the prompt — a schema describes what the
+ * model writes, never what it reads.
+ *
+ * The per-source `relevance` entries carry no description of their own. One
+ * verdict definition sits on the parent object; repeating it on every key put
+ * ~6,700 tokens of the same sentence in the schema on a 45-source morning.
+ *
+ * Two checks the schema cannot make stay with `validateExtraction`: `quote` as
+ * a literal substring of its source, and `dueAt` as a date the source text
+ * actually supports (`dates.ts`). `format: "date"` buys the shape — never a
+ * timestamp — and that is all a schema can know about a date.
+ */
+const VERDICT = { enum: ['hide', 'low', 'normal', 'high'] };
 
-Input er JSON på stdin: dagens dato, børnene, og en liste af kilder med fuld tekst. Feltnavnene er engelske; alt indhold du skriver, er dansk.
+export function extractionSchema(input: BriefInput) {
+  const sourceKeys = input.items.map((item) => item.key);
+  const firstNames = input.family.children.map((c) => c.firstName);
+  const threadKeys = input.items
+    .filter((item) => (item.conversation?.messages.length ?? 0) >= CONVERSATION_MIN_MESSAGES)
+    .map((item) => item.key);
 
-Svar KUN med JSON i præcis denne form, uden kodeblok og uden forklaring udenom:
-{
-  "topline": "én dansk sætning om ugens tilstand",
-  "signals": [
-    {
-      "kind": "action|deadline|event|bring|info|social",
-      "title": "kort dansk titel, bydeform hvis det er noget der skal gøres",
-      "child": "barnets fornavn, eller null hvis det gælder alle/ingen bestemt",
-      "dueAt": "YYYY-MM-DD eller null",
-      "urgency": "now|week|later|fyi",
-      "quote": "ORDRET tekststump fra kildens tekst, som belæg",
-      "why": "kort: hvorfor det betyder noget for netop denne familie",
-      "concernsChild": true/false,
-      "sourceKey": "kildens sourceKey"
-    }
-  ],
-  "childSummaries": { "Fornavn": "1-2 sætninger om hvad der sker for barnet" },
-  "conversationSummaries": { "thread:123": "1-2 sætninger: hvad samtalen handler om, og hvor den står nu" },
-  "relevance": { "kildens sourceKey": "hide|low|normal|high" }
+  return {
+    type: 'object',
+    properties: {
+      topline: {
+        type: 'string',
+        description: 'Én dansk sætning om ugens tilstand. Konklusionen først.',
+      },
+      signals: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            kind: {
+              enum: ['action', 'deadline', 'event', 'bring', 'info', 'social'],
+              description:
+                'Hvad punktet er: "bring" noget der skal medbringes, "action" noget der skal gøres, "deadline" en frist, "event" noget der sker, "info" godt at vide, "social" en hyggelig oplysning.',
+            },
+            title: {
+              type: 'string',
+              description: 'Kort dansk titel. Bydeform, hvis det er noget der skal gøres.',
+            },
+            child: {
+              enum: [...firstNames, null],
+              description: 'Barnets fornavn, eller null hvis det gælder alle eller ingen bestemt.',
+            },
+            dueAt: {
+              type: ['string', 'null'],
+              format: 'date',
+              description:
+                'Dagen det gælder. Den skal have belæg i kildens tekst — som dato, eller som ugedag eller uge, der kan regnes om. Står der ingen, er feltet null. Datoen efterprøves mod kilden bagefter; et signal med en dato uden belæg bliver kasseret.',
+            },
+            urgency: {
+              enum: ['now', 'week', 'later', 'fyi'],
+              description:
+                'Hvor hurtigt det haster: "now" i dag, "week" inden for ugen, "later" længere ude, "fyi" ingenting der haster.',
+            },
+            quote: {
+              type: 'string',
+              description:
+                'En ordret, sammenhængende tekststump fra netop denne kildes "text" — den sætning, der gør punktet relevant for forælderen. Efterprøves som ordret understreng bagefter; findes der ikke belæg, så lav ikke signalet.',
+            },
+            why: {
+              type: ['string', 'null'],
+              description:
+                'Kort: hvorfor det betyder noget for netop denne familie. Null hvis titlen siger det hele.',
+            },
+            concernsChild: {
+              type: 'boolean',
+              description:
+                'True når beskeden kræver noget af forældrene vedrørende deres eget barn — tilmelding af barnet, noget barnet skal have med, en dag barnet skal møde anderledes, en aflysning der rammer barnets dag. False når det er noget, familien selv kan vælge til: et kursustilbud, en temaaften, et netværk. Forskellen er ikke, hvor bredt beskeden er sendt ud: skolefoto er sendt til hele skolen og kræver noget af os, forældrekurset er sendt til de samme og gør ikke.',
+            },
+            sourceKey: {
+              ...(sourceKeys.length > 0 ? { enum: sourceKeys } : { type: 'string' }),
+              description: 'Kilden signalet er læst ud af.',
+            },
+          },
+          required: [
+            'kind',
+            'title',
+            'child',
+            'dueAt',
+            'urgency',
+            'quote',
+            'why',
+            'concernsChild',
+            'sourceKey',
+          ],
+          additionalProperties: false,
+        },
+      },
+      childSummaries: {
+        type: 'object',
+        description: '1-2 sætninger pr. barn om, hvad der sker for det.',
+        properties: Object.fromEntries(firstNames.map((name) => [name, { type: 'string' }])),
+        additionalProperties: false,
+      },
+      conversationSummaries: {
+        type: 'object',
+        description:
+          'Kun for de tråde, der er nævnt her — de har ' +
+          `${CONVERSATION_MIN_MESSAGES}` +
+          ' beskeder eller flere, og en enkelt besked læser man hellere selv. Skriv hvad samtalen handler om, hvem der har spurgt om hvad, og om der stadig mangler et svar fra os. Læseren kan folde hele samtalen ud under dit resumé, så skriv det som en indgang til den, ikke som en erstatning.',
+        properties: Object.fromEntries(threadKeys.map((key) => [key, { type: 'string' }])),
+        additionalProperties: false,
+      },
+      relevance: {
+        type: 'object',
+        description:
+          'Din vurdering af hver enkelt kilde, også hver kalenderaftale, målt mod familiens præferencer nederst i instruktionen. Signalerne bestemmer, hvad der står på et punkt; det her bestemmer, hvor højt kilden må nå. "hide": deres liste siger, at den slags ikke skal med. "low": den betyder mindre for dem. "normal": listen siger hverken fra eller til, og indhold og rækkevidde afgør placeringen. "high": listen siger, at det her betyder noget for dem — en afsender de har nævnt, et emne de har bedt om — og så kommer kilden på siden, også uden noget konkret at udtrække af den. Har familien ingen ønsker på listen, er alt "normal".',
+        properties: Object.fromEntries(sourceKeys.map((key) => [key, VERDICT])),
+        required: sourceKeys,
+        additionalProperties: false,
+      },
+    },
+    required: ['topline', 'signals', 'childSummaries', 'conversationSummaries', 'relevance'],
+    additionalProperties: false,
+  };
 }
 
-"relevance" er din vurdering af HVER kilde — Aula-kilder og hver enkelt kalenderaftale, én pr. sourceKey, ingen udeladt — målt mod familiens ønsker nederst:
-- "hide": familiens liste siger, at den slags ikke skal med. Vises ikke.
-- "low": familiens liste siger, at det betyder mindre for dem. Vises kun i "context", aldrig som et punkt.
-- "normal": ingen af familiens ønsker taler for eller imod. Indhold og rækkevidde afgør placeringen.
-- "high": familiens liste siger, at det er vigtigt for dem — fx en afsender de har nævnt, eller et emne de har bedt om. Kommer altid på siden som et punkt, også hvis du ikke fandt noget konkret at udtrække fra den.
-Har familien ingen ønsker på listen, er alt "normal". Signalerne bestemmer, hvad der står på et punkt; "relevance" bestemmer, hvor højt kilden må nå.
+const INSTRUCTIONS = `Du læser indhold fra Aula for et eller flere børn i en institution (vuggestue, børnehave, skole) og skal sortere i de informationer, en travl forælder skal vide.
 
-Ufravigelige regler:
-- "quote" SKAL være en ordret sammenhængende tekststump fra netop den kildes "text". Find du ikke belæg, så udelad signalet.
-- "sourceKey" SKAL være en af de kilder du fik. Opfind aldrig et.
-- Kilder med type "personal" er allerede strukturerede kalenderaftaler. Vurdér hver enkelt i "relevance" som enhver anden kilde. Hvis du laver et signal for en aftale, er kind "event", dueAt datoen fra writtenAt, child null og concernsChild false. Beregn aldrig sammenstød, og skriv aldrig, at der ikke er sammenstød.
-- Opfind aldrig datoer. Står der ingen dato, sæt dueAt til null.
-- Er samme sag sendt flere gange (fx samme møde i to tråde, eller samme tilbud fra to institutioner), så lav ÉT signal for den vigtigste kilde.
-- "concernsChild" er det vigtigste felt du udfylder. Sæt det til true, når beskeden kræver noget af forældrene VEDRØRENDE deres eget barn — tilmelding af barnet, noget barnet skal have med, en dag barnet skal møde anderledes, en aflysning der rammer barnets dag. Sæt det til false, når den ikke gør.
-- Hver kilde har en "audience": "child" og "class" er skrevet af nogen, der kender barnet; "institution" er sendt til hele skolen eller hele huset; "municipal" er sendt til alle forældre i kommunen. Hvor bredt noget er sendt ud, afgør ikke i sig selv, om det er relevant.
-- "conversationSummaries" laver du KUN for kilder med "messageCount" på ${CONVERSATION_MIN_MESSAGES} eller derover — en enkelt besked læser man hellere selv. Skriv hvad samtalen handler om, hvem der har spurgt om hvad, og om der stadig mangler et svar fra os. Læseren kan folde hele samtalen ud under dit resumé, så skriv det som en indgang til den, ikke som en erstatning.
-- Skriv alt på dansk.`;
+Formålet med oversigten: forælderen skal kunne lade være med at åbne Aula uden at gå glip af noget. Det, der betyder noget, ligger spredt ud over opslag, beskeder, ugeplaner og kalender, blandet med irrelevante beskeder og "støj". Din opgave er at skille de to ting ad. Hold det for øje i hver eneste vurdering:
+- Det vigtigste: information forælderen aktivt skal tage stilling til og handle på eller det, der ændrer en dag: noget der skal medbringes, tilmeldes, besvares eller betales, en frist, en aflysning, et møde, en dag hvor barnet møder anderledes.
+- En kilde kan være uger eller måneder gammel og stadig være det eneste sted, datoen står. Nævner én kilde et arrangement uden dato, og en anden kilde nævner det samme med dato, så hører de sammen: brug datoen, og lav ét signal ud af dem. Forælderen har for længst glemt det oprindelige opslag  — at binde det gamle og det nye sammen er præcis det, oversigten er til for.
+- En dato, der er passeret, er ikke længere noget at handle på.
+- Intet af det, du ikke fremhæver, går tabt; det står længere nede på siden, foldet sammen. En nedprioritering koster en foldning, ikke et punkt — så vær konkret frem for at fremhæve alt for en sikkerheds skyld. Fremhæver du alt, fremhæver du intet.
+
+Input er JSON: dagens dato, børnene, og en liste af kilder. Svarets felter er beskrevet i skemaet. Alt indhold du skriver, er dansk.
+
+To felter i inputtet er værd at forstå, før du læser en kilde:
+- "text" er kildens fulde tekst. Den er den eneste autoritet på, hvad der står i kilden, og du må hverken ændre eller udvide den. Alt du hævder, skal kunne læses der.
+- "audience" fortæller, hvor bredt kilden er sendt ud: "child" og "class" er skrevet af nogen, der kender barnet, "institution" er sendt til hele skolen eller hele huset, "municipal" til alle forældre i kommunen. Det er et fingerpeg om relevans, ikke et svar — hvad kilden beder om, vejer tungere end hvor bredt den er sendt.
+
+Kilder med type "personal" er familiens egne kalenderaftaler, allerede strukturerede; vurdér dem i "relevance" som alle andre. Beregn ikke sammenstød mellem aftaler og skoledagen, og skriv ikke, at der ingen er.
+
+Er den samme sag sendt flere gange — samme møde i to tråde, samme tilbud fra to institutioner — så lav ét signal for den vigtigste kilde.`;
 
 /**
  * The family's list, appended to the instructions.
@@ -575,7 +702,9 @@ Ufravigelige regler:
  * This is where every editorial opinion in the brief now lives — including the
  * ones this tool ships with, which `preferences.ts` seeds into the file on
  * first use. What stays above, hard-coded, is only what is not an opinion:
- * quote verbatim, cite a real source, invent no dates, answer in this shape.
+ * quote verbatim, ground every date in its source, and what each field means.
+ * The answer's shape is not there at all any more — `extractionSchema` states
+ * it, and the CLI enforces it.
  * The split is deliberate — a user can argue with the judgement without being
  * able to loosen the guards.
  *
@@ -613,11 +742,18 @@ export async function extractSignals(
 ): Promise<ExtractResult> {
   const payload = extractionPayload(input);
   const instructions = withPreferences(INSTRUCTIONS, input.preferences);
-  // The preferences are part of the question, so they are part of the key.
-  // Keyed on the payload alone, a run made minutes after `aula remember` would
-  // answer from a cache entry that never saw the new wish — the feature would
-  // look broken exactly when it was being tried out.
-  const key = cacheKey({ contract: CONTRACT_VERSION, payload, preferences: input.preferences });
+  // The whole question is part of the key, not just the data it is asked about.
+  //
+  // The preferences are the obvious half: keyed on the payload alone, a run made
+  // minutes after `aula remember` would answer from an entry that never saw the
+  // new wish — the feature would look broken exactly when it was being tried out.
+  //
+  // The prompt itself is the half that bit. `instructions` used to be absent
+  // here, so editing the prompt changed nothing for any input already cached:
+  // the next run answered from an entry the old wording produced, and the edit
+  // looked like it had no effect. Hashing what was actually asked makes that
+  // impossible, and it subsumes the preferences, which travel inside it.
+  const key = cacheKey({ contract: CONTRACT_VERSION, payload, instructions });
   const cachePath = join(CACHE_DIR, `extract-${key}.json`);
 
   if (opts.useCache !== false) {
@@ -639,11 +775,18 @@ export async function extractSignals(
   // so letting it through still produces a brief — it just produces an honest
   // one. Nothing is written to the cache on this path either; a 06:30 outage
   // must not pin a degraded brief for the rest of the day.
-  const answer = await runClaude(instructions, body, { timeoutMs: opts.timeoutMs ?? 240_000 });
+  const schema = extractionSchema(input);
+  const call = { timeoutMs: opts.timeoutMs ?? 240_000, schema };
+  const answer = await runClaude(instructions, body, call);
 
+  // `structured` is the CLI's own parse of a schema-checked tool call, so on
+  // the ordinary path there is nothing to parse and nothing to fail at. The
+  // fallback stays for the case where the envelope arrives without it — an
+  // older CLI, or a shape the flag did not take — and it is the only reason
+  // `parseJsonLoosely` still has a caller here.
   let parsed: unknown;
   try {
-    parsed = parseJsonLoosely(answer);
+    parsed = answer.structured ?? parseJsonLoosely(answer.text);
   } catch {
     // The model answered, but not with JSON. The rules layer still carries the
     // brief; reporting it as a problem beats passing it off as an empty result.
@@ -658,18 +801,23 @@ export async function extractSignals(
   }
   let result = validateExtraction(input, parsed);
 
+  // What survives a retry is narrower than it was. The shape, the source keys
+  // and the completeness of `relevance` are the schema's now, so a second pass
+  // only ever fixes the two things checked against the sources themselves: a
+  // quote that is not in its source, and a date that is not in its text.
   if (result.problems.length > 0) {
     const retry = `${instructions}
 
-Dit forrige svar havde disse fejl. Ret dem og svar igen med det fulde JSON:
+Dit forrige svar havde disse fejl. Ret dem, og svar igen med det hele:
 ${result.problems.map((p) => `- ${p}`).join('\n')}`;
     try {
-      const second = await runClaude(retry, body, { timeoutMs: opts.timeoutMs ?? 240_000 });
-      const reparsed = validateExtraction(input, parseJsonLoosely(second));
+      const second = await runClaude(retry, body, call);
+      const secondParsed = second.structured ?? parseJsonLoosely(second.text);
+      const reparsed = validateExtraction(input, secondParsed);
       // Keep the retry only if it is genuinely better.
       if (reparsed.problems.length < result.problems.length) {
         result = reparsed;
-        parsed = parseJsonLoosely(second);
+        parsed = secondParsed;
       }
     } catch {
       // Keep the first result; the caller degrades gracefully.
