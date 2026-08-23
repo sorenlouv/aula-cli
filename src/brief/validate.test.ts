@@ -86,6 +86,15 @@ describe('validatePage', () => {
     expect(validatePage(html, BRIEF).map((v) => v.rule)).toContain('noise');
   });
 
+  test("checks every source a card cites, not only the card's first", () => {
+    const ranked = rankedBrief(INPUT, [{ ...CARD, sourceKeys: [SOURCE.key, COURSE.key] }]);
+    const inconsistent = { ...ranked, hidden: [COURSE] };
+
+    expect(validatePage(renderPage(inconsistent), inconsistent).map((v) => v.rule)).toContain(
+      'noise',
+    );
+  });
+
   test('catches external resources, which break the file and the PDF', () => {
     for (const bad of [
       '<img src="https://x/y.png">',

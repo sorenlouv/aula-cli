@@ -15,7 +15,7 @@ import { deployArtifact, type DeployResult } from './deploy.ts';
 import { extractCards } from './llm.ts';
 import { publish, type PublishResult } from './publish.ts';
 import { cardsFromRules, rank } from './rank.ts';
-import { renderPage } from './render.ts';
+import { renderPage, type PageOptions } from './render.ts';
 import {
   loadState,
   markSeen,
@@ -26,7 +26,7 @@ import {
   whichAreNew,
 } from './state.ts';
 import type { Card, RankedBrief } from './types.ts';
-import { validatePage } from './validate.ts';
+import { validatePage, type Violation } from './validate.ts';
 import { errorMessage } from '../validation.ts';
 
 export type BriefOptions = {
@@ -62,6 +62,24 @@ export type BriefRun = {
  * date is in the page itself.
  */
 export const BRIEF_TITLE = 'Aula AI oversigt';
+
+export function isBriefRunComplete(opts: {
+  modelWasRequested: boolean;
+  extractionRan: boolean;
+  origin: BriefRun['origin'];
+  deploymentFailed: boolean;
+  violations: readonly Violation[];
+}): boolean {
+  return (
+    (!opts.modelWasRequested || (opts.extractionRan && opts.origin === 'model')) &&
+    !opts.deploymentFailed &&
+    opts.violations.length === 0
+  );
+}
+
+export function pageViolationMessages(violations: readonly Violation[]): string[] {
+  return violations.map((violation) => `Sidekontrol: ${violation.rule} — ${violation.detail}`);
+}
 
 export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Promise<BriefRun> {
   const now = opts.now ?? new Date();
@@ -116,15 +134,23 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   const isNew = (key: string) => newKeys.has(key);
 
   const origin: BriefRun['origin'] = modelCards === null ? 'fallback' : 'model';
-  const body = renderPage(brief, {
+  const pageOptions: PageOptions = {
     topline,
     summaries,
     isNew,
     ...(origin === 'fallback' && opts.useModel !== false ? { note: 'kun reglerne' } : {}),
-  });
+  };
+  let body = renderPage(brief, pageOptions);
   // The page is held to its invariants whoever wrote the cards.
-  for (const v of validatePage(body, brief)) {
+  const violations = validatePage(body, brief);
+  for (const v of violations) {
     notes.push(`Siden: ${v.rule} (${v.detail})`);
+  }
+  brief.degraded.push(...pageViolationMessages(violations));
+  if (violations.length > 0) {
+    // Publish the usable page, but make its own validation failure visible in
+    // Datastatus. The scheduler will retry because completion is gated below.
+    body = renderPage(brief, pageOptions);
   }
 
   // ---------------------------------------------------------------- publish
@@ -153,9 +179,13 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   // model's extraction ran, its layout passed validation, and the hosted copy
   // — where one is configured — was actually refreshed. With `--no-llm` the
   // rules-only page is what was asked for, so it is complete on its own terms.
-  const complete =
-    (opts.useModel === false || (extractionRan && origin === 'model')) &&
-    deployment.status !== 'failed';
+  const complete = isBriefRunComplete({
+    modelWasRequested: opts.useModel !== false,
+    extractionRan,
+    origin,
+    deploymentFailed: deployment.status === 'failed',
+    violations,
+  });
 
   // Recorded only once the page exists, so a crash re-shows rather than hides.
   markSeen(

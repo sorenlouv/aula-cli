@@ -146,6 +146,17 @@ describe('rank: what is not a card', () => {
     expect(brief.rest).toEqual([]);
   });
 
+  test('a source cited by a card is shown, even when the model also hid it', () => {
+    const brief = rank(input([POST, THREAD]), {
+      model: [card({ id: 'a', sourceKeys: ['post:1', 'thread:2'] })],
+      rules: [],
+      hidden: ['thread:2'],
+    });
+
+    expect(brief.cards[0]?.sourceKeys).toEqual(['post:1', 'thread:2']);
+    expect(brief.hidden).toEqual([]);
+  });
+
   test('a hidden key that names no source is ignored', () => {
     const brief = rank(input([POST]), { model: [], rules: [], hidden: ['post:404'] });
     expect(brief.hidden).toEqual([]);

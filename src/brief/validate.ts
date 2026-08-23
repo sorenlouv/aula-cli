@@ -14,7 +14,7 @@
 import { escapeHtml } from '../html.ts';
 import type { RankedBrief } from './types.ts';
 
-type Violation = { rule: string; detail: string };
+export type Violation = { rule: string; detail: string };
 
 /**
  * Tags that could pull something in over the network — plus `<style>`, which
@@ -82,11 +82,18 @@ export function validatePage(html: string, brief: RankedBrief): Violation[] {
     }
   }
 
-  // 4. Noise stays down: nothing the model hid may appear as a card. A card's
-  //    open tag carries its first source; a hidden key there is a leak.
+  // 4. Noise stays down: nothing the model hid may appear as a card. The first
+  //    source has its own attribute; every source is also present as the prefix
+  //    of a done key, so a merged card must be checked there too.
   const cardTags = [...html.matchAll(/<div class="card[^"]*"[^>]*>/g)].map((m) => m[0]);
   for (const item of brief.hidden) {
-    if (cardTags.some((tag) => tag.includes(`data-source-id="${item.key}"`))) {
+    if (
+      cardTags.some((tag) => {
+        if (tag.includes(`data-source-id="${item.key}"`)) return true;
+        const done = /data-done-keys="([^"]*)"/.exec(tag)?.[1] ?? '';
+        return done.split(' ').some((key) => key.startsWith(`${item.key}|`));
+      })
+    ) {
       violations.push({
         rule: 'noise',
         detail: `skjult "${item.title}" er vist som et kort`,

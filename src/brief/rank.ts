@@ -146,6 +146,10 @@ export function rank(
     });
 
   const covered = new Set(ranked.flatMap((card) => card.sourceKeys));
+  // A contradictory answer can cite and hide the same source. Showing wins:
+  // the card depends on it, and hiding it would make the source disappear from
+  // the muted count while still appearing under Læs mere.
+  for (const key of covered) hiddenKeys.delete(key);
   const rest = input.items.filter(
     (item) => item.kind !== 'personal' && !covered.has(item.key) && !hiddenKeys.has(item.key),
   );

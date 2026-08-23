@@ -50,6 +50,12 @@ renderer and satisfies them by construction, so this is a regression net: a
 template edit that drops `data-source-id`, or a path that lets a hidden source
 through as a card, must fail loudly rather than ship quietly.
 
+A violation does not suppress publication — an imperfect page is more useful
+than none — but it is named in *Datastatus* and keeps `lastRun.complete` false,
+so the scheduler retries. For a contradictory model answer that both cites and
+hides one source, showing wins: the source remains under the card and is removed
+from `hidden` before rendering.
+
 | Invariant | Check |
 | --- | --- |
 | Nothing required was dropped | every card the ranker kept appears as `data-signal-id` |
@@ -358,7 +364,8 @@ start kills the process long after the publish landed.
 `schedule.ts` uses `caffeinate -i -s` and retries every
 `RETRY_EVERY_MINUTES` (15) for `RETRY_FOR_MINUTES` (180). Every trigger passes
 `--catch-up`; `state.json`'s `lastRun.complete` stops retries after a complete
-run.
+run. Fetch/model/deploy degradation and any rendered invariant violation keep
+it false.
 
 ## Risks
 
