@@ -1,18 +1,9 @@
 # Setting up aula-cli
 
-For the agent installing on a parent's machine; about ten minutes, most of it
-the MitID login. Ask before installing software or writing outside this
-repository. Never perform the MitID approval yourself. Report each step's
-outcome.
+Perform steps 1–4 run without stopping. Then offer the optional steps.
+`aula new` reads 2 weeks of messages: give it a 10-minute timeout; everything else should answers in seconds.
 
-Steps 1–4 run without stopping. **Then offer all four extras** — none of them
-is discoverable from the outside, and they are what makes this a tool the
-family uses rather than one that merely works — and finish with the hand-over.
-Run only what the user agrees to. `new` reads a fortnight of messages through a
-model: give it a 10-minute timeout; everything else answers in seconds.
-
-Needs macOS or Linux (Windows paths exist, untested), git, the MitID app on the
-user's phone, and for the brief the `claude` CLI on PATH.
+Needs git, the MitID app on the user's phone, and `claude` CLI on PATH.
 
 ## 1. Code and runtime
 
@@ -22,8 +13,7 @@ bun --version || curl -fsSL https://bun.sh/install | bash   # Bun ≥ 1.3; `exec
 bun install
 ```
 
-Somewhere the user can find again; if already cloned elsewhere, stay there.
-Everything runs as `bun src/cli.ts <command>` from that folder, including the
+If already cloned elsewhere, stay there. Everything runs as `bun src/cli.ts <command>` from that folder, including the
 steps that bake its path into a file.
 
 ## 2. Log in with MitID
@@ -36,17 +26,14 @@ fails saying so. Instead:
 2. Run in the background with a 10-minute timeout:
    `bun src/cli.ts login --username "<username>"`
 3. It prints a `http://127.0.0.1:…` link and opens it. Give the user the link
-   too and tell them to keep the page open: it shows whatever MitID asks — a
-   code to approve in the app, a QR pair that rotates every few seconds, or a
-   list of identities — and they approve on their phone.
+   too and tell them to keep the page open: it the MitID QR code challenge which the user must handle and they approve on their phone.
 4. Watch for `Login successful`, or a failure with its reason.
 
 `--no-browser` keeps it in the terminal for a machine with no desktop;
-`--method CODE_TOKEN` for a kodeviser; `--debug` writes a diagnostic trace to
-`~/.aula/login-trace.jsonl`. Never ask for or type their MitID
-password; the default method has none. The login refreshes automatically.
+`--method CODE_TOKEN` for numeric code instead of QR code; `--debug` writes a diagnostic trace to
+`~/.aula/login-trace.jsonl`. Never ask for or type their MitID password; the default method has none. The login refreshes automatically.
 
-A *parallel session* error (CAP008) means an earlier attempt is still live on
+A _parallel session_ error (CAP008) means an earlier attempt is still live on
 MitID's side: reject any pending approval in the app, close aula.dk tabs, wait a
 minute, retry. The CLI says this when it happens.
 
@@ -63,8 +50,7 @@ otherwise report it before continuing.
 
 ## 4. Install the skill
 
-Install the skill for the agent the parent uses. Re-running overwrites it; open
-a new session afterwards.
+Install the skill for the user's agent of choice. Re-running overwrites it; open a new session afterwards.
 
 Claude:
 
@@ -80,17 +66,13 @@ mkdir -p ~/.agents/skills/aula
 sed "s|{{AULA_CLI_DIR}}|$(pwd)|" .claude/skills/aula/SKILL.md > ~/.agents/skills/aula/SKILL.md
 ```
 
-This repository's own `AGENTS.md` is notes for people working *on* the CLI, not
-a usage guide; Codex loads it when the repo is open, and nothing in it needs
-following to use the tool.
+Do not read `AGENTS.md`. It is only for maintainers (code contributors), not end users of the CLI.
 
-## Offer these four
+## Optional steps
 
-Say what each does and let the user choose. Each writes outside this
-repository, so deleting the folder does not undo it.
+Say what each does and let the user choose. Each writes outside this repository, so deleting the cloned repo folder does not undo it.
 
-**A. `aula` from anywhere.** Needs `~/.local/bin` on PATH, which macOS does not
-have by default.
+**A. `aula` from anywhere.** Needs `~/.local/bin` on PATH, which macOS does not have by default.
 
 ```bash
 mkdir -p ~/.local/bin && printf '#!/bin/sh\nexec bun "%s/src/cli.ts" "$@"\n' "$(pwd)" > ~/.local/bin/aula && chmod +x ~/.local/bin/aula
@@ -123,9 +105,7 @@ Every later run redeploys to the same URL; `open --web` opens it.
 
 ### D. Their own calendar
 
-The overview knows the school's day, not that the dentist is at 13.30 on
-Thursday. Point it at the user's own calendars and both land on the same page,
-so they can see for themselves whether a day works.
+Integrate the user's personal calendars into the Aula overview, to show both types of events in a unified view.
 
 ```bash
 bun src/cli.ts calendars                 # every calendar Claude can see; the ones being read are marked
@@ -152,16 +132,15 @@ time, not only during setup.
 
 The model-enabled daily overview reads a fixed next-fortnight window, sends
 every appointment through the same model relevance verdicts as every Aula
-source, and reports a model or connector failure in *Datastatus*. It never
+source, and reports a model or connector failure in _Datastatus_. It never
 computes clashes or claims that a quiet-looking day has none.
 
 ## 5. Hand over
 
-Tell the user it is ready: they can ask "what did I miss in Aula?" or "har
-børnene noget i denne uge, jeg skal huske?". Standing wishes about what to
-highlight are recorded with `aula remember`; the skill covers when and how.
+Tell the user it is ready: they can now interact with Aula in natural language.
+The user may want to tune which events are relevant to them specifically. You can call `aula remember` to store their preferences, eg "Always show events from other parents"
 
-## When something is off
+## Debugging
 
 - **Exit code 2** — login expired. Log in again (step 2).
 - **`stdin is empty`** — the login was started with nothing to answer its
@@ -170,7 +149,7 @@ highlight are recorded with `aula remember`; the skill covers when and how.
 - **A weekly plan says COULD NOT BE READ** — the school's vendor failed; not an
   empty week. The warning names the vendor.
 - **Scheduled brief misbehaves** — read `~/.aula/brief/launchd.log`. `timed
-  out`: the Mac slept mid-run; the retries redo the morning. `Not logged in`:
+out`: the Mac slept mid-run; the retries redo the morning. `Not logged in`:
   `claude` has no credentials outside a terminal — run `claude` once and log in.
   `command not found`: a plugin hook off launchd's bare PATH — re-run `schedule`.
 - **Hosted link stale** — the same log's `Artifact blev ikke opdateret:` line
