@@ -54,7 +54,7 @@ export const BRIEF_CSS = `
 [hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--ink);
   font:16px/1.55 ui-sans-serif,-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
-  -webkit-font-smoothing:antialiased;overflow-wrap:anywhere}
+  -webkit-font-smoothing:antialiased}
 .wrap{max-width:940px;margin:0 auto;padding:40px 24px 80px}
 header{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap;margin-bottom:28px}
 h1{margin:0;font-size:34px;letter-spacing:-.02em;font-weight:650}
@@ -239,7 +239,7 @@ footer{margin-top:26px;text-align:center;color:var(--ink-3);font-size:12px}
   .done-toggle{border-style:solid;cursor:auto}
 }
 @media (max-width:680px){
-  .wrap{padding:26px 16px 60px}
+  .wrap{padding:26px 16px 60px;overflow-wrap:anywhere}
   h1{font-size:27px}
   .topline{font-size:17.5px}
   /* As a flex item, the chip row otherwise keeps its max-content width and

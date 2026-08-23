@@ -341,7 +341,7 @@ describe('the family’s calendar', () => {
 describe('the rest of the page', () => {
   test('phone layout lets the child-chip row shrink before it wraps', () => {
     expect(BRIEF_CSS).toContain('.kids{width:100%;min-width:0}');
-    expect(BRIEF_CSS).toContain('overflow-wrap:anywhere');
+    expect(BRIEF_CSS).toContain('.wrap{padding:26px 16px 60px;overflow-wrap:anywhere}');
   });
 
   test('per-child lines, album tiles and the kids in the header', () => {
