@@ -41,7 +41,8 @@
  */
 
 import { errorMessage, isRecord } from '../validation.ts';
-import { modelEffortArgs, spawnClaude } from '../brief/llm.ts';
+import { modelEffortArgs, spawnClaude } from '../llm/claude.ts';
+import { googleCalendarToolRequest } from '../llm/requests/google-calendar.ts';
 
 /** Generous for a call measured at 8–9s; short enough to cost minutes, not a morning. */
 const TIMEOUT_MS = 120_000;
@@ -183,11 +184,7 @@ async function attemptTool(
   opts: { timeoutMs: number },
 ): Promise<unknown> {
   const name = `${TOOL_PREFIX}${tool}`;
-  const prompt = [
-    instruction,
-    'Kald ingen andre værktøjer. Sammenfat ikke svaret.',
-    'Svar derefter kun med ordet DONE.',
-  ].join('\n');
+  const prompt = googleCalendarToolRequest.prompt({ instruction });
 
   // `claude` needs `$USER` to find its keychain credentials: with `HOME` and
   // `PATH` alone it reports *Not logged in*. launchd supplies it, so the
