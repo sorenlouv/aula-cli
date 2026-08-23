@@ -65,9 +65,9 @@ describe('buildDateSupport', () => {
     const s = buildDateSupport(input([item('post:1', 'Løbedag på mandag. Fest 9/9.')]));
     expect(s.weekdays.has(4)).toBe(true); // today, Thursday
     expect(s.weekdays.has(1)).toBe(true); // "mandag" + the timestamp
-    expect(s.dates.has('8-13')).toBe(true); // today
-    expect(s.dates.has('8-10')).toBe(true); // the timestamp
-    expect(s.dates.has('9-9')).toBe(true); // from the text
+    expect(s.dates.has('2026-08-13')).toBe(true); // today
+    expect(s.dates.has('2026-08-10')).toBe(true); // the timestamp
+    expect(s.dates.has('2026-09-09')).toBe(true); // from the text
     expect(s.weeks.has(33)).toBe(true);
   });
 
@@ -80,7 +80,7 @@ describe('buildDateSupport', () => {
       endsAt: '2026-08-27T23:59:00',
     });
     const support = buildDateSupport(input([source]));
-    expect(support.perSource.get(source.key)?.dates.has('8-27')).toBe(true);
+    expect(support.perSource.get(source.key)?.dates.has('2026-08-27')).toBe(true);
   });
 });
 
@@ -145,10 +145,26 @@ describe('dueAtSupported', () => {
     expect(dueAtSupported('2026-08-14', 'post:1', s)).toBe(false);
   });
 
-  test('"i morgen" grounds tomorrow', () => {
+  test('"i morgen" is resolved from the day the source was written', () => {
     const s = buildDateSupport(input([item('post:1', 'I morgen holder vi løbedag.')]));
-    expect(dueAtSupported('2026-08-14', 'post:1', s)).toBe(true);
-    expect(dueAtSupported('2026-08-15', 'post:1', s)).toBe(false);
+    expect(dueAtSupported('2026-08-11', 'post:1', s)).toBe(true);
+    expect(dueAtSupported('2026-08-14', 'post:1', s)).toBe(false);
+  });
+
+  test('a source timestamp cannot license the same month and day in another year', () => {
+    const s = buildDateSupport(input([item('post:1', 'Skrevet uden en dato i teksten.')]));
+    expect(dueAtSupported('2030-08-10', 'post:1', s)).toBe(false);
+  });
+
+  test('a source-backed date must stay inside fetched history through one year ahead', () => {
+    const s = buildDateSupport(
+      input([
+        item('post:old', 'Skrevet uden en dato i teksten.', '2026-07-29T11:00:00+00:00'),
+        item('post:future', 'Arrangement 14. august 2027.'),
+      ]),
+    );
+    expect(dueAtSupported('2026-07-29', 'post:old', s)).toBe(false);
+    expect(dueAtSupported('2027-08-14', 'post:future', s)).toBe(false);
   });
 
   test('an ungrounded date fails', () => {

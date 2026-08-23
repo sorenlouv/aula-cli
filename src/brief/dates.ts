@@ -6,7 +6,9 @@
  * the other thing the models invent — a "senest søndag" here, a "første gang
  * 24/8" there — so they get the same treatment. Every weekday, calendar date
  * or week number in model-authored text must be traceable to a source text,
- * a source's own timestamp, the claim's own validated date, or today.
+ * a source's own timestamp, the claim's own validated date, or today. Calendar
+ * support keeps the complete year-month-day: a matching day and month in a
+ * different year is not evidence.
  *
  * Out of scope, deliberately: semantic misplacement — a date that exists in
  * the sources but is attached to the wrong item. Catching that needs
@@ -16,6 +18,7 @@
 
 import { localIsoDate } from '../integrations/types.ts';
 import { isValidCalendarDate, parseIsoDateParts } from '../validation.ts';
+import { extractDates } from './rules.ts';
 import type { BriefInput } from './types.ts';
 
 /** Indexed as `Date#getDay()`: Sunday first. */
@@ -152,29 +155,36 @@ export function findDateClaims(text: string): DateClaim[] {
 type SourceDates = {
   weekdays: Set<number>;
   dates: Set<string>;
-  relTomorrow: boolean;
-  relToday: boolean;
 };
 
 export type DateSupport = {
   weekdays: Set<number>;
-  dates: Set<string>; // "M-D"
+  dates: Set<string>; // YYYY-MM-DD
   weeks: Set<number>;
   perSource: Map<string, SourceDates>;
   today: string;
   todayWeekday: number;
+  supportStart: string; // earliest YYYY-MM-DD a dueAt may use
+  supportEnd: string; // latest YYYY-MM-DD a dueAt may use
   windowEnd: string; // last YYYY-MM-DD a weekday-derived date may land on
 };
 
-const key = (month: number, day: number) => `${month}-${day}`;
-
 function isoDate(
   value: string,
-): { iso: string; month: number; day: number; weekday: number } | null {
+): { iso: string; year: number; month: number; day: number; weekday: number } | null {
   const parsed = parseIsoDateParts(value.slice(0, 10));
   if (!parsed) return null;
-  return { iso: parsed.iso, month: parsed.month, day: parsed.day, weekday: parsed.weekday };
+  return parsed;
 }
+
+const asLocalDate = (day: { year: number; month: number; day: number }) =>
+  new Date(day.year, day.month - 1, day.day);
+
+const hasDayMonth = (dates: Set<string>, month: number, day: number) =>
+  [...dates].some((value) => {
+    const parsed = isoDate(value);
+    return parsed?.month === month && parsed.day === day;
+  });
 
 /** Everything the sources, their timestamps, and today can vouch for. */
 export function buildDateSupport(input: BriefInput): DateSupport {
@@ -185,16 +195,24 @@ export function buildDateSupport(input: BriefInput): DateSupport {
     perSource: new Map(),
     today: input.today,
     todayWeekday: -1,
+    supportStart: '',
+    supportEnd: '',
     windowEnd: '',
   };
   const todayParsed = isoDate(input.today);
   if (todayParsed) {
-    support.dates.add(key(todayParsed.month, todayParsed.day));
+    support.dates.add(todayParsed.iso);
     support.weekdays.add(todayParsed.weekday);
     support.todayWeekday = todayParsed.weekday;
-    const end = new Date(`${input.today}T00:00:00`);
-    end.setDate(end.getDate() + Math.max(input.windowDays, 7));
-    support.windowEnd = localIsoDate(end);
+    const start = asLocalDate(todayParsed);
+    start.setDate(start.getDate() - input.windowDays);
+    support.supportStart = localIsoDate(start);
+    const supportEnd = asLocalDate(todayParsed);
+    supportEnd.setDate(supportEnd.getDate() + 365);
+    support.supportEnd = localIsoDate(supportEnd);
+    const windowEnd = asLocalDate(todayParsed);
+    windowEnd.setDate(windowEnd.getDate() + Math.max(input.windowDays, 7));
+    support.windowEnd = localIsoDate(windowEnd);
   }
   const week = Number(/-W(\d{1,2})$/.exec(input.isoWeek)?.[1]);
   if (Number.isFinite(week)) support.weeks.add(week);
@@ -204,26 +222,27 @@ export function buildDateSupport(input: BriefInput): DateSupport {
     const per: SourceDates = {
       weekdays: new Set(),
       dates: new Set(),
-      relTomorrow: /\bi morgen\b/i.test(text),
-      relToday: /\bi dag\b/i.test(text),
     };
     for (const claim of findDateClaims(text)) {
       if (claim.kind === 'weekday') per.weekdays.add(claim.day);
-      else if (claim.kind === 'date') per.dates.add(key(claim.month, claim.day));
-      else support.weeks.add(claim.week);
+      else if (claim.kind === 'week') support.weeks.add(claim.week);
     }
     const at = item.at ? isoDate(item.at) : null;
+    const reference = at ?? todayParsed;
+    if (reference) {
+      for (const date of extractDates(text, asLocalDate(reference))) per.dates.add(date);
+    }
     if (at) {
       // The timestamp's date and weekday are visible metadata, so prose may
       // mention them — but only a weekday the source *text* asserts may
       // ground a derived dueAt, or every post would license one future date
       // per week forever.
-      per.dates.add(key(at.month, at.day));
+      per.dates.add(at.iso);
       support.weekdays.add(at.weekday);
     }
     const endsAt = item.endsAt ? isoDate(item.endsAt) : null;
     if (endsAt) {
-      per.dates.add(key(endsAt.month, endsAt.day));
+      per.dates.add(endsAt.iso);
       support.weekdays.add(endsAt.weekday);
     }
     support.perSource.set(item.key, per);
@@ -256,11 +275,7 @@ export function unsupportedDateClaims(
     if (!support.windowEnd) return false;
     const cursor = new Date(`${support.today}T00:00:00`);
     for (let i = 0; i < 60; i++) {
-      if (
-        cursor.getDay() === day &&
-        support.dates.has(key(cursor.getMonth() + 1, cursor.getDate()))
-      )
-        return true;
+      if (cursor.getDay() === day && support.dates.has(localIsoDate(cursor))) return true;
       cursor.setDate(cursor.getDate() + 1);
       if (localIsoDate(cursor) > support.windowEnd) break;
     }
@@ -276,7 +291,7 @@ export function unsupportedDateClaims(
       claim.kind === 'weekday'
         ? weekdayOk(claim.day)
         : claim.kind === 'date'
-          ? support.dates.has(key(claim.month, claim.day)) ||
+          ? hasDayMonth(support.dates, claim.month, claim.day) ||
             (dueAt !== null && dueAt.month === claim.month && dueAt.day === claim.day)
           : support.weeks.has(claim.week);
     if (!ok && !bad.includes(claim.raw)) bad.push(claim.raw);
@@ -286,8 +301,9 @@ export function unsupportedDateClaims(
 
 /**
  * Whether a signal's `dueAt` is grounded — by the signal's OWN source only:
- * an explicit date it carries, its timestamp, or a forward derivation
- * ("på tirsdag", "i morgen", "i dag") landing inside the digest window.
+ * an explicit date it carries, its timestamp, or a derivation ("på tirsdag",
+ * "i morgen", "i dag") resolved from the source's written date. The result
+ * must fall between the beginning of the fetched history and one year ahead.
  * Another source's date deliberately does not count: the date chip is what a
  * parent acts on, and "some other post mentions the 25th" is exactly how a
  * wrong chip slips through looking grounded.
@@ -295,18 +311,19 @@ export function unsupportedDateClaims(
 export function dueAtSupported(dueAt: string, sourceKey: string, support: DateSupport): boolean {
   const parsed = isoDate(dueAt);
   if (!parsed) return false;
+  if (
+    !support.supportStart ||
+    !support.supportEnd ||
+    parsed.iso < support.supportStart ||
+    parsed.iso > support.supportEnd
+  )
+    return false;
   const per = support.perSource.get(sourceKey);
   if (!per) return false;
-  if (per.dates.has(key(parsed.month, parsed.day))) return true;
+  if (per.dates.has(parsed.iso)) return true;
   const inWindow =
     parsed.iso >= support.today && (!support.windowEnd || parsed.iso <= support.windowEnd);
   if (!inWindow) return false;
   if (per.weekdays.has(parsed.weekday)) return true;
-  if (per.relToday && parsed.iso === support.today) return true;
-  if (per.relTomorrow) {
-    const next = new Date(`${support.today}T00:00:00`);
-    next.setDate(next.getDate() + 1);
-    if (parsed.iso === localIsoDate(next)) return true;
-  }
   return false;
 }

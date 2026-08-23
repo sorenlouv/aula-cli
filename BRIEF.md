@@ -39,6 +39,14 @@ with the date removed, because the date is usually the point. Invented small
 deadlines ("senest søndag", stated nowhere) are the one failure mode every model
 shows occasionally; grounding turns them into a dropped card and one retry.
 
+Date support keeps full calendar days, including the year. Relative phrases
+such as *i morgen* resolve from the source's written date, not the day the brief
+runs, and a card date must land between the beginning of the fetched history
+and one year after the brief. A card's date chip is checked against its own
+sources. Date-shaped prose is still checked against the union of all sources;
+that permits cross-source date borrowing and is an accepted residual risk at
+this seam.
+
 The renderer builds from `styles.ts` tokens, so the page cannot come out
 grey-on-white, and **the sections keep their places**: this is read in twenty
 seconds over breakfast, and knowing where things live beats variety.
