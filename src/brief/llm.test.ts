@@ -111,15 +111,16 @@ describe('validateExtraction', () => {
     expect(result.problems).toEqual([]);
   });
 
-  test('a verdict outside the four words reads as normal; one for an unknown source is reported', () => {
-    // Same treatment as an unknown kind and an unknown sourceKey respectively:
-    // the safe reading for the one, a reported problem for the other.
+  test('a verdict outside the four words reads as normal and is reported for repair', () => {
     const result = validateExtraction(INPUT, {
       signals: [good],
       relevance: { 'post:1': 'meget', 'post:999': 'high' },
     });
     expect(result.relevance).toEqual({ 'post:1': 'normal' });
-    expect(result.problems).toEqual(['relevance: ukendt sourceKey "post:999"']);
+    expect(result.problems).toEqual([
+      'relevance.post:1: "meget" er ikke hide|low|normal|high',
+      'relevance: ukendt sourceKey "post:999"',
+    ]);
   });
 
   test('a missing verdict map is a problem worth the retry; an empty input is owed none', () => {
@@ -127,15 +128,40 @@ describe('validateExtraction', () => {
     // nothing else, so an answer without them has skipped the question.
     const without = validateExtraction(INPUT, { signals: [good] });
     expect(without.relevance).toEqual({});
-    expect(without.problems).toEqual(['relevance: mangler — én vurdering pr. kilde']);
+    expect(without.problems).toEqual(['relevance: mangler for post:1']);
     expect(validateExtraction(briefInput({ items: [] }), { signals: [] }).problems).toEqual([]);
   });
 
-  test('a partial verdict map is taken as it is — the rest read as normal downstream', () => {
+  test('a partial verdict map reports every source the model failed to rank', () => {
     const two = briefInput({ ...INPUT, items: [SOURCE, { ...SOURCE, key: 'post:2' }] });
     const result = validateExtraction(two, { signals: [], relevance: { 'post:2': 'hide' } });
     expect(result.relevance).toEqual({ 'post:2': 'hide' });
-    expect(result.problems).toEqual([]);
+    expect(result.problems).toEqual(['relevance: mangler for post:1']);
+  });
+
+  test('every personal calendar entry is owed its own model verdict', () => {
+    const first = sourceItem({
+      key: 'cal:family:dentist:2026-08-14T13:30:00+02:00',
+      kind: 'personal',
+      title: 'Tandlæge kl. 13:30–14:15',
+      text: 'Tandlæge · 13:30–14:15 · Fra kalenderen «Familie»',
+      at: '2026-08-14T13:30:00',
+      audience: 'family',
+    });
+    const second = { ...first, key: 'cal:family:playdate:2026-08-15T10:00:00+02:00' };
+    const calendarInput = briefInput({ items: [first, second] });
+    const complete = validateExtraction(calendarInput, {
+      signals: [],
+      relevance: { [first.key]: 'high', [second.key]: 'normal' },
+    });
+    expect(complete.problems).toEqual([]);
+    expect(complete.relevance).toEqual({ [first.key]: 'high', [second.key]: 'normal' });
+
+    const partial = validateExtraction(calendarInput, {
+      signals: [],
+      relevance: { [first.key]: 'high' },
+    });
+    expect(partial.problems).toEqual([`relevance: mangler for ${second.key}`]);
   });
 
   test('nulls a topline with an invented date and reports it', () => {
@@ -240,7 +266,7 @@ describe('validateExtraction', () => {
     test('keeps a summary for a thread that is genuinely an exchange', () => {
       const result = validateExtraction(withThread(4), {
         signals: [],
-        ...verdicts,
+        relevance: { 'post:1': 'normal', 'thread:9': 'normal' },
         conversationSummaries: { 'thread:9': '  Yrsa foreslår et møde; I har sagt ja.  ' },
       });
       expect(result.conversationSummaries).toEqual({

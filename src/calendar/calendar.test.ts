@@ -5,8 +5,9 @@ import { describe, expect, test } from 'bun:test';
 // kitchen wall. Asserting it in UTC would test a program nobody runs.
 process.env.TZ = 'Europe/Copenhagen';
 
-import { parseStream } from './connector.ts';
-import { toPersonalEvent } from './index.ts';
+import { toPersonalSourceItem } from '../brief/collect.ts';
+import { parseCalendarsPayload, parseEventsPayload, parseStream } from './connector.ts';
+import { calendarWindow, toPersonalEvent } from './index.ts';
 
 const CAL = { id: 'far@eksempel.dk', name: 'Familien' };
 
@@ -36,6 +37,7 @@ describe('reading one connector event', () => {
       startTime: '13:30',
       endTime: '14:15',
       allDay: false,
+      calendarId: 'far@eksempel.dk',
       calendarName: 'Familien',
     });
   });
@@ -101,9 +103,40 @@ describe('reading one connector event', () => {
     expect(moved?.startTime).toBe('15:00');
   });
 
-  test('junk is skipped rather than thrown over', () => {
-    expect(toPersonalEvent(null, CAL)).toBeNull();
-    expect(toPersonalEvent({ summary: 'no times' }, CAL)).toBeNull();
+  test('malformed entries fail the calendar instead of looking absent', () => {
+    expect(() => toPersonalEvent(null, CAL)).toThrow('ikke var et objekt');
+    expect(() => toPersonalEvent({ summary: 'no times' }, CAL)).toThrow('uden id');
+  });
+});
+
+describe('the bounded calendar window', () => {
+  test('uses local calendar days across daylight saving time', () => {
+    const { from, to } = calendarWindow(new Date(2026, 2, 22, 16, 30), 14);
+    expect([from.getFullYear(), from.getMonth(), from.getDate(), from.getHours()]).toEqual([
+      2026, 2, 22, 0,
+    ]);
+    expect([to.getFullYear(), to.getMonth(), to.getDate(), to.getHours()]).toEqual([
+      2026, 3, 5, 0,
+    ]);
+    // Copenhagen moves forward during this fortnight. Fixed millisecond
+    // arithmetic would end at 01:00 and silently spill into a fifteenth day.
+    expect(to.getTime() - from.getTime()).toBe(14 * 86_400_000 - 3_600_000);
+  });
+});
+
+describe('appointment presentation', () => {
+  test('keeps the full timed interval in the source the model and page receive', () => {
+    const source = toPersonalSourceItem(toPersonalEvent(TIMED, CAL)!);
+    expect(source.title).toBe('Tandlæge kl. 13:30–14:15');
+    expect(source.text).toContain('13:30–14:15');
+    expect(source.at).toBe('2026-08-27T13:30:00');
+    expect(source.endsAt).toBe('2026-08-27T14:15:00');
+  });
+
+  test('keeps a multi-day all-day interval visible', () => {
+    const source = toPersonalSourceItem(toPersonalEvent(ALL_DAY, CAL)!);
+    expect(source.title).toBe('Ferie · hele dagen 25/8–27/8');
+    expect(source.endsAt).toBe('2026-08-27T23:59:00');
   });
 });
 
@@ -125,7 +158,7 @@ const STREAM = [
 describe('reading the tool call off the stream', () => {
   test('the arguments the model chose and the payload it got back', () => {
     const { servers, calls, results } = parseStream(STREAM);
-    expect(servers).toEqual(['claude.ai Google Calendar']);
+    expect(servers).toEqual([{ name: 'claude.ai Google Calendar', status: 'connected' }]);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.input).toEqual({ calendarId: 'a@b.c' });
     expect(results.get('tu_1')?.text).toBe('{"events":[]}');
@@ -157,5 +190,25 @@ describe('reading the tool call off the stream', () => {
     // list without ours counts as absence; see `attemptTool`.
     const line = JSON.stringify({ type: 'system', subtype: 'init', mcp_servers: [] });
     expect(parseStream(line).servers).toEqual([]);
+  });
+});
+
+describe('connector payload contracts', () => {
+  test('a missing collection is an error, never an empty result', () => {
+    expect(() => parseCalendarsPayload({})).toThrow('calendars-liste');
+    expect(() => parseEventsPayload({ ok: true })).toThrow('events-liste');
+  });
+
+  test('one malformed calendar rejects the listing', () => {
+    expect(() =>
+      parseCalendarsPayload({ calendars: [{ id: 'family', summary: 'Familie' }, { summary: 'Privat' }] }),
+    ).toThrow('ugyldig kalender');
+  });
+
+  test('pagination is refused so a partial fortnight cannot look complete', () => {
+    expect(() => parseEventsPayload({ events: [], nextPageToken: 'page-2' })).toThrow(
+      'flere sider',
+    );
+    expect(parseEventsPayload({ events: [], nextPageToken: '' })).toEqual([]);
   });
 });

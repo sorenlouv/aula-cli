@@ -338,6 +338,10 @@ function mergeKey(signal: Signal): string {
  * is the source's own and never moves at all.
  */
 function interchangeable(a: RankedSignal, b: RankedSignal): boolean {
+  // Every private appointment is an independently selected, model-ranked
+  // source. Sharing a day and the generic `event` kind is not evidence that a
+  // dentist visit and a school meeting are the same thing.
+  if (a.source.kind === 'personal' || b.source.kind === 'personal') return false;
   return (
     (a.tier === 'hidden') === (b.tier === 'hidden') &&
     a.source.important === b.source.important
@@ -369,11 +373,26 @@ export function rank(
       degraded.push(`Udeladt: signal "${signal.title}" peger på en ukendt kilde (${signal.sourceKey}).`);
       continue;
     }
+    const effective: Signal = source.kind === 'personal'
+      ? {
+          ...signal,
+          // The model ranks the appointment; the connector remains the source
+          // of its factual shape. This prevents an appointment titled
+          // "deadline" from becoming an action or being assigned to a child.
+          kind: 'event',
+          title: source.title,
+          child: null,
+          dueAt: isoOf(source.at),
+          quote: null,
+          why: null,
+          concernsChild: false,
+        }
+      : signal;
     const verdict = verdictOf(source.key);
-    const { score, reasons } = scoreOf(signal, source.audience, source.important, verdict);
-    const tier = tierOf(signal, source.audience, source.important, verdict);
+    const { score, reasons } = scoreOf(effective, source.audience, source.important, verdict);
+    const tier = tierOf(effective, source.audience, source.important, verdict);
     scored.push({
-      ...signal,
+      ...effective,
       score,
       tier,
       mustShow: tier === 'act' || tier === 'week',

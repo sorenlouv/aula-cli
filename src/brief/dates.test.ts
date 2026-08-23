@@ -58,6 +58,18 @@ describe('buildDateSupport', () => {
     expect(s.dates.has('9-9')).toBe(true); // from the text
     expect(s.weeks.has(33)).toBe(true);
   });
+
+  test('an interval end is grounded for the same source', () => {
+    const source = sourceItem({
+      key: 'cal:family:holiday',
+      kind: 'personal',
+      text: 'Ferie · hele dagen 25/8–27/8',
+      at: '2026-08-25T00:00:00',
+      endsAt: '2026-08-27T23:59:00',
+    });
+    const support = buildDateSupport(input([source]));
+    expect(support.perSource.get(source.key)?.dates.has('8-27')).toBe(true);
+  });
 });
 
 describe('unsupportedDateClaims', () => {

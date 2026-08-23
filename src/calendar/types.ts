@@ -17,7 +17,7 @@
 export type CalendarRef = {
   /** Google's own id — `far@eksempel.dk`, or a long `…@group.calendar.google.com`. */
   id: string;
-  /** What the user calls it. Shown; never matched on. */
+  /** What the user calls it. Shown and accepted as an exact CLI selection. */
   name: string;
 };
 
@@ -39,6 +39,8 @@ export type PersonalEvent = {
    * arriving as a cancellation plus a new thing.
    */
   key: string;
+  /** Stable connector identity; names are display state and may be duplicated. */
+  calendarId: string;
   calendarName: string;
   title: string;
   /** Local day it starts on, `YYYY-MM-DD`. */

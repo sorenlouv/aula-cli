@@ -5,7 +5,12 @@
  */
 
 import type { AulaClient } from './../client.ts';
-import { loadPersonalEvents, type PersonalEvent } from '../calendar/index.ts';
+import {
+  calendarWindow,
+  loadPersonalEvents,
+  PERSONAL_CALENDAR_DAYS,
+  type PersonalEvent,
+} from '../calendar/index.ts';
 import { readConfig } from '../config.ts';
 import { localIsoDate } from '../integrations/types.ts';
 import {
@@ -200,6 +205,7 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
       title: event.title,
       text: [event.title, event.location, event.createdBy].filter(Boolean).join(' · '),
       at: event.start,
+      endsAt: event.end,
       author: event.createdBy,
       groups: [],
       childNames: event.children,
@@ -210,7 +216,7 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
   }
 
   // --------------------------------------------------- the family's own diary
-  const personal = await collectPersonal({ days: opts.days, now });
+  const personal = await collectPersonal(now);
   items.push(...personal.items);
   health.push(...personal.health);
 
@@ -328,10 +334,9 @@ function summariseWarning(warning: string): string {
 /**
  * The family's own appointments, as sources.
  *
- * No setup: where Google Calendar is connected in Claude, the family's own
- * calendars are read. Where it is not, this does nothing and says nothing — an
- * overview must not nag every morning about a feature nobody asked for.
- * `aula calendars` exists to narrow the default, not to enable it.
+ * Opt-in only: a fresh installation has no configured calendars and reads no
+ * appointments. `aula calendars` lists names, and `calendars set` records the
+ * exact calendars the parent chose.
  *
  * **They are shown, not analysed.** An appointment becomes a dated item like
  * any other, and lands among the week's other dated things on the same day as
@@ -356,23 +361,21 @@ function summariseWarning(warning: string): string {
  * could do.
  */
 async function collectPersonal(
-  ctx: { days: number; now: Date },
+  now: Date,
 ): Promise<{ items: SourceItem[]; health: HealthNote[] }> {
   const calendars = readConfig().calendars ?? [];
   if (calendars.length === 0) return { items: [], health: [] };
 
-  const from = new Date(ctx.now.getFullYear(), ctx.now.getMonth(), ctx.now.getDate());
-  const to = new Date(from.getTime() + ctx.days * 86_400_000);
+  // Aula history may be widened with `new --days`; private calendar data may
+  // not. Every occurrence in this bounded window becomes one model-ranked
+  // source, keeping prompt size and connector pagination predictable.
+  const { from, to } = calendarWindow(now, PERSONAL_CALENDAR_DAYS);
   const loaded = await loadPersonalEvents(calendars, { from, to });
 
   const health: HealthNote[] = loaded.warnings.map((message) => ({ level: 'warn', message }));
   if (loaded.notConnected) {
-    health.push({
-      level: 'warn',
-      message:
-        'Google Kalender er ikke forbundet i Claude, så jeres egne aftaler mangler her. ' +
-        'Kør `aula calendars` for at komme videre.',
-    });
+    const warning = health[0];
+    if (warning) warning.message += ' Kør `aula calendars` for at komme videre.';
   } else if (loaded.warnings.length === 0) {
     // What was read, in the footer that already says what was fetched — about
     // the fetch, like every other line there, and never about the week.
@@ -383,7 +386,7 @@ async function collectPersonal(
     });
   }
 
-  return { items: loaded.events.map(toSourceItem), health };
+  return { items: loaded.events.map(toPersonalSourceItem), health };
 }
 
 /**
@@ -394,18 +397,24 @@ async function collectPersonal(
  * The time goes in the title because for a calendar entry the time *is* half of
  * what it says; "Tandlæge" on its own is not the thing the reader needs.
  */
-function toSourceItem(event: PersonalEvent): SourceItem {
-  const when = event.startTime ? ` kl. ${event.startTime}` : '';
+export function toPersonalSourceItem(event: PersonalEvent): SourceItem {
+  const when = personalWhen(event);
   return {
     key: event.key,
     kind: 'personal',
     title: `${event.title}${when}`,
-    text: [event.title, event.location, `Fra kalenderen «${event.calendarName}»`]
+    text: [
+      event.title,
+      when.trim().replace(/^·\s*/, ''),
+      event.location,
+      `Fra kalenderen «${event.calendarName}»`,
+    ]
       .filter(Boolean)
       .join(' · '),
     // Local and naive on purpose: the ranker turns this into a Danish calendar
     // day, and an all-day event has no instant to be faithful to.
     at: `${event.date}T${event.startTime ?? '00:00'}:00`,
+    endsAt: `${event.endDate}T${event.endTime ?? '23:59'}:00`,
     author: event.calendarName,
     groups: [],
     // Nothing here says which child an appointment is about. Guessing from the
@@ -416,4 +425,23 @@ function toSourceItem(event: PersonalEvent): SourceItem {
     important: false,
     url: event.url,
   };
+}
+
+function personalWhen(event: PersonalEvent): string {
+  if (event.allDay) {
+    return event.date === event.endDate
+      ? ' · hele dagen'
+      : ` · hele dagen ${shortDay(event.date)}–${shortDay(event.endDate)}`;
+  }
+  if (event.date === event.endDate) {
+    return event.endTime && event.endTime !== event.startTime
+      ? ` kl. ${event.startTime}–${event.endTime}`
+      : ` kl. ${event.startTime}`;
+  }
+  return ` fra ${shortDay(event.date)} kl. ${event.startTime} til ${shortDay(event.endDate)} kl. ${event.endTime}`;
+}
+
+function shortDay(iso: string): string {
+  const [, month = '', day = ''] = iso.split('-');
+  return `${Number(day)}/${Number(month)}`;
 }

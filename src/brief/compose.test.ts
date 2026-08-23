@@ -150,6 +150,40 @@ describe('parsePlan', () => {
     expect(plan.topline).toBeUndefined();
     expect(problems.some((p) => p.startsWith('topline'))).toBe(true);
   });
+
+  test('a personal appointment cannot be promoted or interpreted by the composer', () => {
+    const personal: RankedSignal = {
+      ...UPCOMING,
+      id: 'cal:family:dentist#0',
+      sourceKey: 'cal:family:dentist',
+      title: 'Tandlæge kl. 13:30–14:15',
+      source: {
+        ...SOURCE,
+        key: 'cal:family:dentist',
+        kind: 'personal',
+        title: 'Tandlæge kl. 13:30–14:15',
+        audience: 'family',
+        url: 'https://calendar.google.com/calendar/event?eid=abc',
+      },
+    };
+    const brief: RankedBrief = { ...BRIEF, signals: [personal] };
+    const { plan, problems } = parsePlan(
+      {
+        act: [{ signalId: personal.id, why: 'Kolliderer med skoledagen' }],
+        week: [{ signalId: personal.id, title: 'Flyt tandlægen', why: 'Der er et sammenstød' }],
+      },
+      brief,
+    );
+    expect(plan.act).toEqual([]);
+    expect(plan.week).toEqual([{ signalId: personal.id }]);
+    expect(problems.some((problem) => problem.includes('kan ikke blive til en handling'))).toBe(true);
+    expect(problems.some((problem) => problem.includes('blev ikke fortolket'))).toBe(true);
+    const html = renderPlan(brief, plan);
+    expect(html).toContain('Tandlæge kl. 13:30–14:15');
+    expect(html).not.toContain('Flyt tandlægen');
+    expect(html).not.toContain('sammenstød');
+    expect(html).toContain('åbn i kalender');
+  });
 });
 
 describe('renderPlan', () => {

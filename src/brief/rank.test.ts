@@ -644,4 +644,96 @@ describe('the family\'s own appointments', () => {
     const order = brief.signals.map((s) => s.sourceKey);
     expect(order.indexOf('post:1')).toBeLessThan(order.indexOf(mine.key));
   });
+
+  test('two private appointments on the same day both survive', () => {
+    const dentist = appointment();
+    const playDate = appointment({
+      key: 'cal:far@eksempel.dk:evt2:2026-08-14T15:00:00+02:00',
+      title: 'Legeaftale kl. 15:00–17:00',
+      at: '2026-08-14T15:00:00',
+    });
+    const sources = [dentist, playDate];
+    const brief = rank(input(sources), signalsFromRules(input(sources), TODAY), {
+      [dentist.key]: 'normal',
+      [playDate.key]: 'normal',
+    });
+    expect(brief.signals.map((signal) => signal.sourceKey).sort()).toEqual(
+      [dentist.key, playDate.key].sort(),
+    );
+  });
+
+  test('a private appointment and a school event on the same day both survive', () => {
+    const mine = appointment();
+    const school = item({
+      key: 'event:school-meeting',
+      kind: 'event',
+      title: 'Forældremøde',
+      text: 'Forældremøde fredag den 14. august.',
+      at: '2026-08-14T17:00:00+02:00',
+      audience: 'class',
+    });
+    const schoolSignal: Signal = {
+      id: 'model:school-meeting',
+      kind: 'event',
+      title: school.title,
+      child: null,
+      dueAt: '2026-08-14',
+      urgency: 'week',
+      quote: 'Forældremøde',
+      why: null,
+      sourceKey: school.key,
+      origin: 'model',
+      concernsChild: false,
+    };
+    const sources = [mine, school];
+    const brief = rank(
+      input(sources),
+      [...signalsFromRules(input([mine]), TODAY), schoolSignal],
+      { [mine.key]: 'normal', [school.key]: 'normal' },
+    );
+    expect(brief.signals.map((signal) => signal.sourceKey).sort()).toEqual(
+      [mine.key, school.key].sort(),
+    );
+  });
+
+  test('the model relevance verdict ranks each appointment through the shared path', () => {
+    const hidden = appointment({ key: 'cal:family:hidden:2026-08-14' });
+    const low = appointment({ key: 'cal:family:low:2026-08-14' });
+    const high = appointment({ key: 'cal:family:high:2026-08-14' });
+    const sources = [hidden, low, high];
+    const brief = rank(input(sources), signalsFromRules(input(sources), TODAY), {
+      [hidden.key]: 'hide',
+      [low.key]: 'low',
+      [high.key]: 'high',
+    });
+    expect(brief.signals.find((signal) => signal.sourceKey === hidden.key)?.tier).toBe('hidden');
+    expect(brief.signals.find((signal) => signal.sourceKey === low.key)?.tier).toBe('context');
+    expect(brief.signals.find((signal) => signal.sourceKey === high.key)?.tier).toBe('week');
+  });
+
+  test('model interpretation cannot turn a private appointment into a clash or action', () => {
+    const source = appointment();
+    const invented: Signal = {
+      id: 'model:calendar',
+      kind: 'action',
+      title: 'Løs sammenstød for Ida',
+      child: 'Ida',
+      dueAt: '2026-08-14',
+      urgency: 'now',
+      quote: 'Tandlæge',
+      why: 'Kan kollidere med skoledagen',
+      sourceKey: source.key,
+      origin: 'model',
+      concernsChild: true,
+    };
+    const result = rank(input([source]), [invented], { [source.key]: 'normal' }).signals[0];
+    expect(result).toMatchObject({
+      kind: 'event',
+      title: source.title,
+      child: null,
+      why: null,
+      concernsChild: false,
+      tier: 'week',
+    });
+  });
 });

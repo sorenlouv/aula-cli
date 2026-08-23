@@ -27,11 +27,19 @@ import {
   flushCache,
 } from './cache.ts';
 import {
+  calendarWindow,
   CalendarNotConnectedError,
-  type ConnectorCalendar,
   listCalendars,
   loadPersonalEvents,
+  PERSONAL_CALENDAR_DAYS,
 } from './calendar/index.ts';
+import {
+  calendarChoices,
+  type CalendarChoice,
+  CalendarSelectionError,
+  resolveCalendarSelection,
+  resolveConfiguredSelection,
+} from './calendar/selection.ts';
 import { AulaApiError, AulaAuthError, AulaClient, CALENDAR_MAX_SPAN_DAYS } from './client.ts';
 import { readConfig, updateConfig } from './config.ts';
 import {
@@ -96,7 +104,7 @@ Everyday:
   calendars                    Your own calendars, with the ones the overview
                                reads marked — appointments from them show up
                                beside the school's own events
-  calendars set <n> [...]      Read exactly these, by number
+  calendars set <name> [...]   Read exactly these, by displayed name
   calendars set none           Read none of them
   schedule [--at HH:MM]        Generate the overview automatically every weekday,
                                retrying through the morning if the Mac was asleep
@@ -743,68 +751,49 @@ async function runPublish(off: boolean): Promise<number> {
 async function runCalendars(positionals: string[]): Promise<number> {
   const sub = positionals[0];
   const refs = positionals.slice(1);
-  if (sub === undefined) return await showCalendars();
-  if (sub === 'set') return await setCalendars(refs);
-  throw new UsageError(
-    `Unknown subcommand "${sub}". Usage: aula ${usageFor('calendars')}`,
-  );
+  if (sub !== undefined && sub !== 'set') {
+    throw new UsageError(
+      `Unknown subcommand "${sub}". Usage: aula ${usageFor('calendars')}`,
+    );
+  }
+
+  try {
+    return sub === undefined ? await showCalendars() : await setCalendars(refs);
+  } catch (err) {
+    if (err instanceof UsageError) throw err;
+    if (err instanceof CalendarNotConnectedError) {
+      console.error(
+        [
+          'Google Calendar is not connected in Claude yet.',
+          '',
+          'Connect it once and there is nothing else to set up — it also reads',
+          'calendars other people have shared with you, which a calendar link cannot:',
+          '',
+          '  Claude  →  Settings  →  Connectors  →  Google Calendar  →  Connect',
+          '',
+          'Then run `aula calendars` again.',
+        ].join('\n'),
+      );
+      return 1;
+    }
+    if (err instanceof CalendarSelectionError) {
+      console.error(err.message);
+      return 1;
+    }
+    console.error(`Could not ask Claude for your calendars: ${errorMessage(err)}`);
+    return 1;
+  }
 }
 
-/**
- * One list, selected first.
- *
- * The calendars being read and the ones merely available used to be two
- * separate listings behind two different commands, each numbered from 1 — so
- * "2" meant a different calendar depending on which one you had last looked at.
- * They are one list now, and the marker says which are being read.
- *
- * **Selected first, in configuration order**, which is what makes one list
- * safe: positions 1..k are always the configured calendars, so `remove <n>`
- * means the same thing whether or not the connector answered — and stays
- * usable on a morning when it did not.
- */
-type ListedCalendar = {
-  id: string;
-  name: string;
-  selected: boolean;
-  accessRole?: string;
-};
-
-async function calendarList(): Promise<ListedCalendar[] | null> {
+/** One live list, selected first; names and ids are stable across invocations. */
+async function calendarList(): Promise<CalendarChoice[]> {
   const configured = readConfig().calendars ?? [];
-  const available = await availableCalendars();
-
-  // Nothing chosen and nothing to choose from: `availableCalendars` has already
-  // said how to connect, and an empty list under that would only be noise.
-  if (available === null && configured.length === 0) return null;
-
-  const byId = new Map((available ?? []).map((c) => [c.id, c]));
-  const selected: ListedCalendar[] = configured.map((c) => {
-    const seen = byId.get(c.id);
-    return {
-      id: c.id,
-      // The connector's name wins where we have it: a calendar renamed in
-      // Google should not keep showing the name it had when it was added.
-      name: seen?.summary ?? c.name,
-      selected: true,
-      ...(seen?.accessRole ? { accessRole: seen.accessRole } : {}),
-    };
-  });
-  const rest: ListedCalendar[] = (available ?? [])
-    .filter((c) => !configured.some((existing) => existing.id === c.id))
-    .map((c) => ({
-      id: c.id,
-      name: c.summary,
-      selected: false,
-      ...(c.accessRole ? { accessRole: c.accessRole } : {}),
-    }));
-  return [...selected, ...rest];
+  return calendarChoices(configured, await listCalendars());
 }
 
 /** Everything available, with the ones being read marked. */
 async function showCalendars(): Promise<number> {
   const list = await calendarList();
-  if (list === null) return 0;
   if (list.length === 0) {
     console.log('Google Calendar is connected, but it lists no calendars.');
     return 0;
@@ -817,13 +806,23 @@ async function showCalendars(): Promise<number> {
         ? 'Your calendars — the overview reads the marked ones:'
         : 'Your calendars — the overview reads none of them yet:',
       '',
-      ...list.map((c, i) => `  ${c.selected ? '*' : ' '} ${i + 1}. ${c.name}${relation(c.accessRole)}`),
+      ...list.map((calendar) => formatCalendarChoice(calendar, list)),
       '',
-      '  aula calendars set <n> [<n> ...]   read exactly these',
+      '  aula calendars set "Familie" "Privat"   read exactly these names',
       ...(chosen > 0 ? ['  aula calendars set none            read none of them'] : []),
     ].join('\n'),
   );
   return 0;
+}
+
+function formatCalendarChoice(calendar: CalendarChoice, all: CalendarChoice[]): string {
+  const duplicateName = all.some(
+    (other) => other.id !== calendar.id && other.name === calendar.name,
+  );
+  const identity = duplicateName
+    ? `${JSON.stringify(calendar.name)}  id: ${calendar.id}`
+    : JSON.stringify(calendar.name);
+  return `  ${calendar.selected ? '*' : ' '} ${identity}${relation(calendar.accessRole)}`;
 }
 
 /**
@@ -841,13 +840,6 @@ function relation(accessRole: string | undefined): string {
   if (accessRole === 'writer') return '  (shared with you, you can edit)';
   if (accessRole === 'reader' || accessRole === 'freeBusyReader') return '  (shared with you)';
   return '';
-}
-
-/** A number from the printed list, or a calendar id. Unresolvable gives null. */
-function pick(list: ListedCalendar[], ref: string): ListedCalendar | null {
-  const index = Number(ref);
-  if (Number.isInteger(index) && index >= 1 && index <= list.length) return list[index - 1] ?? null;
-  return list.find((c) => c.id === ref) ?? null;
 }
 
 /**
@@ -869,16 +861,16 @@ function pick(list: ListedCalendar[], ref: string): ListedCalendar | null {
  * one command, and there is nothing to compare against — read the list, say
  * which ones matter.
  *
- * The cost is that it is destructive by omission: `set 2` stops reading
- * whatever 1 was. So the answer is never just "done" — it names what it started
- * and stopped reading, because a calendar disappearing quietly is precisely the
- * failure this command's shape invites.
+ * The cost is that it is destructive by omission: naming only "Privat" stops
+ * reading "Familie". So the answer is never just "done" — it names what it
+ * started and stopped reading, because a calendar disappearing quietly is
+ * precisely the failure this command's shape invites.
  */
 async function setCalendars(refs: string[]): Promise<number> {
   const configured = readConfig().calendars ?? [];
   if (refs.length === 0) {
     throw new UsageError(
-      'Usage: aula calendars set <n> [<n> ...] — the numbers from `aula calendars`.\n' +
+      'Usage: aula calendars set <name> [<name> ...] — exact names from `aula calendars`.\n' +
         'To stop reading all of them: aula calendars set none',
     );
   }
@@ -899,28 +891,13 @@ async function setCalendars(refs: string[]): Promise<number> {
     return 0;
   }
 
-  // Narrowing an existing selection needs no connector: the marked calendars are
-  // always 1..k of the one list. Only reaching past them needs the full list —
-  // so dropping a calendar still works on a morning the connector does not
-  // answer, which is when you are most likely to want to.
-  const narrowing = refs.every((ref) => {
-    const n = Number(ref);
-    return Number.isInteger(n) && n >= 1 && n <= configured.length;
-  });
-  const list: ListedCalendar[] | null = narrowing
-    ? configured.map((c) => ({ id: c.id, name: c.name, selected: true }))
-    : await calendarList();
-  if (list === null) return 0;
-
-  const chosen: ListedCalendar[] = [];
-  for (const ref of refs) {
-    const found = pick(list, ref);
-    if (!found) {
-      console.error(`No calendar "${ref}". \`aula calendars\` lists them with the numbers to use.`);
-      return 1;
-    }
-    if (!chosen.some((c) => c.id === found.id)) chosen.push(found);
-  }
+  // Dropping calendars by saved id remains possible while the connector is
+  // unavailable. Names require one live listing because an unselected calendar
+  // may have the same name; selection is resolved against that same snapshot
+  // rather than a second listing whose order may have changed.
+  const chosen =
+    resolveConfiguredSelection(configured, refs) ??
+    resolveCalendarSelection(await calendarList(), refs);
 
   const wanted = chosen.map((c) => ({ id: c.id, name: c.name }));
   const before = new Set(configured.map((c) => c.id));
@@ -928,7 +905,13 @@ async function setCalendars(refs: string[]): Promise<number> {
   const started = wanted.filter((c) => !before.has(c.id));
   const stopped = configured.filter((c) => !after.has(c.id));
 
-  if (started.length === 0 && stopped.length === 0) {
+  const unchanged =
+    configured.length === wanted.length &&
+    configured.every(
+      (calendar, index) =>
+        calendar.id === wanted[index]?.id && calendar.name === wanted[index]?.name,
+    );
+  if (unchanged) {
     console.log(
       `Already reading ${wanted.map((c) => `"${c.name}"`).join(' and ')} — nothing changed.`,
     );
@@ -946,60 +929,26 @@ async function setCalendars(refs: string[]): Promise<number> {
   // chain works for a calendar nobody has seen answer yet; re-reading one that
   // was already being read every morning proves nothing and costs a round trip.
   if (started.length === 0) return 0;
-  const load = await loadPersonalEvents(started, {
-    from: new Date(),
-    to: new Date(Date.now() + 14 * 86_400_000),
-  });
+  const load = await loadPersonalEvents(started, calendarWindow(new Date()));
   for (const warning of load.warnings) console.error(warning);
-  if (load.warnings.length === 0) {
-    // Per calendar, not just a total: one silently empty calendar is exactly
-    // what a single combined number would hide.
-    console.log(
-      [
-        ...started.map((c) => {
-          const count = load.events.filter((e) => e.calendarName === c.name).length;
-          return `  ${c.name}: ${count} appointment(s) in the next 14 days`;
-        }),
-        ...load.events.slice(0, 3).map(
-          (e) => `  · ${e.date}${e.startTime ? ` ${e.startTime}` : ''}  ${e.title}`,
-        ),
-        '',
-        'They are in the next overview — `aula new` builds it now.',
-      ].join('\n'),
-    );
-  }
+  if (load.warnings.length > 0) return 1;
+
+  // Per calendar, not just a total: one silently empty calendar is exactly
+  // what a single combined number would hide.
+  console.log(
+    [
+      ...started.map((c) => {
+        const count = load.events.filter((event) => event.calendarId === c.id).length;
+        return `  ${c.name}: ${count} appointment(s) in the next ${PERSONAL_CALENDAR_DAYS} days`;
+      }),
+      ...load.events.slice(0, 3).map(
+        (event) => `  · ${event.date}${event.startTime ? ` ${event.startTime}` : ''}  ${event.title}`,
+      ),
+      '',
+      'They are in the next overview — `aula new` builds it now.',
+    ].join('\n'),
+  );
   return 0;
-}
-/**
- * The connector's calendars, or `null` when there is no connector — in which
- * case the user has already been told what to do about it.
- *
- * Connecting is a few clicks with no link to copy, and it is the only way to
- * read a calendar somebody else shared — which is what a household's shared
- * calendar usually is.
- */
-async function availableCalendars(): Promise<ConnectorCalendar[] | null> {
-  try {
-    return await listCalendars();
-  } catch (err) {
-    if (err instanceof CalendarNotConnectedError) {
-      console.log(
-        [
-          'Google Calendar is not connected in Claude yet.',
-          '',
-          'Connect it once and there is nothing else to set up — it also reads',
-          'calendars other people have shared with you, which a calendar link cannot:',
-          '',
-          '  Claude  →  Settings  →  Connectors  →  Google Calendar  →  Connect',
-          '',
-          'Then run `aula calendars` again.',
-        ].join('\n'),
-      );
-      return null;
-    }
-    console.error(`Could not ask Claude for your calendars: ${errorMessage(err)}`);
-    return null;
-  }
 }
 
 function runRemember(positionals: string[]): number {

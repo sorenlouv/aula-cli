@@ -12,8 +12,8 @@
  * turns into a `Datastatus` line.
  */
 
-import { errorMessage } from '../validation.ts';
 import { localIsoDate } from '../integrations/types.ts';
+import { errorMessage, parseIsoDateParts } from '../validation.ts';
 import { CalendarNotConnectedError, listEvents } from './connector.ts';
 import type { CalendarRef, PersonalEvent } from './types.ts';
 
@@ -28,6 +28,18 @@ export type CalendarLoad = {
   /** The connector is not set up. Distinct because it has a cure. */
   notConnected: boolean;
 };
+
+/** Personal appointments are deliberately bounded independently of Aula history. */
+export const PERSONAL_CALENDAR_DAYS = 14;
+
+/** A local-calendar window; unlike millisecond arithmetic this survives DST. */
+export function calendarWindow(now: Date, days = PERSONAL_CALENDAR_DAYS): { from: Date; to: Date } {
+  if (!Number.isInteger(days) || days < 1) throw new Error(`Invalid calendar window: ${days}`);
+  const from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const to = new Date(from);
+  to.setDate(to.getDate() + days);
+  return { from, to };
+}
 
 /**
  * Read every configured calendar over `[from, to)`.
@@ -53,15 +65,17 @@ export async function loadPersonalEvents(
       const raw = await listEvents(calendar.id, from, to, {
         ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
       });
+      const calendarEvents: PersonalEvent[] = [];
       for (const item of raw) {
         const event = toPersonalEvent(item, calendar);
-        if (event) events.push(event);
+        if (event) calendarEvents.push(event);
       }
+      events.push(...calendarEvents);
     } catch (err) {
       if (err instanceof CalendarNotConnectedError) {
         notConnected = true;
         warnings.push(
-          `Kalenderen «${calendar.name}» blev ikke læst — Google Kalender er ikke forbundet i Claude.`,
+          'Google Kalender blev ikke læst — forbindelsen til Google Kalender i Claude mangler.',
         );
         // Every other calendar would fail for the same reason, and one line
         // saying so beats the same line once per calendar.
@@ -99,14 +113,17 @@ function isRecordish(value: unknown): value is Record<string, unknown> {
  * 26th), so it is pulled back a day to give an inclusive `endDate`.
  */
 export function toPersonalEvent(raw: unknown, calendar: CalendarRef): PersonalEvent | null {
-  if (!isRecordish(raw)) return null;
+  if (!isRecordish(raw)) throw new Error(`Kalenderen «${calendar.name}» gav en aftale, der ikke var et objekt.`);
   // A cancelled occurrence of a repeating appointment still comes back; it is
   // not something anybody has to be anywhere for.
   if (raw.status === 'cancelled') return null;
 
+  const id = typeof raw.id === 'string' && raw.id.trim() ? raw.id : null;
+  if (!id) throw new Error(`Kalenderen «${calendar.name}» gav en aftale uden id.`);
+
   const start = isRecordish(raw.start) ? (raw.start as TimeRef) : null;
   const end = isRecordish(raw.end) ? (raw.end as TimeRef) : null;
-  if (!start) return null;
+  if (!start || !end) throw new Error(`Aftalen ${id} i «${calendar.name}» mangler start eller slut.`);
 
   const title = typeof raw.summary === 'string' && raw.summary.trim() ? raw.summary.trim() : '(uden titel)';
   const allDay = typeof start.dateTime !== 'string';
@@ -117,27 +134,26 @@ export function toPersonalEvent(raw: unknown, calendar: CalendarRef): PersonalEv
   let endTime: string | null = null;
 
   if (allDay) {
-    if (typeof start.date !== 'string') return null;
-    date = start.date.slice(0, 10);
-    endDate = typeof end?.date === 'string' ? previousDay(end.date.slice(0, 10)) : date;
+    date = connectorDay(start.date, `start på aftalen ${id}`);
+    endDate = previousDay(connectorDay(end.date, `slut på aftalen ${id}`));
     if (endDate < date) endDate = date;
   } else {
     const startAt = new Date(String(start.dateTime));
-    if (Number.isNaN(startAt.getTime())) return null;
+    if (Number.isNaN(startAt.getTime())) throw new Error(`Aftalen ${id} har en ugyldig start.`);
     date = localIsoDate(startAt);
     startTime = localTime(startAt);
-    const endAt = typeof end?.dateTime === 'string' ? new Date(end.dateTime) : null;
-    if (endAt && !Number.isNaN(endAt.getTime())) {
-      endDate = localIsoDate(endAt);
-      endTime = localTime(endAt);
-    } else {
-      endDate = date;
-      endTime = startTime;
+    if (typeof end.dateTime !== 'string') throw new Error(`Aftalen ${id} mangler et sluttidspunkt.`);
+    const endAt = new Date(end.dateTime);
+    if (Number.isNaN(endAt.getTime()) || endAt < startAt) {
+      throw new Error(`Aftalen ${id} har en ugyldig slutning.`);
     }
+    endDate = localIsoDate(endAt);
+    endTime = localTime(endAt);
   }
 
   return {
     key: keyOf(raw, calendar, start),
+    calendarId: calendar.id,
     calendarName: calendar.name,
     title,
     date,
@@ -159,10 +175,18 @@ export function toPersonalEvent(raw: unknown, calendar: CalendarRef): PersonalEv
  * event has neither and uses its own id.
  */
 function keyOf(raw: Record<string, unknown>, calendar: CalendarRef, start: TimeRef): string {
-  const series = typeof raw.recurringEventId === 'string' ? raw.recurringEventId : String(raw.id ?? '');
+  const series = typeof raw.recurringEventId === 'string' ? raw.recurringEventId : String(raw.id);
   const original = isRecordish(raw.originalStartTime) ? (raw.originalStartTime as TimeRef) : start;
   const slot = String(original.dateTime ?? original.date ?? start.dateTime ?? start.date ?? '');
+  if (!slot) throw new Error(`Aftalen ${String(raw.id)} mangler et tidspunkt til sin nøgle.`);
   return `cal:${calendar.id}:${series}:${slot}`;
+}
+
+function connectorDay(value: unknown, where: string): string {
+  if (typeof value !== 'string') throw new Error(`${where} mangler en dato.`);
+  const day = value.slice(0, 10);
+  if (!parseIsoDateParts(day)) throw new Error(`${where} har en ugyldig dato.`);
+  return day;
 }
 
 function localTime(date: Date): string {

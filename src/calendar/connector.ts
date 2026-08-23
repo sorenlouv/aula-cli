@@ -72,19 +72,48 @@ export type ConnectorCalendar = {
   accessRole?: string;
 };
 
+/** A valid JSON reply is not necessarily a valid connector reply. */
+export function parseCalendarsPayload(payload: unknown): ConnectorCalendar[] {
+  if (!isRecord(payload) || !Array.isArray(payload.calendars)) {
+    throw new Error('list_calendars svarede uden en calendars-liste');
+  }
+  return payload.calendars.map((raw, index) => {
+    if (!isRecord(raw) || typeof raw.id !== 'string' || !raw.id.trim()) {
+      throw new Error(`list_calendars gav en ugyldig kalender på plads ${index + 1}`);
+    }
+    if (typeof raw.summary !== 'string' || !raw.summary.trim()) {
+      throw new Error(`list_calendars gav en kalender uden navn (${raw.id})`);
+    }
+    return {
+      id: raw.id,
+      summary: raw.summary,
+      ...(typeof raw.description === 'string' ? { description: raw.description } : {}),
+      ...(typeof raw.timeZone === 'string' ? { timeZone: raw.timeZone } : {}),
+      ...(typeof raw.accessRole === 'string' ? { accessRole: raw.accessRole } : {}),
+    };
+  });
+}
+
+/** Events are shaped later, but the envelope itself is a strict contract. */
+export function parseEventsPayload(payload: unknown): unknown[] {
+  if (!isRecord(payload) || !Array.isArray(payload.events)) {
+    throw new Error('list_events svarede uden en events-liste');
+  }
+  if (payload.nextPageToken !== undefined && typeof payload.nextPageToken !== 'string') {
+    throw new Error('list_events gav en ugyldig nextPageToken');
+  }
+  if (typeof payload.nextPageToken === 'string' && payload.nextPageToken.length > 0) {
+    throw new Error('kalenderen gav flere sider end der blev læst — perioden er for lang');
+  }
+  return payload.events;
+}
+
 /** Calendars the connector can see. The whole of the setup flow's discovery. */
 export async function listCalendars(opts: { timeoutMs?: number } = {}): Promise<ConnectorCalendar[]> {
   const payload = await callTool('list_calendars', {}, 'Kald list_calendars uden argumenter.', {
     timeoutMs: opts.timeoutMs ?? TIMEOUT_MS,
   });
-  const calendars = isRecord(payload) && Array.isArray(payload.calendars) ? payload.calendars : [];
-  return calendars.filter(isRecord).map((raw) => ({
-    id: String(raw.id ?? ''),
-    summary: String(raw.summary ?? raw.id ?? ''),
-    ...(typeof raw.description === 'string' ? { description: raw.description } : {}),
-    ...(typeof raw.timeZone === 'string' ? { timeZone: raw.timeZone } : {}),
-    ...(typeof raw.accessRole === 'string' ? { accessRole: raw.accessRole } : {}),
-  })).filter((c) => c.id.length > 0);
+  return parseCalendarsPayload(payload);
 }
 
 /** Raw events for one calendar over one window. Shaping is `index.ts`'s job. */
@@ -94,30 +123,14 @@ export async function listEvents(
   endTime: string,
   opts: { timeoutMs?: number } = {},
 ): Promise<unknown[]> {
-  const args = { calendarId, startTime, endTime };
+  const args = { calendarId, startTime, endTime, pageSize: 250 };
   const payload = await callTool(
     'list_events',
     args,
-    [
-      'Kald list_events med præcis disse argumenter:',
-      `calendarId: ${calendarId}`,
-      `startTime: ${startTime}`,
-      `endTime: ${endTime}`,
-      'pageSize: 250',
-    ].join('\n'),
+    `Kald list_events med præcis dette JSON-objekt som argument: ${JSON.stringify(args)}`,
     { timeoutMs: opts.timeoutMs ?? TIMEOUT_MS },
   );
-  if (!isRecord(payload)) return [];
-  // Silent truncation is the one failure that would look exactly like a quiet
-  // fortnight, so it is refused rather than reported short. 250 is the tool's
-  // own maximum and a fortnight of family life does not reach it; if this ever
-  // fires, the window wants splitting, not raising.
-  if (typeof payload.nextPageToken === 'string' && payload.nextPageToken.length > 0) {
-    throw new Error(
-      `kalenderen gav flere sider end der blev læst (${calendarId}) — perioden er for lang`,
-    );
-  }
-  return Array.isArray(payload.events) ? payload.events : [];
+  return parseEventsPayload(payload);
 }
 
 // --------------------------------------------------------------- transport
@@ -132,7 +145,7 @@ export async function listEvents(
  */
 async function callTool(
   tool: string,
-  expected: Record<string, string>,
+  expected: Record<string, unknown>,
   instruction: string,
   opts: { timeoutMs: number },
 ): Promise<unknown> {
@@ -150,12 +163,20 @@ async function callTool(
       last = err instanceof Error ? err : new Error(String(err));
     }
   }
+  if (last instanceof CalendarToolUnavailableError) {
+    throw new CalendarNotConnectedError('Google Kalender er ikke forbundet i Claude.');
+  }
   throw last ?? new Error(`${tool} fejlede`);
+}
+
+/** Empty server discovery plus no tool call; retried before it means disconnected. */
+class CalendarToolUnavailableError extends Error {
+  override readonly name = 'CalendarToolUnavailableError';
 }
 
 async function attemptTool(
   tool: string,
-  expected: Record<string, string>,
+  expected: Record<string, unknown>,
   instruction: string,
   opts: { timeoutMs: number },
 ): Promise<unknown> {
@@ -193,8 +214,14 @@ async function attemptTool(
   // empty one means the session had not registered its servers yet when the
   // envelope was written — saying "not connected" on that would send somebody
   // off to connect a connector they already have.
-  if (stream.servers.length > 0 && !stream.servers.some((s) => SERVER_MATCH.test(s))) {
+  const calendarServer = stream.servers.find((server) => SERVER_MATCH.test(server.name));
+  if (stream.servers.length > 0 && !calendarServer) {
     throw new CalendarNotConnectedError('Google Kalender er ikke forbundet i Claude.');
+  }
+  if (calendarServer?.status && /failed|error|disconnected/i.test(calendarServer.status)) {
+    throw new CalendarNotConnectedError(
+      `Google Kalender-forbindelsen i Claude svarer ${calendarServer.status}.`,
+    );
   }
   if (run.code !== 0 && stream.calls.length === 0) {
     const detail = run.stderr.trim() || run.stdout.trim().slice(0, 200) || '(ingen fejltekst)';
@@ -202,15 +229,17 @@ async function attemptTool(
   }
 
   const calls = stream.calls.filter((call) => call.name === name);
-  if (calls.length === 0) throw new Error(`${tool} blev aldrig kaldt`);
+  if (calls.length === 0) {
+    if (stream.servers.length === 0) throw new CalendarToolUnavailableError(`${tool} blev aldrig kaldt`);
+    throw new Error(`${tool} blev aldrig kaldt`);
+  }
   if (calls.length > 1) throw new Error(`${tool} blev kaldt ${calls.length} gange`);
   const call = calls[0]!;
 
-  for (const [key, want] of Object.entries(expected)) {
-    const got = call.input[key];
-    if (got !== want) {
-      throw new Error(`${tool} blev kaldt med ${key}=${JSON.stringify(got)}, ikke ${JSON.stringify(want)}`);
-    }
+  if (!sameToolInput(call.input, expected)) {
+    throw new Error(
+      `${tool} blev kaldt med ${JSON.stringify(call.input)}, ikke ${JSON.stringify(expected)}`,
+    );
   }
 
   const result = stream.results.get(call.id);
@@ -223,6 +252,16 @@ async function attemptTool(
   }
 }
 
+function sameToolInput(actual: Record<string, unknown>, expected: Record<string, unknown>): boolean {
+  const actualKeys = Object.keys(actual).sort();
+  const expectedKeys = Object.keys(expected).sort();
+  return (
+    actualKeys.length === expectedKeys.length &&
+    actualKeys.every((key, index) => key === expectedKeys[index] && actual[key] === expected[key])
+  );
+}
+
+type ConnectorServer = { name: string; status: string | null };
 type ToolCall = { id: string; name: string; input: Record<string, unknown> };
 type ToolResult = { text: string; isError: boolean };
 
@@ -242,11 +281,11 @@ export function parseStream(stdout: string): {
    * registered. Neither is evidence that a server is missing; only a populated
    * list without ours is. See `attemptTool`.
    */
-  servers: string[];
+  servers: ConnectorServer[];
   calls: ToolCall[];
   results: Map<string, ToolResult>;
 } {
-  let servers: string[] = [];
+  let servers: ConnectorServer[] = [];
   const calls: ToolCall[] = [];
   const results = new Map<string, ToolResult>();
 
@@ -264,8 +303,11 @@ export function parseStream(stdout: string): {
     if (parsed.type === 'system' && parsed.subtype === 'init' && Array.isArray(parsed.mcp_servers)) {
       servers = parsed.mcp_servers
         .filter(isRecord)
-        .map((s) => String(s.name ?? ''))
-        .filter((n) => n.length > 0);
+        .map((server) => ({
+          name: String(server.name ?? ''),
+          status: typeof server.status === 'string' ? server.status : null,
+        }))
+        .filter((server) => server.name.length > 0);
     }
 
     const message = parsed.message;

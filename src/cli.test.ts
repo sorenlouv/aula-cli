@@ -566,6 +566,18 @@ function sandboxWithClaude(mode: string, result?: string) {
   return box;
 }
 
+test('calendar connector discovery and fetch failures are explicit non-zero results', () => {
+  const missing = sandboxWithClaude('ok').run('calendars');
+  assert.equal(missing.code, 1);
+  assert.match(missing.stderr, /Google Calendar is not connected in Claude/);
+  assert.match(missing.stderr, /Settings.*Connectors.*Google Calendar/s);
+
+  const failed = sandboxWithClaude('error').run('calendars');
+  assert.equal(failed.code, 1);
+  assert.match(failed.stderr, /Could not ask Claude for your calendars/);
+  assert.match(failed.stderr, /Not logged in/);
+});
+
 test('publish creates the artifact, saves its url to config.json, and records the deploy', () => {
   const box = sandboxWithClaude('ok', `Deployed: ${ARTIFACT}`);
   mkdirSync(join(box.dir, 'brief'), { recursive: true });
@@ -773,6 +785,11 @@ test("the model's relevance verdicts reach the ranker — the whole return leg",
   // …and the score breakdown names the verdicts that did it, on both sides.
   assert.match(result.stderr, /relevance:hide/);
   assert.match(result.stderr, /relevance:high \+25/);
+  // This fixture intentionally ranks only two of several sources. The useful
+  // verdicts still apply, but the omission is never cached or marked complete.
+  assert.match(result.stdout, /Ufuldstændig kørsel/);
+  const page = readFileSync(join(box.dir, 'brief', 'latest.html'), 'utf8');
+  assert.match(page, /Modellens vurdering var ufuldstændig/);
 });
 
 test('preferences reset puts the shipped list back and names the casualties', () => {

@@ -74,6 +74,8 @@ export type SourceItem = {
   title: string;
   /** The prose that gets scanned for obligations. */
   text: string;
+  /** End of an interval when the source describes one; absent for point-in-time content. */
+  endsAt?: string | null;
   at: string | null;
   author: string | null;
   groups: string[];

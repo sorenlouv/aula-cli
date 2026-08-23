@@ -5,7 +5,7 @@ of it the MitID login. Ask before installing software and before writing
 outside this repository (the skill install does). Never perform the MitID
 approval yourself. Report each step's outcome.
 
-Steps 1–4 run without stopping. **Then offer all three extras** — none of them
+Steps 1–4 run without stopping. **Then offer all four extras** — none of them
 is discoverable from the outside, and they are what makes this a tool the
 family uses rather than one that merely works — and finish with the hand-over.
 Run only what the user agrees to.
@@ -163,7 +163,7 @@ so they can see for themselves whether a day works.
 
 ```bash
 bun src/cli.ts calendars                 # every calendar Claude can see; the ones being read are marked
-bun src/cli.ts calendars set 2 4         # read exactly these two, and no others
+bun src/cli.ts calendars set "Familie" "Privat"  # read exactly these two, and no others
 bun src/cli.ts calendars set none        # read none of them
 ```
 
@@ -171,16 +171,23 @@ Needs Google Calendar connected in Claude. That is the only supported route —
 there is no API key or calendar-link alternative, and `calendars` prints the few
 clicks when the connector is missing.
 
-**Show the list and let the user pick.** Never guess which calendars matter and
-never set one unasked: this writes to `~/.aula/config.json`, outside the
-repository. `set` states the whole answer — it reads exactly what you name and
-stops reading the rest — so pass every calendar that should be read, not only a
-new one. It reports how many appointments each newly set calendar holds in the
-next fortnight; pass that back, and say so if one comes back empty when they
-expected otherwise.
+**Show the list and let the user pick.** Pass exact displayed names (or the id
+shown when two calendars have the same name), never a list position that may
+refer to something else on a later connector read. Never guess which calendars
+matter and never set one unasked: this writes to `~/.aula/config.json`, outside
+the repository. `set` states the whole answer — it reads exactly what you name
+and stops reading the rest — so pass every calendar that should be read, not
+only a new one. It reports how many appointments each newly set calendar holds
+in the next fortnight; pass that back, and say so if one comes back empty when
+they expected otherwise.
 
 Nothing is read until a calendar is named here, and this can be done at any
 time, not only during setup.
+
+The model-enabled daily overview reads a fixed next-fortnight window, sends
+every appointment through the same model relevance verdicts as every Aula
+source, and reports a model or connector failure in *Datastatus*. It never
+computes clashes or claims that a quiet-looking day has none.
 
 ## 5. Hand over
 
