@@ -146,7 +146,12 @@ test('a missing MitID username is warned about rather than failing silently', as
   // Through the dispatcher, because that is where the warning now lives — on
   // the registry's needsMitidUsername flag, where an adapter cannot skip it.
   await withVendor(
-    (url) => url.includes('/Aula/GetChildren') ? { Children: [] } : url.includes('/Aula/Authenticate') ? {} : [],
+    (url) =>
+      url.includes('/Aula/GetChildren')
+        ? { Children: [] }
+        : url.includes('/Aula/Authenticate')
+          ? {}
+          : [],
     async (_calls, tokens) => {
       const plan = await readWidget('0004', { ...CTX, sessionIdIsFallback: true }, tokens);
       assert.match(plan.warnings?.join('\n') ?? '', /MitID username/);
@@ -182,7 +187,10 @@ test('the fallback-session warning is re-applied per read, never accumulated', a
   const cache = fakeCache();
   await withVendor(
     () => [
-      { name: 'Alma Eksempelsen', weekPlan: [{ date: 'mandag', tasks: [{ type: 'task', content: 'Læs' }] }] },
+      {
+        name: 'Alma Eksempelsen',
+        weekPlan: [{ date: 'mandag', tasks: [{ type: 'task', content: 'Læs' }] }],
+      },
     ],
     async (calls, tokens) => {
       const ctx = { ...CTX, sessionIdIsFallback: true };
@@ -259,7 +267,12 @@ test('a null-valued optional field empties that field rather than the whole plan
         name: 'Alma Eksempelsen',
         exceptionMessage: null,
         weekPlan: [
-          { date: '2026-08-24', tasks: [{ type: 'task', pill: 'Dansk', title: 'Læs s. 12', content: null, editUrl: null }] },
+          {
+            date: '2026-08-24',
+            tasks: [
+              { type: 'task', pill: 'Dansk', title: 'Læs s. 12', content: null, editUrl: null },
+            ],
+          },
         ],
       },
     ],
@@ -275,7 +288,9 @@ test('a null-valued optional field empties that field rather than the whole plan
 
 test('a null-valued optional field is tolerated by every vendor adapter', async () => {
   await withVendor(
-    () => ({ opgaver: [{ title: 'Læs side 12', ugedag: 'mandag', forloeb: null, hold: [{ navn: null }] }] }),
+    () => ({
+      opgaver: [{ title: 'Læs side 12', ugedag: 'mandag', forloeb: null, hold: [{ navn: null }] }],
+    }),
     async (_calls, tokens) => {
       const plan = await minUddannelse.getTasks(CTX, tokens, '0030');
       assert.equal(plan.items.length, 1);
@@ -284,16 +299,20 @@ test('a null-valued optional field is tolerated by every vendor adapter', async 
   );
 
   await withVendor(
-    () => [{
-      userName: 'Alma',
-      teamReminders: [{
-        dueDate: '2026-08-24',
-        teamName: null,
-        teamNames: null,
-        reminderText: 'Turtaske',
-        subjectName: null,
-      }],
-    }],
+    () => [
+      {
+        userName: 'Alma',
+        teamReminders: [
+          {
+            dueDate: '2026-08-24',
+            teamName: null,
+            teamNames: null,
+            reminderText: 'Turtaske',
+            subjectName: null,
+          },
+        ],
+      },
+    ],
     async (_calls, tokens) => {
       const plan = await systematic.getReminders(CTX, tokens, '0087');
       assert.equal(plan.items.length, 1);
@@ -333,10 +352,17 @@ test('an unusable roster row costs only that child their assignments', async () 
   await withVendor(
     (url) => {
       if (url.includes('/Aula/GetChildren')) {
-        return { Children: [{ Id: 1, Login: 'alma1234', Name: null }, { Id: 2, Login: null, Name: 'Viggo' }] };
+        return {
+          Children: [
+            { Id: 1, Login: 'alma1234', Name: null },
+            { Id: 2, Login: null, Name: 'Viggo' },
+          ],
+        };
       }
       if (url.includes('/Aula/AuthenticateAulaUser')) return {};
-      return [{ StartTimeISO: '2026-08-24T08:00:00', ChapterTitle: 'Matematik', Description: null }];
+      return [
+        { StartTimeISO: '2026-08-24T08:00:00', ChapterTitle: 'Matematik', Description: null },
+      ];
     },
     async (_calls, tokens) => {
       const plan = await skoleportal.getAssignments(CTX, tokens, '0142');
@@ -350,7 +376,12 @@ test('a malformed roster row is reported without taking down valid siblings', as
   await withVendor(
     (url) => {
       if (url.includes('/Aula/GetChildren')) {
-        return { Children: [{ Id: 1, Login: 'alma1234' }, { Id: '2', Login: 'vigg5678' }] };
+        return {
+          Children: [
+            { Id: 1, Login: 'alma1234' },
+            { Id: '2', Login: 'vigg5678' },
+          ],
+        };
       }
       if (url.includes('/Aula/AuthenticateAulaUser')) return {};
       return [{ StartTimeISO: '2026-08-24T08:00:00', ChapterTitle: 'Matematik' }];
@@ -387,7 +418,11 @@ test('a MinUddannelse ugebrev is flattened from HTML to text', async () => {
         {
           navn: 'Viggo Eksempelsen',
           institutioner: [
-            { ugebreve: [{ indhold: '<p>K&aelig;re for&aelig;ldre</p><p>Husk gummist&oslash;vler.</p>' }] },
+            {
+              ugebreve: [
+                { indhold: '<p>K&aelig;re for&aelig;ldre</p><p>Husk gummist&oslash;vler.</p>' },
+              ],
+            },
           ],
         },
       ],
@@ -492,7 +527,9 @@ test('Lektier enumerates children and maps them by UniLogin', async () => {
           ],
         };
       }
-      return [{ StartTimeISO: '2026-08-12T00:00:00', ChapterTitle: 'Matematik', Description: 'Side 4' }];
+      return [
+        { StartTimeISO: '2026-08-12T00:00:00', ChapterTitle: 'Matematik', Description: 'Side 4' },
+      ];
     },
     async (calls, tokens) => {
       const plan = await skoleportal.getAssignments(CTX, tokens, '0142');
@@ -597,10 +634,7 @@ test('two schools on two weekly-plan providers are both read', async () => {
         CTX,
         tokens,
       );
-      assert.deepEqual(
-        plans.map((p) => p.provider).sort(),
-        ['easyiq', 'meebook'],
-      );
+      assert.deepEqual(plans.map((p) => p.provider).sort(), ['easyiq', 'meebook']);
     },
   );
 });

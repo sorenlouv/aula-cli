@@ -21,14 +21,20 @@ describe('calendar selection', () => {
   });
 
   test('exact names survive a reordered connector listing', () => {
-    const first = calendarChoices([], [
-      { id: 'family', summary: 'Family' },
-      { id: 'work', summary: 'Work' },
-    ]);
-    const second = calendarChoices([], [
-      { id: 'work', summary: 'Work' },
-      { id: 'family', summary: 'Family' },
-    ]);
+    const first = calendarChoices(
+      [],
+      [
+        { id: 'family', summary: 'Family' },
+        { id: 'work', summary: 'Work' },
+      ],
+    );
+    const second = calendarChoices(
+      [],
+      [
+        { id: 'work', summary: 'Work' },
+        { id: 'family', summary: 'Family' },
+      ],
+    );
     expect(resolveCalendarSelection(first, ['Family']).map((calendar) => calendar.id)).toEqual([
       'family',
     ]);
@@ -38,10 +44,13 @@ describe('calendar selection', () => {
   });
 
   test('duplicate names are refused instead of guessed', () => {
-    const choices = calendarChoices([], [
-      { id: 'a@example.com', summary: 'Family' },
-      { id: 'b@example.com', summary: 'Family' },
-    ]);
+    const choices = calendarChoices(
+      [],
+      [
+        { id: 'a@example.com', summary: 'Family' },
+        { id: 'b@example.com', summary: 'Family' },
+      ],
+    );
     expect(() => resolveCalendarSelection(choices, ['Family'])).toThrow(
       'Use one of these exact ids: a@example.com, b@example.com',
     );
@@ -53,9 +62,9 @@ describe('calendar selection', () => {
       { id: 'family', name: 'Family' },
       { id: 'work', name: 'Work' },
     ];
-    expect(resolveConfiguredSelection(configured, ['work'])?.map((calendar) => calendar.id)).toEqual([
-      'work',
-    ]);
+    expect(
+      resolveConfiguredSelection(configured, ['work'])?.map((calendar) => calendar.id),
+    ).toEqual(['work']);
     // A saved name may collide with an unselected calendar we cannot see
     // offline, so resolving it without the live list would be a guess.
     expect(resolveConfiguredSelection(configured, ['Work'])).toBeNull();

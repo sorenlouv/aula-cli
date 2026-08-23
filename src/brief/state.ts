@@ -96,9 +96,12 @@ function parseLastRun(value: unknown): LastRun | undefined {
 function parseLastDeploy(value: unknown): LastDeploy | undefined {
   if (!isRecord(value)) return undefined;
   if (
-    typeof value.url !== 'string' || !value.url ||
-    typeof value.at !== 'string' || !Number.isFinite(Date.parse(value.at)) ||
-    typeof value.day !== 'string' || !parseIsoDateParts(value.day)
+    typeof value.url !== 'string' ||
+    !value.url ||
+    typeof value.at !== 'string' ||
+    !Number.isFinite(Date.parse(value.at)) ||
+    typeof value.day !== 'string' ||
+    !parseIsoDateParts(value.day)
   ) {
     return undefined;
   }
@@ -157,7 +160,11 @@ export function todayIsComplete(state: BriefState, now = new Date()): boolean {
   return state.lastRun?.complete === true && state.lastRun.day === localIsoDate(now);
 }
 
-export function recordRun(state: BriefState, run: { day: string; complete: boolean }, now = new Date()): void {
+export function recordRun(
+  state: BriefState,
+  run: { day: string; complete: boolean },
+  now = new Date(),
+): void {
   state.lastRun = { day: run.day, at: now.toISOString(), complete: run.complete };
 }
 

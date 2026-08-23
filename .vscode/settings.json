@@ -1,0 +1,21 @@
+{
+  // The repo pins its own formatting in .prettierrc, and the agent hook in
+  // .claude/settings.json runs the same binary on the same config. Both sides
+  // must agree, or every save churns the file against the other's defaults.
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+
+  // Only format when a Prettier config is actually found. Without this the
+  // extension falls back to Prettier's defaults (double quotes, 80 columns)
+  // and a single save rewrites the whole file.
+  "prettier.requireConfig": true,
+
+  "[typescript]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[javascript]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[json]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[jsonc]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+
+  // The docs are hand-wrapped with hand-aligned tables; .prettierignore keeps
+  // Prettier off them. This says the same thing to the editor directly.
+  "[markdown]": { "editor.formatOnSave": false }
+}

@@ -81,6 +81,18 @@ fallback sources.
   it appends rather than redraws there and would push a fresh QR block into the
   driving agent's context on every rotation.
 
+## Formatting
+
+Prettier owns the layout — single quotes, 100 columns, pinned in `.prettierrc`.
+Both sides run that same config: VSCode format-on-save through the Prettier
+extension, and agent edits through the `PostToolUse` hook in
+`.claude/settings.json`, which calls `scripts/format-hook.sh`. Do not hand-align
+code against the formatter; run `bun run format` (or `format:check`) instead.
+
+Markdown is in `.prettierignore` on purpose. The docs are hand-wrapped and their
+tables are hand-aligned, and Prettier pads every cell to the widest row. Leave
+them alone.
+
 ## Verifying
 
 `bun test src/` stubs `fetch`; `cli.test.ts` and `auth.test.ts` run the CLI as a

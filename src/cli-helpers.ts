@@ -6,7 +6,8 @@ import type { Contact, PresenceTemplates } from './types.ts';
 import { isIsoWeek, parseIsoDateParts } from './validation.ts';
 
 const COPENHAGEN = 'Europe/Copenhagen';
-const AULA_TIMESTAMP = /^(\d{4}-\d{2}-\d{2})[T ](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:(?:0\d|1[0-3]):?[0-5]\d|14:?00))?$/;
+const AULA_TIMESTAMP =
+  /^(\d{4}-\d{2}-\d{2})[T ](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:(?:0\d|1[0-3]):?[0-5]\d|14:?00))?$/;
 
 export function indent(text: string, spaces: number): string {
   const pad = ' '.repeat(spaces);
@@ -31,7 +32,9 @@ export function formatDate(iso: string | null | undefined): string {
   if (!iso) return 'unknown date';
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
-  return new Intl.DateTimeFormat('da-DK', { dateStyle: 'medium', timeZone: COPENHAGEN }).format(date);
+  return new Intl.DateTimeFormat('da-DK', { dateStyle: 'medium', timeZone: COPENHAGEN }).format(
+    date,
+  );
 }
 
 export function startOfDay(date: Date): Date {
@@ -61,7 +64,8 @@ export function parseSince(input: string): Date {
   }
   const datePart = timestamp?.[1] ?? trimmed;
   const parsed = parseIsoDateParts(datePart);
-  if (!parsed) throw new UsageError(`Could not parse --since "${input}". Use e.g. 7d, 3w, or 2026-08-01.`);
+  if (!parsed)
+    throw new UsageError(`Could not parse --since "${input}". Use e.g. 7d, 3w, or 2026-08-01.`);
   return new Date(parsed.year, parsed.month - 1, parsed.day);
 }
 
@@ -99,13 +103,14 @@ export function presenceStatusDanish(status: number | string | undefined): strin
  * calls this "henteform", on the "Komme/gå" module.
  * Wire constants from Aula's presence frontend; do not renumber.
  */
-const PRESENCE_ACTIVITY_TYPES: Readonly<Record<number, { da: string; en: string }>> =
-  Object.freeze({
+const PRESENCE_ACTIVITY_TYPES: Readonly<Record<number, { da: string; en: string }>> = Object.freeze(
+  {
     0: { da: 'Hentes af', en: 'collected by a named person' },
     1: { da: 'Selvbestemmer', en: 'may leave alone within a window' },
     2: { da: 'Sendes hjem', en: 'leaves alone at the exit time' },
     3: { da: 'Går hjem med', en: 'leaves with a named person' },
-  });
+  },
+);
 
 function presenceActivityType(activityType: number | null | undefined): string | null {
   if (activityType === null || activityType === undefined) return null;
@@ -264,7 +269,10 @@ export function upcomingBirthdays(contacts: BirthdayContact[], limit?: number): 
  * `selfDecider`, `sendHome`, `goHomeWith` — so the caller would otherwise have
  * to know the enum to find an entry time.
  */
-export function normaliseSchedule(templates: PresenceTemplates, window: { from: string; to: string }) {
+export function normaliseSchedule(
+  templates: PresenceTemplates,
+  window: { from: string; to: string },
+) {
   const days: Array<{
     child: string | null;
     childId: number | null;

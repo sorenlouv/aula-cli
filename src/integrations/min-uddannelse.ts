@@ -11,13 +11,7 @@
  */
 
 import { htmlToText } from '../html.ts';
-import {
-  expectOptionalType,
-  isArrayOf,
-  isOptional,
-  isRecord,
-  isString,
-} from '../validation.ts';
+import { expectOptionalType, isArrayOf, isOptional, isRecord, isString } from '../validation.ts';
 import { type WidgetTokens, widgetFetch } from '../widgets.ts';
 import type { IntegrationContext, WeekPlan, WeekPlanItem } from './types.ts';
 
@@ -57,19 +51,25 @@ function isTeam(value: unknown): value is MuTeam {
 }
 
 function isMuTask(value: unknown): value is MuTask {
-  return isRecord(value) &&
+  return (
+    isRecord(value) &&
     isOptional(value.kuvertnavn, isString) &&
     isOptional(value.title, isString) &&
     isOptional(value.ugedag, isString) &&
     isOptional(value.opgaveType, isString) &&
     isOptional(value.hold, (teams): teams is MuTeam[] => isArrayOf(teams, isTeam)) &&
-    isOptional(value.forloeb, (course): course is MuCourse =>
-      isRecord(course) && isOptional(course.navn, isString));
+    isOptional(
+      value.forloeb,
+      (course): course is MuCourse => isRecord(course) && isOptional(course.navn, isString),
+    )
+  );
 }
 
 function isMuTasksResponse(value: unknown): value is MuTasksResponse {
-  return isRecord(value) &&
-    isOptional(value.opgaver, (tasks): tasks is MuTask[] => isArrayOf(tasks, isMuTask));
+  return (
+    isRecord(value) &&
+    isOptional(value.opgaver, (tasks): tasks is MuTask[] => isArrayOf(tasks, isMuTask))
+  );
 }
 
 function isMuWeeklyLetterResponse(value: unknown): value is MuWeeklyLetterResponse {
@@ -77,14 +77,19 @@ function isMuWeeklyLetterResponse(value: unknown): value is MuWeeklyLetterRespon
     isRecord(candidate) && isOptional(candidate.indhold, isString);
   const isInstitution = (candidate: unknown): candidate is MuInstitution =>
     isRecord(candidate) &&
-    isOptional(candidate.ugebreve, (letters): letters is MuLetter[] => isArrayOf(letters, isLetter));
+    isOptional(candidate.ugebreve, (letters): letters is MuLetter[] =>
+      isArrayOf(letters, isLetter),
+    );
   const isPerson = (candidate: unknown): candidate is MuPerson =>
     isRecord(candidate) &&
     isOptional(candidate.navn, isString) &&
     isOptional(candidate.institutioner, (institutions): institutions is MuInstitution[] =>
-      isArrayOf(institutions, isInstitution));
-  return isRecord(value) &&
-    isOptional(value.personer, (people): people is MuPerson[] => isArrayOf(people, isPerson));
+      isArrayOf(institutions, isInstitution),
+    );
+  return (
+    isRecord(value) &&
+    isOptional(value.personer, (people): people is MuPerson[] => isArrayOf(people, isPerson))
+  );
 }
 
 async function fetchMu<T>(
@@ -106,11 +111,14 @@ async function fetchMu<T>(
       sessionUUID: ctx.guardianId,
       userProfile: 'guardian',
     });
-    return widgetFetch({
-      url: `${url}?${params}`,
-      widgetId,
-      headers: { authorization: `Bearer ${token}`, accept: 'application/json' },
-    }, decode);
+    return widgetFetch(
+      {
+        url: `${url}?${params}`,
+        widgetId,
+        headers: { authorization: `Bearer ${token}`, accept: 'application/json' },
+      },
+      decode,
+    );
   });
 }
 
@@ -120,7 +128,8 @@ export async function getTasks(
   widgetId: string,
 ): Promise<WeekPlan> {
   const data = await fetchMu(TASKS_URL, ctx, widgetId, tokens, (value) =>
-    expectOptionalType(value, isMuTasksResponse, 'a MinUddannelse assignment response', {}));
+    expectOptionalType(value, isMuTasksResponse, 'a MinUddannelse assignment response', {}),
+  );
   const items: WeekPlanItem[] = [];
   for (const task of data?.opgaver ?? []) {
     const subjects = (task.hold ?? []).map((team) => team.navn).filter(Boolean);
@@ -148,7 +157,13 @@ export async function getWeeklyLetter(
   widgetId: string,
 ): Promise<WeekPlan> {
   const data = await fetchMu(WEEKLY_LETTER_URL, ctx, widgetId, tokens, (value) =>
-    expectOptionalType(value, isMuWeeklyLetterResponse, 'a MinUddannelse weekly letter response', {}));
+    expectOptionalType(
+      value,
+      isMuWeeklyLetterResponse,
+      'a MinUddannelse weekly letter response',
+      {},
+    ),
+  );
   const items: WeekPlanItem[] = [];
   for (const person of data?.personer ?? []) {
     for (const institution of person.institutioner ?? []) {

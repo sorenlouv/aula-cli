@@ -1,17 +1,27 @@
 import { describe, expect, test } from 'bun:test';
 import { briefInput, sourceItem } from '../testing/brief-fixtures.ts';
-import { buildDateSupport, dueAtSupported, findDateClaims, unsupportedDateClaims } from './dates.ts';
+import {
+  buildDateSupport,
+  dueAtSupported,
+  findDateClaims,
+  unsupportedDateClaims,
+} from './dates.ts';
 import type { BriefInput, SourceItem } from './types.ts';
 
-const item = (key: string, text: string, at: string | null = '2026-08-10T11:00:00+00:00'): SourceItem =>
-  sourceItem({ key, text, at });
+const item = (
+  key: string,
+  text: string,
+  at: string | null = '2026-08-10T11:00:00+00:00',
+): SourceItem => sourceItem({ key, text, at });
 
 // 2026-08-13 is a Thursday; 2026-08-10 (the default item timestamp) a Monday.
 const input = (items: SourceItem[]): BriefInput => briefInput({ items });
 
 describe('findDateClaims', () => {
   test('finds weekdays through Danish inflections', () => {
-    const days = findDateClaims('Idræt om torsdagen, løb hver mandag, og tirsdage er turdage; fredags plan.')
+    const days = findDateClaims(
+      'Idræt om torsdagen, løb hver mandag, og tirsdage er turdage; fredags plan.',
+    )
       .filter((c) => c.kind === 'weekday')
       .map((c) => (c.kind === 'weekday' ? c.day : -1));
     expect(days).toEqual([4, 1, 2, 5]);
@@ -26,7 +36,9 @@ describe('findDateClaims', () => {
   });
 
   test('reads abbreviated months and range starts', () => {
-    const claims = findDateClaims('Mødet er fredag d. 18 sep kl 13-14. Fotografering 24.-28. august.');
+    const claims = findDateClaims(
+      'Mødet er fredag d. 18 sep kl 13-14. Fotografering 24.-28. august.',
+    );
     expect(claims).toContainEqual({ kind: 'date', month: 9, day: 18, raw: '18 sep' });
     expect(claims).toContainEqual({ kind: 'date', month: 8, day: 28, raw: '28. august' });
     expect(claims.some((c) => c.kind === 'date' && c.month === 8 && c.day === 24)).toBe(true);
@@ -91,11 +103,19 @@ describe('unsupportedDateClaims', () => {
       input([item('post:1', 'Husk turtasken.'), item('post:2', 'Vi løber hver søndag.')]),
     );
     // "søndag" exists globally (post:2) but not in post:1 — and dates stay global.
-    expect(unsupportedDateClaims('Aflever senest søndag', multi, { sourceKey: 'post:1' })).toEqual(['søndag']);
-    expect(unsupportedDateClaims('Aflever senest søndag', multi, { sourceKey: 'post:2' })).toEqual([]);
-    expect(unsupportedDateClaims('Kolliderer med festen 10/8', multi, { sourceKey: 'post:1' })).toEqual([]);
+    expect(unsupportedDateClaims('Aflever senest søndag', multi, { sourceKey: 'post:1' })).toEqual([
+      'søndag',
+    ]);
+    expect(unsupportedDateClaims('Aflever senest søndag', multi, { sourceKey: 'post:2' })).toEqual(
+      [],
+    );
+    expect(
+      unsupportedDateClaims('Kolliderer med festen 10/8', multi, { sourceKey: 'post:1' }),
+    ).toEqual([]);
     // Today's weekday (torsdag) is visible to every card.
-    expect(unsupportedDateClaims('Idræt i dag, torsdag', multi, { sourceKey: 'post:1' })).toEqual([]);
+    expect(unsupportedDateClaims('Idræt i dag, torsdag', multi, { sourceKey: 'post:1' })).toEqual(
+      [],
+    );
   });
 });
 

@@ -1,0 +1,16 @@
+node_modules/
+bun.lock
+
+# Gitignored working data — attachments and anything derived from real Aula
+# responses. Never formatted, never read.
+data/
+attachments/
+
+# Git worktrees checked out inside the repo.
+.claude/worktrees/
+
+# The docs are hand-wrapped prose with hand-aligned tables. Prettier pads every
+# table cell to the widest row and rewrites *emphasis* to _emphasis_, which is
+# churn without a payoff. Ignoring them here keeps format-on-save a no-op on
+# markdown, so the editor and the agent agree to leave these alone.
+*.md

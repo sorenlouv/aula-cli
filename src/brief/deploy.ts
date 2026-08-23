@@ -176,11 +176,17 @@ export async function deployArtifact(
   // agent may read is this one, wherever `$AULA_DIR` put it.
   const readRule = `Read(/${artifactPath})`;
   const args = [
-    '-p', deployPrompt(artifactPath, url, opts.title),
-    '--tools', 'Artifact', 'Read',
-    '--allowedTools', 'Artifact', readRule,
+    '-p',
+    deployPrompt(artifactPath, url, opts.title),
+    '--tools',
+    'Artifact',
+    'Read',
+    '--allowedTools',
+    'Artifact',
+    readRule,
     '--strict-mcp-config',
-    '--output-format', 'json',
+    '--output-format',
+    'json',
     ...modelEffortArgs(),
   ];
   const timeoutMs = opts.timeoutMs ?? TIMEOUT_MS;
@@ -218,7 +224,10 @@ export async function deployArtifact(
 
     const reply = parseClaudeJson(run.stdout);
     if (reply?.denials.includes('Artifact')) {
-      return { status: 'failed', reason: 'claude -p afviste Artifact-værktøjet (permission denied)' };
+      return {
+        status: 'failed',
+        reason: 'claude -p afviste Artifact-værktøjet (permission denied)',
+      };
     }
     // The reply is prose from a model, so it is a report and not proof: require
     // the target URL back, with no error marker beside it. A brief that

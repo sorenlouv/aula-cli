@@ -140,13 +140,37 @@ const THREADS = [
  */
 const MESSAGES: Record<number, { from: string; role: string; ago: number; html: string }[]> = {
   5001: [
-    { from: 'Yrsa Storm', role: 'employee', ago: -4, html: 'Vi tager af sted mandag den 25. Husk regntøj.' },
-    { from: 'Far Eksempelsen', role: 'guardian', ago: -3, html: 'Skal de have madpakke med begge dage?' },
-    { from: 'Yrsa Storm', role: 'employee', ago: -2, html: 'Kun mandag. Tirsdag sørger vi for maden.' },
+    {
+      from: 'Yrsa Storm',
+      role: 'employee',
+      ago: -4,
+      html: 'Vi tager af sted mandag den 25. Husk regntøj.',
+    },
+    {
+      from: 'Far Eksempelsen',
+      role: 'guardian',
+      ago: -3,
+      html: 'Skal de have madpakke med begge dage?',
+    },
+    {
+      from: 'Yrsa Storm',
+      role: 'employee',
+      ago: -2,
+      html: 'Kun mandag. Tirsdag sørger vi for maden.',
+    },
     { from: 'Far Eksempelsen', role: 'guardian', ago: -1, html: 'Perfekt, tak.' },
   ],
-  5002: [{ from: 'Pædagog Palle', role: 'employee', ago: -2, html: 'Vi holder lukket fredag den 29.' }],
-  5003: [{ from: 'Skoleleder', role: 'employee', ago: -3, html: 'Husk forældremødet på torsdag klokken 17.' }],
+  5002: [
+    { from: 'Pædagog Palle', role: 'employee', ago: -2, html: 'Vi holder lukket fredag den 29.' },
+  ],
+  5003: [
+    {
+      from: 'Skoleleder',
+      role: 'employee',
+      ago: -3,
+      html: 'Husk forældremødet på torsdag klokken 17.',
+    },
+  ],
 };
 
 /** Keyed by the institution-profile id that makes the post visible. */
@@ -169,7 +193,14 @@ const EVENTS = [
  */
 const ALBUMS = [
   { id: 9001, forId: 11, title: 'Tur til stranden', at: -2, group: '2E', inst: 'Eksempelskolen' },
-  { id: 9002, forId: 22, title: 'Sommerfest i Myretuen', at: -9, group: 'Myretuen', inst: 'Børnehuset Eksemplet' },
+  {
+    id: 9002,
+    forId: 22,
+    title: 'Sommerfest i Myretuen',
+    at: -9,
+    group: 'Myretuen',
+    inst: 'Børnehuset Eksemplet',
+  },
   { id: 9003, forId: 11, title: 'Fastelavn i 2E', at: -5, group: '2E', inst: 'Eksempelskolen' },
 ];
 
@@ -200,7 +231,9 @@ function record(what: string): void {
 }
 
 async function handle(input: string | Request | URL, init?: RequestInit): Promise<Response> {
-  const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+  const url = new URL(
+    typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
+  );
 
   if (url.host === 'app.meebook.com') {
     record(`meebook ${url.searchParams.getAll('childFilter[]').join(',')}`);
@@ -303,7 +336,8 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
     case 'posts.getAllPosts': {
       const ids = new Set(numbers(url.searchParams, 'institutionProfileIds'));
       const page = Number(url.searchParams.get('index') ?? 0);
-      const visible = process.env.FAKE_AULA_EMPTY_POSTS === '1' ? [] : POSTS.filter((p) => ids.has(p.forId));
+      const visible =
+        process.env.FAKE_AULA_EMPTY_POSTS === '1' ? [] : POSTS.filter((p) => ids.has(p.forId));
       return envelope({ posts: page === 0 ? visible.map(toPost) : [], hasMorePosts: false });
     }
     case 'gallery.getAlbums': {
@@ -335,9 +369,10 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
     }
     case 'calendar.getEventsByProfileIdsAndResourceIds': {
       const body: unknown = JSON.parse(String(init?.body ?? '{}'));
-      const rawIds = isRecord(body) && Array.isArray(body.instProfileIds)
-        ? body.instProfileIds.filter(isNumber)
-        : [];
+      const rawIds =
+        isRecord(body) && Array.isArray(body.instProfileIds)
+          ? body.instProfileIds.filter(isNumber)
+          : [];
       const ids = new Set(rawIds);
       return envelope(
         EVENTS.filter((e) => ids.has(e.forId)).map((e) => ({
@@ -370,7 +405,11 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
       );
     }
     case 'profiles.getContactlist':
-      return envelope(Number(url.searchParams.get('page') ?? 1) === 1 ? [{ profileId: 1, fullName: 'Klassekammerat', birthday: '2016-05-04' }] : []);
+      return envelope(
+        Number(url.searchParams.get('page') ?? 1) === 1
+          ? [{ profileId: 1, fullName: 'Klassekammerat', birthday: '2016-05-04' }]
+          : [],
+      );
     case 'notifications.getNotificationsForActiveProfile':
       return envelope([]);
     case 'commonFiles.getCommonFiles':

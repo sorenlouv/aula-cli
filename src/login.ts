@@ -140,7 +140,12 @@ export async function runLogin(args: LoginArgs): Promise<number> {
             // would push a fresh 35-line block of QR into the output on every
             // rotation — straight into the context of the agent this page
             // exists to spare.
-            page.update({ kind: 'qr', qr1: qr.qr1Json, qr2: qr.qr2Json, updateCount: qr.updateCount });
+            page.update({
+              kind: 'qr',
+              qr1: qr.qr1Json,
+              qr2: qr.qr2Json,
+              updateCount: qr.updateCount,
+            });
             return;
           }
           renderQr(qr.qr1Json, qr.qr2Json, qr.updateCount);
@@ -187,7 +192,9 @@ export async function runLogin(args: LoginArgs): Promise<number> {
     }
 
     const secondsLeft = Math.max(0, tokens.expires_at - Math.floor(Date.now() / 1000));
-    info(`Access token valid for ${Math.round(secondsLeft / 60)} min; it refreshes itself after that.`);
+    info(
+      `Access token valid for ${Math.round(secondsLeft / 60)} min; it refreshes itself after that.`,
+    );
     await page?.finish({ ok: true, message: 'Tokens saved. Aula is ready to read.' });
     return 0;
   } catch (err) {
@@ -278,13 +285,17 @@ export async function runStatus(asText: boolean): Promise<number> {
 
   if (status.loggedIn) {
     const mins = Math.round((status.accessTokenExpiresInSeconds ?? 0) / 60);
-    ok(`Logged in as ${fmt.bold(status.username ?? '?')}${status.identityName ? ` (${status.identityName})` : ''}`);
+    ok(
+      `Logged in as ${fmt.bold(status.username ?? '?')}${status.identityName ? ` (${status.identityName})` : ''}`,
+    );
     info(`  Access token valid for ${mins} min, then refreshed automatically.`);
   } else {
     warn('Not logged in with MitID.');
     info(`  Run ${fmt.dim('bun run login')}.`);
   }
-  info(`  Token store:     ${status.tokenStore}${status.tokenKeyFromEnv ? ` (key from $${KEY_ENV})` : ''}`);
+  info(
+    `  Token store:     ${status.tokenStore}${status.tokenKeyFromEnv ? ` (key from $${KEY_ENV})` : ''}`,
+  );
   info(`  Cookie jar:      ${status.cookieJar ?? 'none'}`);
   return 0;
 }

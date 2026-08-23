@@ -58,13 +58,25 @@ const HIDDEN: RankedSignal = {
   audience: 'municipal',
   relevance: 'hide',
   sourceKey: 'post:9',
-  source: { ...SOURCE, key: 'post:9', title: 'Forældrekursus', audience: 'municipal', groups: ['Alle forældre'] },
+  source: {
+    ...SOURCE,
+    key: 'post:9',
+    title: 'Forældrekursus',
+    audience: 'municipal',
+    groups: ['Alle forældre'],
+  },
 };
 
 const INPUT: BriefInput = briefInput({
   family: {
     children: [
-      { name: 'Alma Signe Eksempelsen', firstName: 'Alma', institution: 'Eksempelskolen', className: '2E', presence: null },
+      {
+        name: 'Alma Signe Eksempelsen',
+        firstName: 'Alma',
+        institution: 'Eksempelskolen',
+        className: '2E',
+        presence: null,
+      },
     ],
     isSteppedUp: true,
   },
@@ -176,7 +188,9 @@ describe('parsePlan', () => {
     );
     expect(plan.act).toEqual([]);
     expect(plan.week).toEqual([{ signalId: personal.id }]);
-    expect(problems.some((problem) => problem.includes('kan ikke blive til en handling'))).toBe(true);
+    expect(problems.some((problem) => problem.includes('kan ikke blive til en handling'))).toBe(
+      true,
+    );
     expect(problems.some((problem) => problem.includes('blev ikke fortolket'))).toBe(true);
     const html = renderPlan(brief, plan);
     expect(html).toContain('Tandlæge kl. 13:30–14:15');
@@ -262,7 +276,10 @@ describe('renderPlan', () => {
 // The reader's escape hatch: a card is a summary, and a summary is only worth
 // trusting if the thing it summarises is one tap away.
 describe('more-block', () => {
-  const conversation = (count: number, extra: Partial<{ total: number; truncated: boolean }> = {}) => ({
+  const conversation = (
+    count: number,
+    extra: Partial<{ total: number; truncated: boolean }> = {},
+  ) => ({
     messages: Array.from({ length: count }, (_, i) => ({
       from: i % 2 === 0 ? 'Yrsa Storm' : 'Søren',
       at: `2026-08-1${i}T09:0${i}:00`,
@@ -312,7 +329,9 @@ describe('more-block', () => {
     const html = fallbackPage(brief, {
       conversations: { 'thread:9': 'Yrsa foreslår tre datoer; I har ikke svaret endnu.' },
     });
-    expect(html).toContain('<p class="gist">Yrsa foreslår tre datoer; I har ikke svaret endnu.</p>');
+    expect(html).toContain(
+      '<p class="gist">Yrsa foreslår tre datoer; I har ikke svaret endnu.</p>',
+    );
     expect(html.indexOf('class="gist"')).toBeLessThan(html.indexOf('<details class="more">'));
   });
 
@@ -384,7 +403,9 @@ describe('more-block', () => {
       conversation: conversation(3),
     });
     const brief: RankedBrief = { ...BRIEF, signals: [], unusedSources: [item] };
-    const html = fallbackPage(brief, { conversations: { 'thread:12': 'Fire forældre aftaler en legedag.' } });
+    const html = fallbackPage(brief, {
+      conversations: { 'thread:12': 'Fire forældre aftaler en legedag.' },
+    });
     expect(html).toContain('Fire forældre aftaler en legedag.');
     expect(html).toContain('Læs hele samtalen · 3 beskeder');
   });
@@ -410,7 +431,9 @@ describe('fallbackPage', () => {
       input: { ...INPUT, health: [{ level: 'ok', message: 'Alle kilder svarede.' }] },
     };
     const html = fallbackPage(clean);
-    expect(html.indexOf('data-block="datastatus"')).toBeGreaterThan(html.indexOf('Kræver handling'));
+    expect(html.indexOf('data-block="datastatus"')).toBeGreaterThan(
+      html.indexOf('Kræver handling'),
+    );
     expect(validatePage(html, clean)).toEqual([]);
   });
 });
@@ -434,16 +457,31 @@ describe('data shapes', () => {
 
   const SHAPES: Array<[string, RankedBrief]> = [
     ['single school child', BRIEF],
-    ['three children across two institutions', withChildren(child('Alma', '2E'), child('Viggo', null), child('Ida', null))],
+    [
+      'three children across two institutions',
+      withChildren(child('Alma', '2E'), child('Viggo', null), child('Ida', null)),
+    ],
     ['single daycare child, no class name', withChildren(child('Ida', null))],
-    ['empty day — no signals, no albums, no warnings', { ...BRIEF, signals: [], input: { ...INPUT, albums: [], health: [] } }],
+    [
+      'empty day — no signals, no albums, no warnings',
+      { ...BRIEF, signals: [], input: { ...INPUT, albums: [], health: [] } },
+    ],
     [
       'sparse signal — no child, quote, why or date',
-      { ...BRIEF, signals: [{ ...MUST_SHOW, child: null, quote: null, why: null, dueAt: null }, HIDDEN] },
+      {
+        ...BRIEF,
+        signals: [{ ...MUST_SHOW, child: null, quote: null, why: null, dueAt: null }, HIDDEN],
+      },
     ],
     [
       'heavy day — twelve action items',
-      { ...BRIEF, signals: [...Array.from({ length: 12 }, (_, i) => ({ ...MUST_SHOW, id: `plan:x:0#${i}` })), HIDDEN] },
+      {
+        ...BRIEF,
+        signals: [
+          ...Array.from({ length: 12 }, (_, i) => ({ ...MUST_SHOW, id: `plan:x:0#${i}` })),
+          HIDDEN,
+        ],
+      },
     ],
   ];
 
@@ -458,9 +496,11 @@ describe('data shapes', () => {
         {
           topline: 'Simuleret topline.',
           emptyAct: 'Helt roligt i dag.',
-          act: [...brief.signals.filter((s) => s.tier === 'act')]
-            .reverse()
-            .map((s) => ({ signalId: s.id, title: `Omskrevet: ${s.title}`, why: 'Simuleret begrundelse.' })),
+          act: [...brief.signals.filter((s) => s.tier === 'act')].reverse().map((s) => ({
+            signalId: s.id,
+            title: `Omskrevet: ${s.title}`,
+            why: 'Simuleret begrundelse.',
+          })),
           week: brief.signals.filter((s) => s.tier === 'week').map((s) => ({ signalId: s.id })),
         },
         brief,

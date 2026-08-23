@@ -121,7 +121,14 @@ export class ResponseCache {
 
   stats(): CacheStats {
     if (!this.#store) {
-      return { enabled: false, path: CACHE_PATH, ttlMs: this.ttlMs, entries: 0, byNamespace: {}, bytes: 0 };
+      return {
+        enabled: false,
+        path: CACHE_PATH,
+        ttlMs: this.ttlMs,
+        entries: 0,
+        byNamespace: {},
+        bytes: 0,
+      };
     }
     const now = Date.now();
     const byNamespace: Record<string, number> = {};

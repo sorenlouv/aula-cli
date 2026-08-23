@@ -20,10 +20,30 @@ import type { SignalKind, Urgency } from './types.ts';
  * date loses the single most important appointment in the account.
  */
 const MONTHS: Record<string, number> = {
-  januar: 1, jan: 1, februar: 2, feb: 2, marts: 3, mar: 3, april: 4, apr: 4,
-  maj: 5, juni: 6, jun: 6, juli: 7, jul: 7, august: 8, aug: 8,
-  september: 9, sept: 9, sep: 9, oktober: 10, okt: 10, november: 11, nov: 11,
-  december: 12, dec: 12,
+  januar: 1,
+  jan: 1,
+  februar: 2,
+  feb: 2,
+  marts: 3,
+  mar: 3,
+  april: 4,
+  apr: 4,
+  maj: 5,
+  juni: 6,
+  jun: 6,
+  juli: 7,
+  jul: 7,
+  august: 8,
+  aug: 8,
+  september: 9,
+  sept: 9,
+  sep: 9,
+  oktober: 10,
+  okt: 10,
+  november: 11,
+  nov: 11,
+  december: 12,
+  dec: 12,
 };
 
 const MONTH_PATTERN = Object.keys(MONTHS)
@@ -31,7 +51,13 @@ const MONTH_PATTERN = Object.keys(MONTHS)
   .join('|');
 
 const WEEKDAYS: Record<string, number> = {
-  søndag: 0, mandag: 1, tirsdag: 2, onsdag: 3, torsdag: 4, fredag: 5, lørdag: 6,
+  søndag: 0,
+  mandag: 1,
+  tirsdag: 2,
+  onsdag: 3,
+  torsdag: 4,
+  fredag: 5,
+  lørdag: 6,
 };
 
 /**
@@ -140,7 +166,7 @@ export function extractDates(sentence: string, today: Date): string[] {
   const named = new RegExp(`(\\d{1,2})\\.?\\s+(${MONTH_PATTERN})\\.?(?:\\s+(\\d{4}))?`, 'gi');
   for (const match of sentence.matchAll(named)) {
     const day = Number(match[1]);
-    const month = MONTHS[(match[2] ?? "").toLowerCase()];
+    const month = MONTHS[(match[2] ?? '').toLowerCase()];
     if (!month) continue;
     const year = match[3] ? Number(match[3]) : inferYear(day, month, today);
     if (!isValidCalendarDate(year, month, day)) continue;
@@ -170,7 +196,7 @@ export function extractDates(sentence: string, today: Date): string[] {
   for (const match of sentence.matchAll(dotted)) {
     const day = Number(match[1]);
     const month = Number(match[2]);
-    if (/^0\d$/.test(match[2] ?? "")) continue; // 17.00, 17.05 — a clock time
+    if (/^0\d$/.test(match[2] ?? '')) continue; // 17.00, 17.05 — a clock time
     const year = inferYear(day, month, today);
     if (!isValidCalendarDate(year, month, day)) continue;
     push(new Date(year, month - 1, day));
@@ -186,10 +212,9 @@ export function extractDates(sentence: string, today: Date): string[] {
   // Definite form too: "om mandagen" is Danish for "on Mondays". That is a
   // recurring commitment rather than a single date, and resolving it to the
   // next Monday is the actionable reading.
-  const weekday = /\b(?:på|om)\s+(mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag)(?:en)?\b/i.exec(
-    sentence,
-  );
-  const weekdayIndex = weekday ? WEEKDAYS[weekday[1]?.toLowerCase() ?? ""] : undefined;
+  const weekday =
+    /\b(?:på|om)\s+(mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag)(?:en)?\b/i.exec(sentence);
+  const weekdayIndex = weekday ? WEEKDAYS[weekday[1]?.toLowerCase() ?? ''] : undefined;
   if (weekdayIndex !== undefined) push(nextWeekday(weekdayIndex, today));
 
   return found;

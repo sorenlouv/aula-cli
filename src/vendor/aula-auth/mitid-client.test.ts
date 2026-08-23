@@ -87,19 +87,23 @@ describe('normalizeAuthenticatorType', () => {
   });
 
   test('rejects a new server value instead of lying about its union type', () => {
-    expect(() => normalizeAuthenticatorType('NEW_DEVICE')).toThrow(/Unknown MitID authenticator type/);
+    expect(() => normalizeAuthenticatorType('NEW_DEVICE')).toThrow(
+      /Unknown MitID authenticator type/,
+    );
   });
 });
 
 describe('MitID wire response parsers', () => {
   test('parses the authentication-session fields the flow proof needs', () => {
-    const response = parseAuthenticationSessionResponse(JSON.stringify({
-      brokerSecurityContext: 'context',
-      serviceProviderName: 'Aula',
-      referenceTextHeader: 'header',
-      referenceTextBody: 'body',
-      ignoredByThisClient: true,
-    }));
+    const response = parseAuthenticationSessionResponse(
+      JSON.stringify({
+        brokerSecurityContext: 'context',
+        serviceProviderName: 'Aula',
+        referenceTextHeader: 'header',
+        referenceTextBody: 'body',
+        ignoredByThisClient: true,
+      }),
+    );
     expect(response.serviceProviderName).toBe('Aula');
     expect(() => parseAuthenticationSessionResponse('{}')).toThrow(MitidError);
   });
@@ -121,11 +125,15 @@ describe('MitID wire response parsers', () => {
   });
 
   test('validates SRP init and prove wrappers', () => {
-    expect(parseSrpInitResponse(JSON.stringify({
-      srpSalt: { value: 'salt' },
-      randomB: { value: 'random' },
-      pbkdf2Salt: { value: 'pbkdf' },
-    })).randomB.value).toBe('random');
+    expect(
+      parseSrpInitResponse(
+        JSON.stringify({
+          srpSalt: { value: 'salt' },
+          randomB: { value: 'random' },
+          pbkdf2Salt: { value: 'pbkdf' },
+        }),
+      ).randomB.value,
+    ).toBe('random');
     expect(parseM2Response('{"m2":{"value":"proof"}}')).toBe('proof');
     expect(() => parseSrpInitResponse('{"srpSalt":{},"randomB":{"value":"x"}}')).toThrow(
       MitidError,
@@ -133,16 +141,20 @@ describe('MitID wire response parsers', () => {
   });
 
   test('validates nested /next combinations, authenticators and error messages', () => {
-    const parsed = parseNextAuthenticatorResponse(JSON.stringify({
-      nextAuthenticator: {
-        authenticatorType: 'APP',
-        authenticatorSessionFlowKey: 'flow',
-        eafeHash: 'hash',
-        authenticatorSessionId: 'session',
-      },
-      combinations: [{ id: 'S3', combinationItems: [{ name: 'MitID app' }] }],
-      errors: [{ errorCode: 'x', userMessage: { supportErrorId: 'CAP008', text: { text: 'busy' } } }],
-    }));
+    const parsed = parseNextAuthenticatorResponse(
+      JSON.stringify({
+        nextAuthenticator: {
+          authenticatorType: 'APP',
+          authenticatorSessionFlowKey: 'flow',
+          eafeHash: 'hash',
+          authenticatorSessionId: 'session',
+        },
+        combinations: [{ id: 'S3', combinationItems: [{ name: 'MitID app' }] }],
+        errors: [
+          { errorCode: 'x', userMessage: { supportErrorId: 'CAP008', text: { text: 'busy' } } },
+        ],
+      }),
+    );
     expect(parsed.combinations?.[0]?.combinationItems[0]?.name).toBe('MitID app');
     expect(parsed.errors?.[0]?.userMessage?.supportErrorId).toBe('CAP008');
     expect(() => parseNextAuthenticatorResponse('{"combinations":[{"id":"S3"}]}')).toThrow(
@@ -186,7 +198,8 @@ describe('a /next response with nulls where optional fields would be', () => {
         userMessage: {
           title: { text: 'Session cancelled', textAria: '' },
           text: {
-            text: 'You have used your user ID in two places at the same time. ' +
+            text:
+              'You have used your user ID in two places at the same time. ' +
               'Due to this, your session has been cancelled. Try again',
             textAria: '',
           },

@@ -59,16 +59,20 @@ type SpEvent = {
 };
 
 function isAuthResponse(value: unknown): value is AuthResponse {
-  return isRecord(value) &&
+  return (
+    isRecord(value) &&
     isOptional(value.loginId, isStringOrNumber) &&
-    isOptional(value.childName, isString);
+    isOptional(value.childName, isString)
+  );
 }
 
 function isChildRow(value: unknown): value is ChildRow {
-  return isRecord(value) &&
+  return (
+    isRecord(value) &&
     isNumber(value.Id) &&
     (value.Login === null || isString(value.Login)) &&
-    isOptional(value.Name, isString);
+    isOptional(value.Name, isString)
+  );
 }
 
 /**
@@ -79,10 +83,13 @@ function isChildRow(value: unknown): value is ChildRow {
  */
 function decodeRoster(value: unknown): DecodedRoster {
   if (value === null || value === undefined) return { rows: [], warnings: [] };
-  if (!isRecord(value)) throw new Error(`Expected a SkolePortal child roster, got ${describeShape(value)}`);
+  if (!isRecord(value))
+    throw new Error(`Expected a SkolePortal child roster, got ${describeShape(value)}`);
   if (value.Children === null || value.Children === undefined) return { rows: [], warnings: [] };
   if (!Array.isArray(value.Children)) {
-    throw new Error(`Expected a SkolePortal child roster, got Children as ${describeShape(value.Children)}`);
+    throw new Error(
+      `Expected a SkolePortal child roster, got Children as ${describeShape(value.Children)}`,
+    );
   }
 
   const rows: UsableChildRow[] = [];
@@ -105,14 +112,16 @@ function decodeRoster(value: unknown): DecodedRoster {
 }
 
 function isSpEvent(value: unknown): value is SpEvent {
-  return isRecord(value) &&
+  return (
+    isRecord(value) &&
     isOptional(value.StartTime, isString) &&
     isOptional(value.StartTimeISO, isString) &&
     isOptional(value.CoursesDisplay, isString) &&
     isOptional(value.ActivitiesDisplay, isString) &&
     isOptional(value.ChapterTitle, isString) &&
     isOptional(value.Title, isString) &&
-    isOptional(value.Description, isString);
+    isOptional(value.Description, isString)
+  );
 }
 
 function decodeEvents(value: unknown): SpEvent[] {
@@ -210,12 +219,16 @@ export async function getWeekPlan(
     };
     try {
       const auth = await tokens.withToken(widgetId, async (token) => {
-        return widgetFetch({
-          url: AUTH_URL,
-          method: 'POST',
-          widgetId,
-          headers: headers({ ...base, token }),
-        }, (value) => expectOptionalType(value, isAuthResponse, 'a SkolePortal authentication response', {}));
+        return widgetFetch(
+          {
+            url: AUTH_URL,
+            method: 'POST',
+            widgetId,
+            headers: headers({ ...base, token }),
+          },
+          (value) =>
+            expectOptionalType(value, isAuthResponse, 'a SkolePortal authentication response', {}),
+        );
       });
       if (auth?.loginId === undefined || auth.loginId === null) {
         warnings.push(`${child.name}: SkolePortal authenticated but returned no loginId.`);
@@ -224,11 +237,14 @@ export async function getWeekPlan(
 
       const events = await tokens.withToken(widgetId, async (token) => {
         const url = `${WEEKPLAN_URL}?loginId=${encodeURIComponent(String(auth.loginId))}&date=${encodeURIComponent(date)}`;
-        return widgetFetch({
-          url,
-          widgetId,
-          headers: headers({ ...base, token }),
-        }, decodeEvents);
+        return widgetFetch(
+          {
+            url,
+            widgetId,
+            headers: headers({ ...base, token }),
+          },
+          decodeEvents,
+        );
       });
 
       const childName = decodeEntities(auth.childName ?? '').trim() || child.name;
@@ -270,7 +286,10 @@ export async function getAssignments(
 ): Promise<WeekPlan> {
   const date = weekParam(ctx.isoWeek);
   const institutions = ctx.institutionCodes.join(',');
-  const childFilter = ctx.children.map((c) => c.userId).filter(Boolean).join(',');
+  const childFilter = ctx.children
+    .map((c) => c.userId)
+    .filter(Boolean)
+    .join(',');
   const items: WeekPlanItem[] = [];
   const warnings: string[] = [];
 
@@ -298,20 +317,26 @@ export async function getAssignments(
   // Called for the session it establishes, not for its body — nothing below
   // reads the response, so decoding it here would only add a way to fail.
   await tokens.withToken(widgetId, async (token) => {
-    return widgetFetch({
-      url: AUTH_URL,
-      method: 'POST',
-      widgetId,
-      headers: headers({ ...base, token }),
-    }, () => undefined);
+    return widgetFetch(
+      {
+        url: AUTH_URL,
+        method: 'POST',
+        widgetId,
+        headers: headers({ ...base, token }),
+      },
+      () => undefined,
+    );
   });
 
   const roster = await tokens.withToken(widgetId, async (token) => {
-    return widgetFetch({
-      url: CHILDREN_URL,
-      widgetId,
-      headers: headers({ ...base, token }),
-    }, decodeRoster);
+    return widgetFetch(
+      {
+        url: CHILDREN_URL,
+        widgetId,
+        headers: headers({ ...base, token }),
+      },
+      decodeRoster,
+    );
   });
 
   warnings.push(...roster.warnings);
@@ -332,11 +357,14 @@ export async function getAssignments(
         const url =
           `${ASSIGNMENTS_URL}?loginId=${encodeURIComponent(String(row.Id))}` +
           `&date=${encodeURIComponent(date)}&activityFilter=null`;
-        return widgetFetch({
-          url,
-          widgetId,
-          headers: headers({ ...base, token, child: child.userId }),
-        }, decodeEvents);
+        return widgetFetch(
+          {
+            url,
+            widgetId,
+            headers: headers({ ...base, token, child: child.userId }),
+          },
+          decodeEvents,
+        );
       });
       const childName = decodeEntities(row.Name ?? '').trim() || child.name;
       for (const event of Array.isArray(events) ? events : []) {

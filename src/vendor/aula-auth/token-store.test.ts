@@ -4,11 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from './crypto.ts';
-import {
-  EncryptedFileTokenStore,
-  type StoredTokenRecord,
-  TokenStoreError,
-} from './token-store.ts';
+import { EncryptedFileTokenStore, type StoredTokenRecord, TokenStoreError } from './token-store.ts';
 
 const SAMPLE: StoredTokenRecord = {
   version: 1,

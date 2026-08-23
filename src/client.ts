@@ -102,10 +102,10 @@ export function assertReadOnly(
       -1,
       opts.allowAnyGetter
         ? `Refusing to call "${method}": this client is read-only, and only ` +
-          `methods named "module.get*", "module.is*" or "module.has*" can be ` +
-          `called without a typed wrapper.`
+            `methods named "module.get*", "module.is*" or "module.has*" can be ` +
+            `called without a typed wrapper.`
         : `Refusing to call "${method}": this client is read-only and only allows ` +
-          `[${[...READ_ONLY_METHODS].join(', ')}].`,
+            `[${[...READ_ONLY_METHODS].join(', ')}].`,
     );
   }
   if (httpMethod === 'POST' && !POST_ALLOWED.has(method)) {
@@ -174,7 +174,9 @@ export class AulaApiError extends Error {
 export class AulaAuthError extends Error {
   /** Always ends with the fix, because MitID is the only credential there is. */
   constructor(problem: string | Remedy, guidance: string = loginInstructions()) {
-    super(typeof problem === 'string' ? `${problem}\n\n${guidance}` : formatRemedy(withLogin(problem)));
+    super(
+      typeof problem === 'string' ? `${problem}\n\n${guidance}` : formatRemedy(withLogin(problem)),
+    );
     this.name = 'AulaAuthError';
   }
 }
@@ -187,7 +189,11 @@ export class AulaAuthError extends Error {
  */
 function withLogin(problem: Remedy): Remedy {
   if (problem.commands?.length) return problem;
-  return { ...problem, action: problem.action ?? 'Log in again with MitID:', commands: ['bun run login'] };
+  return {
+    ...problem,
+    action: problem.action ?? 'Log in again with MitID:',
+    commands: ['bun run login'],
+  };
 }
 
 export type QueryValue = string | number | boolean | Array<string | number>;
@@ -248,7 +254,8 @@ export class AulaClient {
       renewToken?: (spent: string) => Promise<string | undefined>;
     } = {},
   ) {
-    const auth: Auth | undefined = opts.auth ??
+    const auth: Auth | undefined =
+      opts.auth ??
       (opts.cookie !== undefined ? { kind: 'cookie', cookie: opts.cookie } : undefined);
     if (!auth) {
       throw new Error('AulaClient needs credentials — use AulaClient.create().');
@@ -258,7 +265,9 @@ export class AulaClient {
     this.#csrf = this.#cookie ? readCookieValue(this.#cookie, 'Csrfp-Token') : undefined;
     const version = opts.apiVersion ?? defaultApiVersion();
     if (!Number.isInteger(version) || version < 1 || version > MAX_API_VERSION) {
-      throw new Error(`apiVersion must be an integer from 1 to ${MAX_API_VERSION} (got "${version}").`);
+      throw new Error(
+        `apiVersion must be an integer from 1 to ${MAX_API_VERSION} (got "${version}").`,
+      );
     }
     this.#version = version;
     this.#cache = opts.cache ?? ResponseCache.disabled();
@@ -266,7 +275,9 @@ export class AulaClient {
   }
 
   /** Builds a client from the stored MitID login — the only credential there is. */
-  static async create(opts: { apiVersion?: number; cache?: CacheSettings } = {}): Promise<AulaClient> {
+  static async create(
+    opts: { apiVersion?: number; cache?: CacheSettings } = {},
+  ): Promise<AulaClient> {
     const auth = await resolveAuth();
     return new AulaClient({
       ...opts,
@@ -351,12 +362,14 @@ export class AulaClient {
       return Promise.resolve();
     }
 
-    this.#sessionBootstrap ??= this
-      // The version probe already called getProfilesByLogin, which seeded the
-      // jar with PHPSESSID; this is the step that makes the session usable.
-      .#send('profiles.getProfileContext', 'GET', {
-        query: { portalrole: 'guardian' },
-      }, this.#version)
+    // The version probe already called getProfilesByLogin, which seeded the
+    // jar with PHPSESSID; this is the step that makes the session usable.
+    this.#sessionBootstrap ??= this.#send(
+      'profiles.getProfileContext',
+      'GET',
+      { query: { portalrole: 'guardian' } },
+      this.#version,
+    )
       .then(() => undefined)
       .catch((err: unknown) => {
         this.#sessionBootstrap = undefined;
@@ -422,9 +435,11 @@ export class AulaClient {
       return true;
     })();
     this.#tokenRecovery = recovery;
-    void recovery.catch(() => undefined).finally(() => {
-      if (this.#tokenRecovery === recovery) this.#tokenRecovery = undefined;
-    });
+    void recovery
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.#tokenRecovery === recovery) this.#tokenRecovery = undefined;
+      });
     return recovery;
   }
 
@@ -511,7 +526,8 @@ export class AulaClient {
         detail:
           `${method} answered with HTTP ${res.status} and a body that is not JSON. ` +
           `It starts: ${raw.slice(0, 200)}`,
-        fallback: 'If this keeps happening, Aula has changed something and aula-cli needs updating.',
+        fallback:
+          'If this keeps happening, Aula has changed something and aula-cli needs updating.',
       });
     }
     const envelope = parseEnvelope(method, parsed);
@@ -553,7 +569,8 @@ export class AulaClient {
           `aula command running at the same time — which retires the token in hand ` +
           `immediately, whatever its expiry says.`,
         action: 'Run the command again; the next run picks up the current token.',
-        fallback: 'If it keeps happening on every run, the stored login is genuinely stale: `bun run login`.',
+        fallback:
+          'If it keeps happening on every run, the stored login is genuinely stale: `bun run login`.',
       });
     }
 
@@ -625,7 +642,7 @@ export class AulaClient {
         : 'Aula sent no message with it, and this is not a status code aula-cli knows about.',
       action: 'See which endpoints are working:',
       commands: ['bun run aula doctor --text'],
-      fallback: 'If this is reproducible, API.md\'s status-code table needs a new row.',
+      fallback: "If this is reproducible, API.md's status-code table needs a new row.",
     });
   }
 
@@ -758,23 +775,32 @@ export class AulaClient {
 
   async getProfileContext(portalRole = 'guardian'): Promise<ProfileContext> {
     const method = 'profiles.getProfileContext';
-    return expectObject<ProfileContext>(method, await this.#request(method, {
-      query: { portalrole: portalRole },
-    }));
+    return expectObject<ProfileContext>(
+      method,
+      await this.#request(method, {
+        query: { portalrole: portalRole },
+      }),
+    );
   }
 
   async getThreads(page = 0): Promise<ThreadList> {
     const method = 'messaging.getThreads';
-    return expectObject<ThreadList>(method, await this.#request(method, {
-      query: { sortOn: 'date', orderDirection: 'desc', page },
-    }));
+    return expectObject<ThreadList>(
+      method,
+      await this.#request(method, {
+        query: { sortOn: 'date', orderDirection: 'desc', page },
+      }),
+    );
   }
 
   async getThread(threadId: number, page = 0): Promise<ThreadDetail> {
     const method = 'messaging.getMessagesForThread';
-    return expectObject<ThreadDetail>(method, await this.#request(method, {
-      query: { threadId, page },
-    }));
+    return expectObject<ThreadDetail>(
+      method,
+      await this.#request(method, {
+        query: { threadId, page },
+      }),
+    );
   }
 
   /**
@@ -791,18 +817,21 @@ export class AulaClient {
     isBookmarked?: boolean;
   }): Promise<PostList> {
     const method = 'posts.getAllPosts';
-    return expectObject<PostList>(method, await this.#request(method, {
-      query: {
-        parent: 'profile',
-        index: opts.index ?? 0,
-        limit: opts.limit ?? 10,
-        isImportant: opts.isImportant ?? false,
-        isUnread: opts.isUnread ?? false,
-        ownPost: false,
-        isBookmarked: opts.isBookmarked ?? false,
-        institutionProfileIds: opts.institutionProfileIds,
-      },
-    }));
+    return expectObject<PostList>(
+      method,
+      await this.#request(method, {
+        query: {
+          parent: 'profile',
+          index: opts.index ?? 0,
+          limit: opts.limit ?? 10,
+          isImportant: opts.isImportant ?? false,
+          isUnread: opts.isUnread ?? false,
+          ownPost: false,
+          isBookmarked: opts.isBookmarked ?? false,
+          institutionProfileIds: opts.institutionProfileIds,
+        },
+      }),
+    );
   }
 
   /**
@@ -1129,7 +1158,9 @@ function defaultApiVersion(): number {
   if (raw === undefined) return FALLBACK_API_VERSION;
   const version = parseInteger(raw, { min: 1, max: MAX_API_VERSION });
   if (version === undefined) {
-    throw new Error(`AULA_API_VERSION must be an integer from 1 to ${MAX_API_VERSION} (got "${raw}").`);
+    throw new Error(
+      `AULA_API_VERSION must be an integer from 1 to ${MAX_API_VERSION} (got "${raw}").`,
+    );
   }
   return version;
 }

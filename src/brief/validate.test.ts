@@ -47,13 +47,25 @@ const HIDDEN: RankedSignal = {
   audience: 'municipal',
   relevance: 'hide',
   sourceKey: 'post:9',
-  source: { ...SOURCE, key: 'post:9', title: 'Forældrekursus', audience: 'municipal', groups: ['Alle forældre'] },
+  source: {
+    ...SOURCE,
+    key: 'post:9',
+    title: 'Forældrekursus',
+    audience: 'municipal',
+    groups: ['Alle forældre'],
+  },
 };
 
 const INPUT: BriefInput = briefInput({
   family: {
     children: [
-      { name: 'Alma Signe Eksempelsen', firstName: 'Alma', institution: 'Eksempelskolen', className: '2E', presence: null },
+      {
+        name: 'Alma Signe Eksempelsen',
+        firstName: 'Alma',
+        institution: 'Eksempelskolen',
+        className: '2E',
+        presence: null,
+      },
     ],
     isSteppedUp: true,
   },

@@ -120,10 +120,12 @@ export function parseAuxResponse(rawBody: string | { Aux?: string }): MitidAuxDa
 
   const coreClient = isRecord(inner) && isRecord(inner.coreClient) ? inner.coreClient : null;
   const parameters = isRecord(inner) && isRecord(inner.parameters) ? inner.parameters : null;
-  const checksumB64 = coreClient && typeof coreClient.checksum === 'string' ? coreClient.checksum : undefined;
-  const sessionId = parameters && typeof parameters.authenticationSessionId === 'string'
-    ? parameters.authenticationSessionId
-    : undefined;
+  const checksumB64 =
+    coreClient && typeof coreClient.checksum === 'string' ? coreClient.checksum : undefined;
+  const sessionId =
+    parameters && typeof parameters.authenticationSessionId === 'string'
+      ? parameters.authenticationSessionId
+      : undefined;
   if (!checksumB64 || !sessionId) {
     throw new MitidError(
       'initialize response Aux is missing coreClient.checksum or authenticationSessionId',
@@ -717,11 +719,13 @@ function parseResponse<T>(
 }
 
 function isAuthenticationSessionResponse(value: unknown): value is AuthenticationSessionResponse {
-  return isRecord(value) &&
+  return (
+    isRecord(value) &&
     isString(value.brokerSecurityContext) &&
     isString(value.serviceProviderName) &&
     isString(value.referenceTextHeader) &&
-    isString(value.referenceTextBody);
+    isString(value.referenceTextBody)
+  );
 }
 
 export function parseAuthenticationSessionResponse(body: string): AuthenticationSessionResponse {
@@ -729,10 +733,12 @@ export function parseAuthenticationSessionResponse(body: string): Authentication
 }
 
 function isAppInitAuthResponse(value: unknown): value is AppInitAuthResponse {
-  return isRecord(value) &&
+  return (
+    isRecord(value) &&
     isOptional(value.pollUrl, isString) &&
     isOptional(value.ticket, isString) &&
-    isOptional(value.errorCode, isString);
+    isOptional(value.errorCode, isString)
+  );
 }
 
 export function parseAppInitAuthResponse(body: string): AppInitAuthResponse {
@@ -742,13 +748,21 @@ export function parseAppInitAuthResponse(body: string): AppInitAuthResponse {
 function isAppPollResponse(value: unknown): value is AppPollResponse {
   const isPayload = (candidate: unknown): candidate is NonNullable<AppPollResponse['payload']> =>
     isRecord(candidate) && isString(candidate.response) && isString(candidate.responseSignature);
-  return isRecord(value) &&
+  return (
+    isRecord(value) &&
     isString(value.status) &&
     isOptional(value.channelBindingValue, isString) &&
-    isOptional(value.updateCount, (candidate): candidate is number =>
-      isNumber(candidate) && Number.isSafeInteger(candidate) && candidate >= 0) &&
-    isOptional(value.confirmation, (candidate): candidate is boolean => typeof candidate === 'boolean') &&
-    isOptional(value.payload, isPayload);
+    isOptional(
+      value.updateCount,
+      (candidate): candidate is number =>
+        isNumber(candidate) && Number.isSafeInteger(candidate) && candidate >= 0,
+    ) &&
+    isOptional(
+      value.confirmation,
+      (candidate): candidate is boolean => typeof candidate === 'boolean',
+    ) &&
+    isOptional(value.payload, isPayload)
+  );
 }
 
 export function parseAppPollResponse(body: string): AppPollResponse {
@@ -762,10 +776,12 @@ function isStringValue(value: unknown): value is StringValue {
 }
 
 function isSrpInitResponse(value: unknown): value is SrpInitResponse {
-  return isRecord(value) &&
+  return (
+    isRecord(value) &&
     isOptional(value.pbkdf2Salt, isStringValue) &&
     isStringValue(value.srpSalt) &&
-    isStringValue(value.randomB);
+    isStringValue(value.randomB)
+  );
 }
 
 export function parseSrpInitResponse(body: string): SrpInitResponse {
@@ -783,11 +799,13 @@ export function parseM2Response(body: string): string | undefined {
 }
 
 function isNextAuthenticator(value: unknown): value is NextAuthenticator {
-  return isRecord(value) &&
+  return (
+    isRecord(value) &&
     isString(value.authenticatorType) &&
     isString(value.authenticatorSessionFlowKey) &&
     isString(value.eafeHash) &&
-    isString(value.authenticatorSessionId);
+    isString(value.authenticatorSessionId)
+  );
 }
 
 type AuthenticatorCombination = NonNullable<NextAuthenticatorResponse['combinations']>[number];
@@ -796,9 +814,7 @@ type NextError = NonNullable<NextAuthenticatorResponse['errors']>[number];
 function isAuthenticatorCombination(value: unknown): value is AuthenticatorCombination {
   const isItem = (candidate: unknown): candidate is { name: string } =>
     isRecord(candidate) && isString(candidate.name);
-  return isRecord(value) &&
-    isString(value.id) &&
-    isArrayOf(value.combinationItems, isItem);
+  return isRecord(value) && isString(value.id) && isArrayOf(value.combinationItems, isItem);
 }
 
 function isNextError(value: unknown): value is NextError {
@@ -808,20 +824,26 @@ function isNextError(value: unknown): value is NextError {
     isRecord(candidate) &&
     isOptional(candidate.text, isText) &&
     isOptional(candidate.supportErrorId, isString);
-  return isRecord(value) &&
+  return (
+    isRecord(value) &&
     isOptional(value.errorCode, isString) &&
     isOptional(value.message, isString) &&
-    isOptional(value.userMessage, isUserMessage);
+    isOptional(value.userMessage, isUserMessage)
+  );
 }
 
 function isNextAuthenticatorResponse(value: unknown): value is NextAuthenticatorResponse {
-  return isRecord(value) &&
+  return (
+    isRecord(value) &&
     isOptional(value.nextAuthenticator, isNextAuthenticator) &&
     isOptional(value.combinations, (candidate): candidate is AuthenticatorCombination[] =>
-      isArrayOf(candidate, isAuthenticatorCombination)) &&
+      isArrayOf(candidate, isAuthenticatorCombination),
+    ) &&
     isOptional(value.errors, (candidate): candidate is NextError[] =>
-      isArrayOf(candidate, isNextError)) &&
-    isOptional(value.nextSessionId, isString);
+      isArrayOf(candidate, isNextError),
+    ) &&
+    isOptional(value.nextSessionId, isString)
+  );
 }
 
 export function parseNextAuthenticatorResponse(body: string): NextAuthenticatorResponse {

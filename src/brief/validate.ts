@@ -73,7 +73,9 @@ export function validatePage(html: string, brief: RankedBrief): Violation[] {
       // Match on a distinctive fragment; the composer may reword around it.
       // Escaped, because the page carries the escaped form — a vendor error
       // with an `&` in its first characters must not read as a missing warning.
-      const stem = escapeHtml(note.message.split(' — ')[0]?.slice(0, 40) ?? note.message.slice(0, 40));
+      const stem = escapeHtml(
+        note.message.split(' — ')[0]?.slice(0, 40) ?? note.message.slice(0, 40),
+      );
       if (!html.includes(stem)) {
         violations.push({ rule: 'datastatus', detail: `advarsel mangler: "${stem}…"` });
       }

@@ -57,7 +57,9 @@ describe('selectChildren', () => {
 
   test('refuses an ambiguous partial name instead of selecting several children', () => {
     expect(() => selectChildren(family, 'Andersen')).toThrow(UsageError);
-    expect(() => selectChildren(family, 'Andersen')).toThrow(/ambiguous.*Alma Andersen.*Viggo Andersen/i);
+    expect(() => selectChildren(family, 'Andersen')).toThrow(
+      /ambiguous.*Alma Andersen.*Viggo Andersen/i,
+    );
   });
 
   test('reports the known children when nothing matches', () => {

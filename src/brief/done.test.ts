@@ -39,7 +39,12 @@ describe('doneKeys', () => {
   test('survives the composer rewording the card', () => {
     // The one thing that must hold: yesterday's tick still matches today's
     // card, however differently the model chose to phrase it.
-    const reworded: RankedSignal = { ...SIGNAL, id: 'model:4', title: 'Skolefoto: tilmeld Alma', kind: 'deadline' };
+    const reworded: RankedSignal = {
+      ...SIGNAL,
+      id: 'model:4',
+      title: 'Skolefoto: tilmeld Alma',
+      kind: 'deadline',
+    };
     expect(doneKeys(reworded)).toEqual(doneKeys(SIGNAL));
   });
 

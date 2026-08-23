@@ -168,7 +168,8 @@ export function briefResponse(
 
   // The newest page does not exist. Make it exist — that is what opening the
   // preview asks for. Failures wait for the explicit retry link.
-  if (gen.failed !== null) return new Response(failedPage(gen.failed), { status: 200, headers: HTML });
+  if (gen.failed !== null)
+    return new Response(failedPage(gen.failed), { status: 200, headers: HTML });
   gen.start();
   return new Response(GENERATING, { status: 200, headers: HTML });
 }

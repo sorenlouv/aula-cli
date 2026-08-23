@@ -166,14 +166,22 @@ export function schtasksCreateArgs(opts: { at: At; bun: string }): string[] {
   const hours = Math.floor(RETRY_FOR_MINUTES / 60);
   const minutes = RETRY_FOR_MINUTES % 60;
   return [
-    '/Create', '/F',
-    '/SC', 'WEEKLY',
-    '/D', 'MON,TUE,WED,THU,FRI',
-    '/TN', TASK_NAME,
-    '/TR', `"${opts.bun}" "${ENTRY}" ${RUN_ARGS.join(' ')}`,
-    '/ST', clock(opts.at),
-    '/RI', String(RETRY_EVERY_MINUTES),
-    '/DU', `${pad(hours)}:${pad(minutes)}`,
+    '/Create',
+    '/F',
+    '/SC',
+    'WEEKLY',
+    '/D',
+    'MON,TUE,WED,THU,FRI',
+    '/TN',
+    TASK_NAME,
+    '/TR',
+    `"${opts.bun}" "${ENTRY}" ${RUN_ARGS.join(' ')}`,
+    '/ST',
+    clock(opts.at),
+    '/RI',
+    String(RETRY_EVERY_MINUTES),
+    '/DU',
+    `${pad(hours)}:${pad(minutes)}`,
   ];
 }
 
@@ -205,9 +213,13 @@ export function runSchedule(opts: { remove: boolean; at?: string }): number {
       return opts.remove ? removeWindows() : installWindows(at);
     default: {
       if (opts.remove) {
-        console.error('No scheduler integration for this platform — remove the lines with: crontab -e');
+        console.error(
+          'No scheduler integration for this platform — remove the lines with: crontab -e',
+        );
       } else {
-        console.error('No scheduler integration for this platform. The cron equivalent (the run, then');
+        console.error(
+          'No scheduler integration for this platform. The cron equivalent (the run, then',
+        );
         console.error('the retries that do nothing once the day is complete):');
         for (const line of cronLines(at)) console.error(`  ${line}`);
       }
@@ -267,9 +279,15 @@ function installDarwin(at: At): number {
     return 1;
   }
   console.log(`Installed — every weekday at ${clock(at)}, ${retryNote(at)}.`);
-  console.log('  The run holds the Mac awake (caffeinate); a Mac asleep on battery is what the retries are for.');
+  console.log(
+    '  The run holds the Mac awake (caffeinate); a Mac asleep on battery is what the retries are for.',
+  );
   if (Object.keys(env).length > 0) {
-    console.log(`  baked:   ${Object.entries(env).map(([k, v]) => `${k}=${v}`).join(' ')}`);
+    console.log(
+      `  baked:   ${Object.entries(env)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(' ')}`,
+    );
   }
   console.log(`  agent:   ${plist}`);
   console.log(`  log:     ${logPath}`);
@@ -285,7 +303,9 @@ function removeDarwin(): number {
   const wasLoaded = uid !== undefined && sh(['launchctl', 'bootout', `gui/${uid}/${LABEL}`]).ok;
   const hadPlist = existsSync(plistPath());
   if (hadPlist) rmSync(plistPath());
-  console.log(wasLoaded || hadPlist ? 'The weekday schedule is removed.' : 'No schedule was installed.');
+  console.log(
+    wasLoaded || hadPlist ? 'The weekday schedule is removed.' : 'No schedule was installed.',
+  );
   return 0;
 }
 

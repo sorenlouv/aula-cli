@@ -109,7 +109,9 @@ export function parseEventsPayload(payload: unknown): unknown[] {
 }
 
 /** Calendars the connector can see. The whole of the setup flow's discovery. */
-export async function listCalendars(opts: { timeoutMs?: number } = {}): Promise<ConnectorCalendar[]> {
+export async function listCalendars(
+  opts: { timeoutMs?: number } = {},
+): Promise<ConnectorCalendar[]> {
   const payload = await callTool('list_calendars', {}, 'Kald list_calendars uden argumenter.', {
     timeoutMs: opts.timeoutMs ?? TIMEOUT_MS,
   });
@@ -194,11 +196,15 @@ async function attemptTool(
   // login. Bisected; `USER` alone is what fixes it.
   const run = await spawnClaude(
     [
-      '-p', prompt,
+      '-p',
+      prompt,
       // ToolSearch as well: MCP tools are deferred in headless runs, so without
       // it the model can never reach the one tool it is allowed to call.
-      '--allowedTools', 'ToolSearch', name,
-      '--output-format', 'stream-json',
+      '--allowedTools',
+      'ToolSearch',
+      name,
+      '--output-format',
+      'stream-json',
       '--verbose',
       ...modelEffortArgs(),
     ],
@@ -230,7 +236,8 @@ async function attemptTool(
 
   const calls = stream.calls.filter((call) => call.name === name);
   if (calls.length === 0) {
-    if (stream.servers.length === 0) throw new CalendarToolUnavailableError(`${tool} blev aldrig kaldt`);
+    if (stream.servers.length === 0)
+      throw new CalendarToolUnavailableError(`${tool} blev aldrig kaldt`);
     throw new Error(`${tool} blev aldrig kaldt`);
   }
   if (calls.length > 1) throw new Error(`${tool} blev kaldt ${calls.length} gange`);
@@ -252,7 +259,10 @@ async function attemptTool(
   }
 }
 
-function sameToolInput(actual: Record<string, unknown>, expected: Record<string, unknown>): boolean {
+function sameToolInput(
+  actual: Record<string, unknown>,
+  expected: Record<string, unknown>,
+): boolean {
   const actualKeys = Object.keys(actual).sort();
   const expectedKeys = Object.keys(expected).sort();
   return (
@@ -300,7 +310,11 @@ export function parseStream(stdout: string): {
     }
     if (!isRecord(parsed)) continue;
 
-    if (parsed.type === 'system' && parsed.subtype === 'init' && Array.isArray(parsed.mcp_servers)) {
+    if (
+      parsed.type === 'system' &&
+      parsed.subtype === 'init' &&
+      Array.isArray(parsed.mcp_servers)
+    ) {
       servers = parsed.mcp_servers
         .filter(isRecord)
         .map((server) => ({
@@ -314,8 +328,16 @@ export function parseStream(stdout: string): {
     if (!isRecord(message) || !Array.isArray(message.content)) continue;
     for (const block of message.content) {
       if (!isRecord(block)) continue;
-      if (block.type === 'tool_use' && typeof block.id === 'string' && typeof block.name === 'string') {
-        calls.push({ id: block.id, name: block.name, input: isRecord(block.input) ? block.input : {} });
+      if (
+        block.type === 'tool_use' &&
+        typeof block.id === 'string' &&
+        typeof block.name === 'string'
+      ) {
+        calls.push({
+          id: block.id,
+          name: block.name,
+          input: isRecord(block.input) ? block.input : {},
+        });
       }
       if (block.type === 'tool_result' && typeof block.tool_use_id === 'string') {
         results.set(block.tool_use_id, {

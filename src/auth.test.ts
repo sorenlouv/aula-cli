@@ -270,5 +270,9 @@ test('a superseded token is replaced when the store holds the dead one too', () 
 
   assert.equal(out.grants, 1, 'exactly one refresh grant');
   assert.equal(out.returned, 'token-from-a-fresh-grant');
-  assert.equal(out.stored, 'token-from-a-fresh-grant', 'the new token is published for the next run');
+  assert.equal(
+    out.stored,
+    'token-from-a-fresh-grant',
+    'the new token is published for the next run',
+  );
 });

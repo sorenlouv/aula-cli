@@ -16,13 +16,7 @@
  */
 
 import { type WidgetTokens, widgetFetch } from '../widgets.ts';
-import {
-  expectOptionalType,
-  isArrayOf,
-  isOptional,
-  isRecord,
-  isString,
-} from '../validation.ts';
+import { expectOptionalType, isArrayOf, isOptional, isRecord, isString } from '../validation.ts';
 import type { IntegrationContext, WeekPlan, WeekPlanItem } from './types.ts';
 
 const MEEBOOK_URL = 'https://app.meebook.com/aulaapi/relatedweekplan/all';
@@ -45,30 +39,40 @@ type MeebookPerson = {
 type MeebookDay = NonNullable<MeebookPerson['weekPlan']>[number];
 
 function isMeebookTask(value: unknown): value is MeebookTask {
-  return isRecord(value) &&
+  return (
+    isRecord(value) &&
     isOptional(value.type, isString) &&
     isOptional(value.pill, isString) &&
     isOptional(value.title, isString) &&
     isOptional(value.content, isString) &&
-    isOptional(value.editUrl, isString);
+    isOptional(value.editUrl, isString)
+  );
 }
 
 function isMeebookDay(value: unknown): value is MeebookDay {
-  return isRecord(value) &&
+  return (
+    isRecord(value) &&
     isOptional(value.date, isString) &&
-    isOptional(value.tasks, (tasks): tasks is MeebookTask[] => isArrayOf(tasks, isMeebookTask));
+    isOptional(value.tasks, (tasks): tasks is MeebookTask[] => isArrayOf(tasks, isMeebookTask))
+  );
 }
 
 function isMeebookPerson(value: unknown): value is MeebookPerson {
-  return isRecord(value) &&
+  return (
+    isRecord(value) &&
     isOptional(value.name, isString) &&
     isOptional(value.weekPlan, (days): days is MeebookDay[] => isArrayOf(days, isMeebookDay)) &&
-    isOptional(value.exceptionMessage, isString);
+    isOptional(value.exceptionMessage, isString)
+  );
 }
 
 function decodePeople(value: unknown): MeebookPerson[] {
-  return expectOptionalType(value, (people): people is MeebookPerson[] =>
-    isArrayOf(people, isMeebookPerson), 'a Meebook week plan', []);
+  return expectOptionalType(
+    value,
+    (people): people is MeebookPerson[] => isArrayOf(people, isMeebookPerson),
+    'a Meebook week plan',
+    [],
+  );
 }
 
 const NO_SUBJECT = 'Ingen fag tilknyttet';
@@ -86,7 +90,9 @@ export async function getWeekPlan(
   });
   for (const child of ctx.children) {
     if (!child.userId) {
-      warnings.push(`${child.name}: no UniLogin on the Aula profile — Meebook cannot look them up.`);
+      warnings.push(
+        `${child.name}: no UniLogin on the Aula profile — Meebook cannot look them up.`,
+      );
       continue;
     }
     params.append('childFilter[]', child.userId);
@@ -94,18 +100,21 @@ export async function getWeekPlan(
   for (const code of ctx.institutionCodes) params.append('institutionFilter[]', code);
 
   const people = await tokens.withToken(widgetId, async (token) => {
-    return await widgetFetch({
-      url: `${MEEBOOK_URL}?${params}`,
-      widgetId,
-      headers: {
-        authorization: `Bearer ${token}`,
-        accept: 'application/json',
-        sessionuuid: ctx.sessionId,
-        'x-version': '1.0',
-        origin: 'https://www.aula.dk',
-        referer: 'https://www.aula.dk/',
+    return await widgetFetch(
+      {
+        url: `${MEEBOOK_URL}?${params}`,
+        widgetId,
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: 'application/json',
+          sessionuuid: ctx.sessionId,
+          'x-version': '1.0',
+          origin: 'https://www.aula.dk',
+          referer: 'https://www.aula.dk/',
+        },
       },
-    }, decodePeople);
+      decodePeople,
+    );
   });
 
   const items: WeekPlanItem[] = [];

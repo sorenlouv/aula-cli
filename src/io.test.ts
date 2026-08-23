@@ -20,7 +20,7 @@ function asPlatform<T>(platform: NodeJS.Platform, fn: () => T): T {
 describe('openCommand', () => {
   const url = 'http://127.0.0.1:54321/2f4a-token';
 
-  test('uses each platform\'s opener', () => {
+  test("uses each platform's opener", () => {
     expect(asPlatform('darwin', () => openCommand(url))).toEqual(['open', url]);
     expect(asPlatform('linux', () => openCommand(url))).toEqual(['xdg-open', url]);
     // `start` is a cmd builtin whose first quoted argument is the window title.

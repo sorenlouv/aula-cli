@@ -62,8 +62,12 @@ describe('buildPlist', () => {
     expect(plist.match(/<key>Weekday<\/key>/g)).toHaveLength(5 * times);
     expect(plist).not.toContain('<key>Weekday</key><integer>0</integer>');
     expect(plist).not.toContain('<key>Weekday</key><integer>6</integer>');
-    expect(plist).toContain('<key>Hour</key><integer>6</integer><key>Minute</key><integer>30</integer>');
-    expect(plist).toContain('<key>Hour</key><integer>9</integer><key>Minute</key><integer>30</integer>');
+    expect(plist).toContain(
+      '<key>Hour</key><integer>6</integer><key>Minute</key><integer>30</integer>',
+    );
+    expect(plist).toContain(
+      '<key>Hour</key><integer>9</integer><key>Minute</key><integer>30</integer>',
+    );
   });
 
   test('bakes brief knobs into the agent, XML-escaped', () => {

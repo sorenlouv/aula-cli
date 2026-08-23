@@ -73,10 +73,18 @@ describe('the run ledger', () => {
     const path = statePath();
     const state: BriefState = { seen: {} };
     recordRun(state, { day: '2026-08-21', complete: true }, earlierToday);
-    recordDeploy(state, 'https://claude.ai/code/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d', earlierToday);
+    recordDeploy(
+      state,
+      'https://claude.ai/code/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d',
+      earlierToday,
+    );
     saveState(state, path);
     const loaded = loadState(path);
-    expect(loaded.lastRun).toEqual({ day: '2026-08-21', at: earlierToday.toISOString(), complete: true });
+    expect(loaded.lastRun).toEqual({
+      day: '2026-08-21',
+      at: earlierToday.toISOString(),
+      complete: true,
+    });
     expect(loaded.lastDeploy).toEqual({
       url: 'https://claude.ai/code/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d',
       at: earlierToday.toISOString(),
@@ -92,21 +100,27 @@ describe('the run ledger', () => {
 
   test('valid JSON with the wrong shape degrades to safe state', () => {
     const path = statePath();
-    writeFileSync(path, JSON.stringify({
-      seen: 'not a map',
-      lastRun: { day: 42, at: null, complete: 'yes' },
-      lastDeploy: ['not', 'an', 'object'],
-    }));
+    writeFileSync(
+      path,
+      JSON.stringify({
+        seen: 'not a map',
+        lastRun: { day: 42, at: null, complete: 'yes' },
+        lastDeploy: ['not', 'an', 'object'],
+      }),
+    );
     expect(loadState(path)).toEqual({ seen: {} });
   });
 
   test('keeps valid fields and drops malformed entries independently', () => {
     const path = statePath();
-    writeFileSync(path, JSON.stringify({
-      seen: { good: yesterday.toISOString(), bad: 42, invalidTimestamp: 'yesterday-ish' },
-      lastRun: { day: '2026-08-21', at: earlierToday.toISOString(), complete: true },
-      lastDeploy: { url: false, at: earlierToday.toISOString(), day: '2026-08-21' },
-    }));
+    writeFileSync(
+      path,
+      JSON.stringify({
+        seen: { good: yesterday.toISOString(), bad: 42, invalidTimestamp: 'yesterday-ish' },
+        lastRun: { day: '2026-08-21', at: earlierToday.toISOString(), complete: true },
+        lastDeploy: { url: false, at: earlierToday.toISOString(), day: '2026-08-21' },
+      }),
+    );
     expect(loadState(path)).toEqual({
       seen: { good: yesterday.toISOString() },
       lastRun: { day: '2026-08-21', at: earlierToday.toISOString(), complete: true },
@@ -115,11 +129,18 @@ describe('the run ledger', () => {
 
   test('drops ledger entries whose date-looking strings are not real dates', () => {
     const path = statePath();
-    writeFileSync(path, JSON.stringify({
-      seen: {},
-      lastRun: { day: '2026-02-31', at: 'not-a-timestamp', complete: true },
-      lastDeploy: { url: 'https://example.test', at: earlierToday.toISOString(), day: '2026-13-01' },
-    }));
+    writeFileSync(
+      path,
+      JSON.stringify({
+        seen: {},
+        lastRun: { day: '2026-02-31', at: 'not-a-timestamp', complete: true },
+        lastDeploy: {
+          url: 'https://example.test',
+          at: earlierToday.toISOString(),
+          day: '2026-13-01',
+        },
+      }),
+    );
     expect(loadState(path)).toEqual({ seen: {} });
   });
 });

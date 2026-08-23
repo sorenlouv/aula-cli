@@ -21,12 +21,28 @@ import type { BriefInput } from './types.ts';
 /** Indexed as `Date#getDay()`: Sunday first. */
 export const DA_WEEKDAYS = ['søndag', 'mandag', 'tirsdag', 'onsdag', 'torsdag', 'fredag', 'lørdag'];
 export const DA_MONTHS = [
-  'januar', 'februar', 'marts', 'april', 'maj', 'juni',
-  'juli', 'august', 'september', 'oktober', 'november', 'december',
+  'januar',
+  'februar',
+  'marts',
+  'april',
+  'maj',
+  'juni',
+  'juli',
+  'august',
+  'september',
+  'oktober',
+  'november',
+  'december',
 ];
 
 const STEM_TO_DAY: Record<string, number> = {
-  søn: 0, man: 1, tirs: 2, ons: 3, tors: 4, fre: 5, lør: 6,
+  søn: 0,
+  man: 1,
+  tirs: 2,
+  ons: 3,
+  tors: 4,
+  fre: 5,
+  lør: 6,
 };
 
 export type DateClaim =
@@ -50,8 +66,18 @@ const WEEK_RE = /\buge\s*(\d{1,2})\b/gi;
 
 function monthIndex(name: string): number {
   const map: Record<string, number> = {
-    jan: 1, feb: 2, mar: 3, apr: 4, maj: 5, jun: 6,
-    jul: 7, aug: 8, sep: 9, okt: 10, nov: 11, dec: 12,
+    jan: 1,
+    feb: 2,
+    mar: 3,
+    apr: 4,
+    maj: 5,
+    jun: 6,
+    jul: 7,
+    aug: 8,
+    sep: 9,
+    okt: 10,
+    nov: 11,
+    dec: 12,
   };
   return map[name.toLowerCase().slice(0, 3)] ?? 0;
 }
@@ -88,7 +114,12 @@ export function findDateClaims(text: string): DateClaim[] {
   return claims;
 }
 
-type SourceDates = { weekdays: Set<number>; dates: Set<string>; relTomorrow: boolean; relToday: boolean };
+type SourceDates = {
+  weekdays: Set<number>;
+  dates: Set<string>;
+  relTomorrow: boolean;
+  relToday: boolean;
+};
 
 export type DateSupport = {
   weekdays: Set<number>;
@@ -102,7 +133,9 @@ export type DateSupport = {
 
 const key = (month: number, day: number) => `${month}-${day}`;
 
-function isoDate(value: string): { iso: string; month: number; day: number; weekday: number } | null {
+function isoDate(
+  value: string,
+): { iso: string; month: number; day: number; weekday: number } | null {
   const parsed = parseIsoDateParts(value.slice(0, 10));
   if (!parsed) return null;
   return { iso: parsed.iso, month: parsed.month, day: parsed.day, weekday: parsed.weekday };
@@ -188,7 +221,10 @@ export function unsupportedDateClaims(
     if (!support.windowEnd) return false;
     const cursor = new Date(`${support.today}T00:00:00`);
     for (let i = 0; i < 60; i++) {
-      if (cursor.getDay() === day && support.dates.has(key(cursor.getMonth() + 1, cursor.getDate())))
+      if (
+        cursor.getDay() === day &&
+        support.dates.has(key(cursor.getMonth() + 1, cursor.getDate()))
+      )
         return true;
       cursor.setDate(cursor.getDate() + 1);
       if (localIsoDate(cursor) > support.windowEnd) break;
@@ -196,9 +232,7 @@ export function unsupportedDateClaims(
     return false;
   };
   const weekdayOk = (day: number) =>
-    (per
-      ? per.weekdays.has(day) || day === support.todayWeekday
-      : support.weekdays.has(day)) ||
+    (per ? per.weekdays.has(day) || day === support.todayWeekday : support.weekdays.has(day)) ||
     dueAt?.weekday === day ||
     resolvesToAttestedDate(day);
   const bad: string[] = [];
@@ -229,7 +263,8 @@ export function dueAtSupported(dueAt: string, sourceKey: string, support: DateSu
   const per = support.perSource.get(sourceKey);
   if (!per) return false;
   if (per.dates.has(key(parsed.month, parsed.day))) return true;
-  const inWindow = parsed.iso >= support.today && (!support.windowEnd || parsed.iso <= support.windowEnd);
+  const inWindow =
+    parsed.iso >= support.today && (!support.windowEnd || parsed.iso <= support.windowEnd);
   if (!inWindow) return false;
   if (per.weekdays.has(parsed.weekday)) return true;
   if (per.relToday && parsed.iso === support.today) return true;

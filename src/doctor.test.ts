@@ -45,7 +45,9 @@ describe('runDoctor', () => {
     // exactly this state.
     const { code, report: got } = await report(stubClient({ getProfiles: async () => [] }));
 
-    const profiles = got.checks.find((c: { name: string }) => c.name === 'profiles.getProfilesByLogin');
+    const profiles = got.checks.find(
+      (c: { name: string }) => c.name === 'profiles.getProfilesByLogin',
+    );
     expect(profiles.status).toBe('warn');
     expect(profiles.note).toContain('no profiles');
     // A warning is not a failure: the run still reports ok.
@@ -61,7 +63,9 @@ describe('runDoctor', () => {
       }),
     );
 
-    const profiles = got.checks.find((c: { name: string }) => c.name === 'profiles.getProfilesByLogin');
+    const profiles = got.checks.find(
+      (c: { name: string }) => c.name === 'profiles.getProfilesByLogin',
+    );
     expect(profiles.status).toBe('fail');
     expect(got.ok).toBe(false);
     expect(code).toBe(1);

@@ -97,7 +97,10 @@ describe('preferences.md', () => {
   test('forget takes the number the listing shows', () => {
     const path = prefsPath();
     writePreferences(['først', 'anden', 'tredje'], path);
-    expect(removePreference(2, path)).toEqual({ removed: 'anden', preferences: ['først', 'tredje'] });
+    expect(removePreference(2, path)).toEqual({
+      removed: 'anden',
+      preferences: ['først', 'tredje'],
+    });
     expect(readPreferences(path)).toEqual(['først', 'tredje']);
   });
 

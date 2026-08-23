@@ -46,7 +46,11 @@ describe('classifyAudience', () => {
     // `institution` separate from `municipal`.
     expect(
       classifyAudience(
-        ['PERSONALE (Alle)', 'Gruppeordningen (elever+forældre+personale) 26-27', 'Eksempelskolen (elever+forældre+medarbejdere) 26-27'],
+        [
+          'PERSONALE (Alle)',
+          'Gruppeordningen (elever+forældre+personale) 26-27',
+          'Eksempelskolen (elever+forældre+medarbejdere) 26-27',
+        ],
         classGroups,
       ),
     ).toBe('institution');
@@ -54,7 +58,10 @@ describe('classifyAudience', () => {
 
   test('cross-institution distribution lists are municipal', () => {
     expect(
-      classifyAudience(['Alle forældre alle skoler', 'Alle forældre i alle dagtilbud'], classGroups),
+      classifyAudience(
+        ['Alle forældre alle skoler', 'Alle forældre i alle dagtilbud'],
+        classGroups,
+      ),
     ).toBe('municipal');
   });
 
@@ -93,7 +100,7 @@ describe('rank', () => {
     expect(brief.signals[0]?.mustShow).toBe(false);
   });
 
-  test('a municipal offer is hidden when the family\'s list says so — which the model reports as a verdict', () => {
+  test("a municipal offer is hidden when the family's list says so — which the model reports as a verdict", () => {
     const items = [municipalOffer()];
     const brief = rank(input(items), signalsFromRules(input(items), TODAY), { 'post:1': 'hide' });
     expect(brief.signals).toHaveLength(1);
@@ -139,7 +146,13 @@ describe('rank', () => {
 
   test('an important signal under-read as background is promoted to week', () => {
     const items = [
-      item({ key: 'post:4', title: 'Skolefoto', text: 'Hver elev skal oprettes.', audience: 'institution', important: true }),
+      item({
+        key: 'post:4',
+        title: 'Skolefoto',
+        text: 'Hver elev skal oprettes.',
+        audience: 'institution',
+        important: true,
+      }),
     ];
     const underRead: Signal = {
       id: 'model:0',
@@ -162,7 +175,12 @@ describe('rank', () => {
 
   test('an unimportant background item is not floored', () => {
     const items = [
-      item({ key: 'post:5', title: 'Nyt fra køkkenet', text: 'Vi bager i næste uge.', audience: 'institution' }),
+      item({
+        key: 'post:5',
+        title: 'Nyt fra køkkenet',
+        text: 'Vi bager i næste uge.',
+        audience: 'institution',
+      }),
     ];
     const brief = rank(input(items), []);
     expect(brief.signals).toHaveLength(0);
@@ -305,7 +323,7 @@ describe('rank', () => {
     };
     const brief = rank(input([]), [orphan]);
     expect(brief.signals).toHaveLength(0);
-    expect(brief.degraded[0] ?? "").toContain('ukendt kilde');
+    expect(brief.degraded[0] ?? '').toContain('ukendt kilde');
   });
 
   test('a municipal message is judged on content, not just on its address', () => {
@@ -381,7 +399,13 @@ describe("the family's list, as the model read it", () => {
     concernsChild: false,
   };
   const johnsThread = (key = 'thread:7') =>
-    item({ key, kind: 'thread', title: 'Legeaftale', author: 'Esben Bille', audience: 'institution' });
+    item({
+      key,
+      kind: 'thread',
+      title: 'Legeaftale',
+      author: 'Esben Bille',
+      audience: 'institution',
+    });
 
   test('high lifts a source read as background to week', () => {
     const brief = rank(input([johnsThread()]), [backgroundNote], { 'thread:7': 'high' });
@@ -401,7 +425,15 @@ describe("the family's list, as the model read it", () => {
   test('a high source no signal covered still reaches the page', () => {
     // The promise is "sig altid til når John skriver". A model that extracted
     // nothing from his message is exactly the day that promise is tested.
-    const items = [item({ key: 'thread:8', kind: 'thread', title: 'Hej igen', text: 'Vi ses på fredag.', author: 'Esben Bille' })];
+    const items = [
+      item({
+        key: 'thread:8',
+        kind: 'thread',
+        title: 'Hej igen',
+        text: 'Vi ses på fredag.',
+        author: 'Esben Bille',
+      }),
+    ];
     const brief = rank(input(items), [], { 'thread:8': 'high' });
     expect(brief.signals).toHaveLength(1);
     expect(brief.signals[0]?.tier).toBe('week');
@@ -413,8 +445,17 @@ describe("the family's list, as the model read it", () => {
   test('high outranks the audience prior', () => {
     // Municipal breadth is the strongest suppressor there is, and a family's
     // own wish is the one thing allowed past it.
-    const items = [item({ key: 'post:10', title: 'Fra forvaltningen', author: 'Esben Bille', audience: 'municipal' })];
-    const brief = rank(input(items), [{ ...backgroundNote, sourceKey: 'post:10' }], { 'post:10': 'high' });
+    const items = [
+      item({
+        key: 'post:10',
+        title: 'Fra forvaltningen',
+        author: 'Esben Bille',
+        audience: 'municipal',
+      }),
+    ];
+    const brief = rank(input(items), [{ ...backgroundNote, sourceKey: 'post:10' }], {
+      'post:10': 'high',
+    });
     expect(brief.signals[0]?.tier).toBe('week');
   });
 
@@ -423,7 +464,12 @@ describe("the family's list, as the model read it", () => {
     // the context tier, never a card — so a verdict the model got wrong costs a
     // fold, not the item.
     const items = [
-      item({ key: 'post:40', title: 'Forældrenetværk', text: 'Tilmeld jer forældrenetværket senest mandag d. 17/8.', audience: 'class' }),
+      item({
+        key: 'post:40',
+        title: 'Forældrenetværk',
+        text: 'Tilmeld jer forældrenetværket senest mandag d. 17/8.',
+        audience: 'class',
+      }),
     ];
     const plain = rank(input(items), signalsFromRules(input(items), TODAY));
     expect(plain.signals[0]?.tier).toBe('act');
@@ -433,13 +479,21 @@ describe("the family's list, as the model read it", () => {
     expect(theirs.unusedSources).toHaveLength(0);
   });
 
-  test('Aula\'s own vigtig flag beats hide and low alike', () => {
+  test("Aula's own vigtig flag beats hide and low alike", () => {
     // The school shouting is not something a preference can mute.
     const closure = () =>
-      item({ key: 'post:2', title: 'Skolen er lukket', text: 'Husk at skolen er lukket på mandag.', audience: 'municipal', important: true });
+      item({
+        key: 'post:2',
+        title: 'Skolen er lukket',
+        text: 'Husk at skolen er lukket på mandag.',
+        audience: 'municipal',
+        important: true,
+      });
     for (const verdict of ['hide', 'low'] as const) {
       const items = [closure()];
-      const brief = rank(input(items), signalsFromRules(input(items), TODAY), { 'post:2': verdict });
+      const brief = rank(input(items), signalsFromRules(input(items), TODAY), {
+        'post:2': verdict,
+      });
       expect(brief.signals[0]?.tier).toBe('act');
     }
   });
@@ -447,7 +501,14 @@ describe("the family's list, as the model read it", () => {
   test('a hide source no signal covered is accounted for in the hidden tier, not the context tier', () => {
     // Listed in the muted foot with the rest of what was hidden; surfacing it
     // as an "unused source" would be the opposite of what the family asked.
-    const items = [item({ key: 'post:31', title: 'Nyt fra forvaltningen', text: 'Kære forældre.', audience: 'municipal' })];
+    const items = [
+      item({
+        key: 'post:31',
+        title: 'Nyt fra forvaltningen',
+        text: 'Kære forældre.',
+        audience: 'municipal',
+      }),
+    ];
     const brief = rank(input(items), [], { 'post:31': 'hide' });
     expect(brief.signals).toHaveLength(1);
     expect(brief.signals[0]?.tier).toBe('hidden');
@@ -468,7 +529,9 @@ describe("the family's list, as the model read it", () => {
         audience: 'municipal',
       }),
     ];
-    const brief = rank(input(items), signalsFromRules(input(items), TODAY), { 'post:closure': 'hide' });
+    const brief = rank(input(items), signalsFromRules(input(items), TODAY), {
+      'post:closure': 'hide',
+    });
     expect(brief.signals[0]?.concernsChild).toBe(true);
     expect(brief.signals[0]?.tier).toBe('context');
     // …while the same verdict on an offer, which asks nothing of us, still hides.
@@ -480,7 +543,9 @@ describe("the family's list, as the model read it", () => {
         audience: 'municipal',
       }),
     ];
-    const hidden = rank(input(offer), signalsFromRules(input(offer), TODAY), { 'post:course': 'hide' });
+    const hidden = rank(input(offer), signalsFromRules(input(offer), TODAY), {
+      'post:course': 'hide',
+    });
     expect(hidden.signals[0]?.concernsChild).toBe(false);
     expect(hidden.signals[0]?.tier).toBe('hidden');
   });
@@ -520,8 +585,18 @@ describe("the family's list, as the model read it", () => {
   test('two tellings of one story still merge when the family weighs them the same', () => {
     // The behaviour the boundary above must not break.
     const items = [
-      item({ key: 'post:70', title: 'Forældrekurset', text: 'Ansøgningsfristen er tirsdag den 1. september 2026.', audience: 'municipal' }),
-      item({ key: 'post:71', title: 'Forældrekurset', text: 'Ansøgningsfristen er tirsdag den 1. september 2026.', audience: 'municipal' }),
+      item({
+        key: 'post:70',
+        title: 'Forældrekurset',
+        text: 'Ansøgningsfristen er tirsdag den 1. september 2026.',
+        audience: 'municipal',
+      }),
+      item({
+        key: 'post:71',
+        title: 'Forældrekurset',
+        text: 'Ansøgningsfristen er tirsdag den 1. september 2026.',
+        audience: 'municipal',
+      }),
     ];
     const both: Record<string, Relevance> = { 'post:70': 'hide', 'post:71': 'hide' };
     const brief = rank(input(items), signalsFromRules(input(items), TODAY), both);
@@ -543,7 +618,14 @@ describe("the family's list, as the model read it", () => {
   test('an emptied list hides nothing at all', () => {
     // The model is told an empty list means everything is normal; the ranker
     // holds the same line when no verdicts arrive.
-    const items = [item({ key: 'post:30', title: 'Tilbud om forældrekursus', text: 'Ansøgningsfristen er tirsdag den 1. september 2026.', audience: 'municipal' })];
+    const items = [
+      item({
+        key: 'post:30',
+        title: 'Tilbud om forældrekursus',
+        text: 'Ansøgningsfristen er tirsdag den 1. september 2026.',
+        audience: 'municipal',
+      }),
+    ];
     const theirs = briefInput({ items, preferences: [] });
     const brief = rank(theirs, signalsFromRules(theirs, TODAY));
     expect(brief.signals[0]?.tier).not.toBe('hidden');
@@ -553,14 +635,22 @@ describe("the family's list, as the model read it", () => {
     // Same kind, same date, same audience: the last one in is the one that
     // overflows — unless the family's word puts it ahead of the rest.
     const items = Array.from({ length: ACT_CAP + 1 }, (_, i) =>
-      item({ key: `plan:x:${i}`, title: `Opgave ${i}`, text: `Husk ${i} madpakke.`, childNames: ['Viggo Birk Eksempelsen'], audience: 'child' }),
+      item({
+        key: `plan:x:${i}`,
+        title: `Opgave ${i}`,
+        text: `Husk ${i} madpakke.`,
+        childNames: ['Viggo Birk Eksempelsen'],
+        audience: 'child',
+      }),
     );
     const last = `plan:x:${ACT_CAP}`;
     const plain = rank(input(items), signalsFromRules(input(items), TODAY));
     expect(plain.signals.filter((s) => s.tier === 'week').map((s) => s.sourceKey)).toEqual([last]);
 
     const theirs = rank(input(items), signalsFromRules(input(items), TODAY), { [last]: 'high' });
-    expect(theirs.signals.filter((s) => s.tier === 'week').map((s) => s.sourceKey)).toEqual([`plan:x:${ACT_CAP - 1}`]);
+    expect(theirs.signals.filter((s) => s.tier === 'week').map((s) => s.sourceKey)).toEqual([
+      `plan:x:${ACT_CAP - 1}`,
+    ]);
     const high = theirs.signals.find((s) => s.sourceKey === last);
     const normal = theirs.signals.find((s) => s.sourceKey === 'plan:x:1');
     expect((high?.score ?? 0) > (normal?.score ?? 0)).toBe(true);
@@ -569,10 +659,25 @@ describe("the family's list, as the model read it", () => {
 
   test('low sinks the score as well as the tier', () => {
     const items = [
-      item({ key: 'post:50', title: 'Fællesspisning', text: 'Vi holder fællesspisning i næste uge.', audience: 'class' }),
-      item({ key: 'post:51', title: 'Fællesspisning', text: 'Vi holder fællesspisning i næste uge.', audience: 'class' }),
+      item({
+        key: 'post:50',
+        title: 'Fællesspisning',
+        text: 'Vi holder fællesspisning i næste uge.',
+        audience: 'class',
+      }),
+      item({
+        key: 'post:51',
+        title: 'Fællesspisning',
+        text: 'Vi holder fællesspisning i næste uge.',
+        audience: 'class',
+      }),
     ];
-    const note = (key: string): Signal => ({ ...backgroundNote, id: `model:${key}`, title: `Fællesspisning ${key}`, sourceKey: key });
+    const note = (key: string): Signal => ({
+      ...backgroundNote,
+      id: `model:${key}`,
+      title: `Fællesspisning ${key}`,
+      sourceKey: key,
+    });
     const brief = rank(input(items), [note('post:50'), note('post:51')], { 'post:51': 'low' });
     const plain = brief.signals.find((s) => s.sourceKey === 'post:50');
     const low = brief.signals.find((s) => s.sourceKey === 'post:51');
@@ -581,7 +686,7 @@ describe("the family's list, as the model read it", () => {
   });
 });
 
-describe('the family\'s own appointments', () => {
+describe("the family's own appointments", () => {
   function appointment(partial: Partial<SourceItem> = {}): SourceItem {
     return item({
       key: 'cal:far@eksempel.dk:evt1:2026-08-14T13:30:00+02:00',
@@ -595,7 +700,7 @@ describe('the family\'s own appointments', () => {
     });
   }
 
-  test('an appointment is a dated thing to know, beside the school\'s own', () => {
+  test("an appointment is a dated thing to know, beside the school's own", () => {
     // Shown, not analysed: it lands in "Kommende" with the week's other dated
     // items, and the page never says whether anything clashed — see `collectPersonal`.
     const source = appointment();
@@ -686,11 +791,10 @@ describe('the family\'s own appointments', () => {
       concernsChild: false,
     };
     const sources = [mine, school];
-    const brief = rank(
-      input(sources),
-      [...signalsFromRules(input([mine]), TODAY), schoolSignal],
-      { [mine.key]: 'normal', [school.key]: 'normal' },
-    );
+    const brief = rank(input(sources), [...signalsFromRules(input([mine]), TODAY), schoolSignal], {
+      [mine.key]: 'normal',
+      [school.key]: 'normal',
+    });
     expect(brief.signals.map((signal) => signal.sourceKey).sort()).toEqual(
       [mine.key, school.key].sort(),
     );

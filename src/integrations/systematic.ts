@@ -10,13 +10,7 @@
  */
 
 import { type WidgetTokens, widgetFetch } from '../widgets.ts';
-import {
-  expectOptionalType,
-  isArrayOf,
-  isOptional,
-  isRecord,
-  isString,
-} from '../validation.ts';
+import { expectOptionalType, isArrayOf, isOptional, isRecord, isString } from '../validation.ts';
 import { type IntegrationContext, isoDate, type WeekPlan, type WeekPlanItem } from './types.ts';
 
 const SYSTEMATIC_URL = 'https://systematic-momo.dk/api/aula/reminders/v1';
@@ -39,22 +33,27 @@ type Person = {
 };
 
 function isReminder(value: unknown): value is Reminder {
-  return isRecord(value) &&
+  return (
+    isRecord(value) &&
     isOptional(value.dueDate, isString) &&
     isOptional(value.teamName, isString) &&
     isOptional(value.reminderText, isString) &&
     isOptional(value.subjectName, isString) &&
     isOptional(value.assignmentText, isString) &&
-    isOptional(value.teamNames, (names): names is string[] => isArrayOf(names, isString));
+    isOptional(value.teamNames, (names): names is string[] => isArrayOf(names, isString))
+  );
 }
 
 function isPerson(value: unknown): value is Person {
-  const reminders = (candidate: unknown): candidate is Reminder[] => isArrayOf(candidate, isReminder);
-  return isRecord(value) &&
+  const reminders = (candidate: unknown): candidate is Reminder[] =>
+    isArrayOf(candidate, isReminder);
+  return (
+    isRecord(value) &&
     isOptional(value.userName, isString) &&
     isOptional(value.teamReminders, reminders) &&
     isOptional(value.courseReminders, reminders) &&
-    isOptional(value.assignmentReminders, reminders);
+    isOptional(value.assignmentReminders, reminders)
+  );
 }
 
 function decodePeople(value: unknown): Person[] {
@@ -82,18 +81,21 @@ export async function getReminders(
   });
 
   const people = await tokens.withToken(widgetId, async (token) => {
-    return await widgetFetch({
-      url: `${SYSTEMATIC_URL}?${params}`,
-      widgetId,
-      headers: {
-        'aula-authorization': `Bearer ${token}`,
-        accept: 'application/json, text/plain, */*',
-        'accept-language': 'en-US,en;q=0.9,da;q=0.8',
-        origin: 'https://www.aula.dk',
-        referer: 'https://www.aula.dk/',
-        zone: 'Europe/Copenhagen',
+    return await widgetFetch(
+      {
+        url: `${SYSTEMATIC_URL}?${params}`,
+        widgetId,
+        headers: {
+          'aula-authorization': `Bearer ${token}`,
+          accept: 'application/json, text/plain, */*',
+          'accept-language': 'en-US,en;q=0.9,da;q=0.8',
+          origin: 'https://www.aula.dk',
+          referer: 'https://www.aula.dk/',
+          zone: 'Europe/Copenhagen',
+        },
       },
-    }, decodePeople);
+      decodePeople,
+    );
   });
 
   const items: WeekPlanItem[] = [];

@@ -208,7 +208,8 @@ export function parseTokenResponse(rawBody: string, fallbackRefresh?: string): A
   if (typeof parsed.expires_in !== 'number' || !Number.isFinite(parsed.expires_in)) {
     throw new OAuthError('Token response missing numeric expires_in');
   }
-  const refreshToken = typeof parsed.refresh_token === 'string' ? parsed.refresh_token : fallbackRefresh;
+  const refreshToken =
+    typeof parsed.refresh_token === 'string' ? parsed.refresh_token : fallbackRefresh;
   if (!refreshToken) throw new OAuthError('Token response missing refresh_token (no fallback)');
 
   const now = Math.floor(Date.now() / 1000);

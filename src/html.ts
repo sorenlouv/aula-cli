@@ -33,9 +33,10 @@ const NAMED_ENTITIES: Record<string, string> = {
 export function decodeEntities(input: string): string {
   return input.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/g, (match, entity: string) => {
     if (entity.startsWith('#')) {
-      const codePoint = entity[1] === 'x' || entity[1] === 'X'
-        ? Number.parseInt(entity.slice(2), 16)
-        : Number.parseInt(entity.slice(1), 10);
+      const codePoint =
+        entity[1] === 'x' || entity[1] === 'X'
+          ? Number.parseInt(entity.slice(2), 16)
+          : Number.parseInt(entity.slice(1), 10);
       if (Number.isFinite(codePoint) && codePoint > 0 && codePoint <= 0x10ffff) {
         try {
           return String.fromCodePoint(codePoint);

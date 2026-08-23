@@ -211,7 +211,11 @@ function parseEncryptedEnvelope(value: unknown): EncryptedEnvelope {
       `Unsupported token file envelope (version=${String(value.version)}, alg=${String(value.alg)})`,
     );
   }
-  if (typeof value.iv !== 'string' || typeof value.ct !== 'string' || typeof value.tag !== 'string') {
+  if (
+    typeof value.iv !== 'string' ||
+    typeof value.ct !== 'string' ||
+    typeof value.tag !== 'string'
+  ) {
     throw new TokenStoreError('Token file envelope is missing encrypted string fields');
   }
   return { version: 1, alg: 'aes-256-gcm', iv: value.iv, ct: value.ct, tag: value.tag };
@@ -226,14 +230,16 @@ function parseStoredTokenRecord(value: unknown): StoredTokenRecord {
   const expiresAt = nonNegativeInteger(tokens.expires_at);
   const obtainedAt = nonNegativeInteger(tokens.obtained_at);
   const savedAt = nonNegativeInteger(value.saved_at);
-  const identityIndex = value.identityIndex === undefined
-    ? undefined
-    : positiveInteger(value.identityIndex);
+  const identityIndex =
+    value.identityIndex === undefined ? undefined : positiveInteger(value.identityIndex);
   if (
-    typeof value.username !== 'string' || !value.username ||
+    typeof value.username !== 'string' ||
+    !value.username ||
     savedAt === undefined ||
-    typeof tokens.access_token !== 'string' || !tokens.access_token ||
-    typeof tokens.refresh_token !== 'string' || !tokens.refresh_token ||
+    typeof tokens.access_token !== 'string' ||
+    !tokens.access_token ||
+    typeof tokens.refresh_token !== 'string' ||
+    !tokens.refresh_token ||
     tokens.token_type !== 'Bearer' ||
     expiresIn === undefined ||
     expiresAt === undefined ||

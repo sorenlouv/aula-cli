@@ -4,7 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { briefInput, sourceItem } from '../testing/brief-fixtures.ts';
 import { installFakeClaude } from '../testing/fake-claude.ts';
-import { parseClaudeJson, parseJsonLoosely, runClaude, spawnClaude, validateExtraction, withPreferences } from './llm.ts';
+import {
+  parseClaudeJson,
+  parseJsonLoosely,
+  runClaude,
+  spawnClaude,
+  validateExtraction,
+  withPreferences,
+} from './llm.ts';
 import type { BriefInput, SourceItem } from './types.ts';
 
 const SOURCE: SourceItem = sourceItem({
@@ -19,7 +26,13 @@ const SOURCE: SourceItem = sourceItem({
 const INPUT: BriefInput = briefInput({
   family: {
     children: [
-      { name: 'Viggo Birk Eksempelsen', firstName: 'Viggo', institution: 'Eksemplet', className: 'Myretuen', presence: null },
+      {
+        name: 'Viggo Birk Eksempelsen',
+        firstName: 'Viggo',
+        institution: 'Eksemplet',
+        className: 'Myretuen',
+        presence: null,
+      },
     ],
     isSteppedUp: true,
   },
@@ -77,7 +90,11 @@ describe('parseJsonLoosely', () => {
 
 describe('validateExtraction', () => {
   test('keeps a well-formed signal', () => {
-    const result = validateExtraction(INPUT, { topline: 'Rolig uge.', signals: [good], ...verdicts });
+    const result = validateExtraction(INPUT, {
+      topline: 'Rolig uge.',
+      signals: [good],
+      ...verdicts,
+    });
     expect(result.problems).toEqual([]);
     expect(result.signals).toHaveLength(1);
     expect(result.signals[0]?.origin).toBe('model');
@@ -189,7 +206,7 @@ describe('validateExtraction', () => {
       signals: [{ ...good, quote: 'Husk gummistøvler og regntøj på fredag' }],
     });
     expect(result.signals).toHaveLength(0);
-    expect(result.problems[0] ?? "").toContain('ordret');
+    expect(result.problems[0] ?? '').toContain('ordret');
   });
 
   test('tolerates whitespace differences in an otherwise literal quote', () => {
@@ -202,13 +219,13 @@ describe('validateExtraction', () => {
   test('drops a signal citing a source that was never supplied', () => {
     const result = validateExtraction(INPUT, { signals: [{ ...good, sourceKey: 'post:999' }] });
     expect(result.signals).toHaveLength(0);
-    expect(result.problems[0] ?? "").toContain('ukendt sourceKey');
+    expect(result.problems[0] ?? '').toContain('ukendt sourceKey');
   });
 
   test('drops an unparseable date rather than guessing', () => {
     const result = validateExtraction(INPUT, { signals: [{ ...good, dueAt: 'på mandag' }] });
     expect(result.signals).toHaveLength(0);
-    expect(result.problems[0] ?? "").toContain('ikke en dato');
+    expect(result.problems[0] ?? '').toContain('ikke en dato');
   });
 
   test('drops an impossible ISO date instead of letting JavaScript roll it over', () => {
@@ -306,7 +323,9 @@ describe('validateExtraction', () => {
     });
 
     test('is empty, not absent, when the model said nothing about threads', () => {
-      expect(validateExtraction(INPUT, { signals: [], ...verdicts }).conversationSummaries).toEqual({});
+      expect(validateExtraction(INPUT, { signals: [], ...verdicts }).conversationSummaries).toEqual(
+        {},
+      );
     });
   });
 });
@@ -347,7 +366,8 @@ describe('the claude subprocess', () => {
 
   describe('parseClaudeJson', () => {
     test('reads the result envelope, last JSON line wins', () => {
-      const out = 'some warning first\n{"type":"result","is_error":false,"result":"hello","permission_denials":[{"tool_name":"Bash"}]}\n';
+      const out =
+        'some warning first\n{"type":"result","is_error":false,"result":"hello","permission_denials":[{"tool_name":"Bash"}]}\n';
       expect(parseClaudeJson(out)).toEqual({ text: 'hello', isError: false, denials: ['Bash'] });
     });
 
@@ -397,7 +417,7 @@ describe('the claude subprocess', () => {
     test('returns the envelope text, tools off', async () => {
       const f = fake('ok', '{"signals":[]}');
       expect(await runClaude('instr', '{}', { timeoutMs: 5_000 })).toBe('{"signals":[]}');
-      expect(f.calls()[0]).toContain("--tools  --strict-mcp-config --output-format json");
+      expect(f.calls()[0]).toContain('--tools  --strict-mcp-config --output-format json');
     });
 
     test('tries once more after a stall, and only after a stall', async () => {
@@ -408,7 +428,9 @@ describe('the claude subprocess', () => {
 
     test('two stalls throw a bounded, explicit error', async () => {
       const f = fake('stall');
-      await expect(runClaude('instr', '{}', { timeoutMs: 300, graceMs: 200 })).rejects.toThrow(/timed out after 0s \(2 attempts\)/);
+      await expect(runClaude('instr', '{}', { timeoutMs: 300, graceMs: 200 })).rejects.toThrow(
+        /timed out after 0s \(2 attempts\)/,
+      );
       expect(f.calls()).toHaveLength(2);
     });
 

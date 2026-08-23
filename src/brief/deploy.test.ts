@@ -78,7 +78,10 @@ describe('isArtifactUrl', () => {
 
 describe('deployArtifact', () => {
   test('skips silently when no target is configured', async () => {
-    const result = await deployArtifact('/tmp/artifact.html', { title: 'T', configPath: configPath() });
+    const result = await deployArtifact('/tmp/artifact.html', {
+      title: 'T',
+      configPath: configPath(),
+    });
     expect(result.status).toBe('skipped');
   });
 
@@ -95,7 +98,10 @@ describe('deployArtifact', () => {
 
   test('succeeds only when the reply names the target url', async () => {
     const fake = fakeClaude('ok', VALID);
-    const result = await deployArtifact('/tmp/artifact.html', { title: 'T', configPath: configPath(VALID) });
+    const result = await deployArtifact('/tmp/artifact.html', {
+      title: 'T',
+      configPath: configPath(VALID),
+    });
     expect(result).toEqual({ status: 'ok', url: VALID });
     const [call] = fake.calls();
     expect(call).toContain('--tools Artifact Read');
@@ -108,19 +114,28 @@ describe('deployArtifact', () => {
 
   test('a reply naming some other url is a failure, not a success', async () => {
     fakeClaude('ok', OTHER);
-    const result = await deployArtifact('/tmp/artifact.html', { title: 'T', configPath: configPath(VALID) });
+    const result = await deployArtifact('/tmp/artifact.html', {
+      title: 'T',
+      configPath: configPath(VALID),
+    });
     expect(result.status).toBe('failed');
   });
 
   test('a refused Artifact tool is reported as such', async () => {
     fakeClaude('denied');
-    const result = await deployArtifact('/tmp/artifact.html', { title: 'T', configPath: configPath(VALID) });
+    const result = await deployArtifact('/tmp/artifact.html', {
+      title: 'T',
+      configPath: configPath(VALID),
+    });
     expect(result.status === 'failed' && result.reason).toContain('Artifact');
   });
 
   test('an error envelope surfaces its text', async () => {
     fakeClaude('error');
-    const result = await deployArtifact('/tmp/artifact.html', { title: 'T', configPath: configPath(VALID) });
+    const result = await deployArtifact('/tmp/artifact.html', {
+      title: 'T',
+      configPath: configPath(VALID),
+    });
     expect(result.status === 'failed' && result.reason).toContain('Not logged in');
   });
 
@@ -156,7 +171,11 @@ describe('deployArtifact', () => {
 
   test('with `create`, the reply is where the url comes from', async () => {
     const fake = fakeClaude('ok', `Published: ${VALID}`);
-    const result = await deployArtifact('/tmp/artifact.html', { title: 'T', configPath: configPath(), create: true });
+    const result = await deployArtifact('/tmp/artifact.html', {
+      title: 'T',
+      configPath: configPath(),
+      create: true,
+    });
     expect(result).toEqual({ status: 'ok', url: VALID });
     // And the prompt asked for a new artifact, not an update.
     expect(fake.calls()[0]).not.toContain('force: true');
@@ -164,7 +183,11 @@ describe('deployArtifact', () => {
 
   test('with `create`, a reply naming two urls is not trusted', async () => {
     fakeClaude('ok', `${VALID} or maybe ${OTHER}`);
-    const result = await deployArtifact('/tmp/artifact.html', { title: 'T', configPath: configPath(), create: true });
+    const result = await deployArtifact('/tmp/artifact.html', {
+      title: 'T',
+      configPath: configPath(),
+      create: true,
+    });
     expect(result.status).toBe('failed');
   });
 });

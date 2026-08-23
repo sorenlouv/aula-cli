@@ -46,7 +46,9 @@ describe('runtime validation', () => {
     expect(expectOptionalType(null, isNames, 'a name list', [])).toEqual([]);
     expect(expectOptionalType(undefined, isNames, 'a name list', [])).toEqual([]);
     expect(expectOptionalType(['a'], isNames, 'a name list', [])).toEqual(['a']);
-    expect(() => expectOptionalType(42, isNames, 'a name list', [])).toThrow('Expected a name list');
+    expect(() => expectOptionalType(42, isNames, 'a name list', [])).toThrow(
+      'Expected a name list',
+    );
   });
 
   /**
@@ -56,7 +58,9 @@ describe('runtime validation', () => {
    */
   test('a decode failure says what arrived, not just what was wanted', () => {
     const isNames = (value: unknown): value is string[] => isArrayOf(value, isString);
-    expect(() => expectType(null, isNames, 'a name list')).toThrow('Expected a name list, got null');
+    expect(() => expectType(null, isNames, 'a name list')).toThrow(
+      'Expected a name list, got null',
+    );
     expect(() => expectType({ Children: 1 }, isNames, 'a name list')).toThrow(
       'Expected a name list, got {Children: number}',
     );

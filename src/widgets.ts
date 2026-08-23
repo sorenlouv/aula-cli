@@ -154,7 +154,10 @@ export function assertWidgetEndpoint(url: string, httpMethod: 'GET' | 'POST'): v
     throw new WidgetError('-', `Refusing to call "${key}": not an allowlisted widget endpoint.`);
   }
   if (allowed !== httpMethod) {
-    throw new WidgetError('-', `Refusing ${httpMethod} to "${key}" — it is allowlisted for ${allowed} only.`);
+    throw new WidgetError(
+      '-',
+      `Refusing ${httpMethod} to "${key}" — it is allowlisted for ${allowed} only.`,
+    );
   }
 }
 
@@ -225,7 +228,10 @@ export class WidgetTokens {
    * {@link EXPIRED} rather than throwing, so an expiry stays distinguishable
    * from a genuine failure.
    */
-  async withToken<T>(widgetId: string, fn: (token: string) => Promise<T | typeof EXPIRED>): Promise<T> {
+  async withToken<T>(
+    widgetId: string,
+    fn: (token: string) => Promise<T | typeof EXPIRED>,
+  ): Promise<T> {
     const first = await fn(await this.get(widgetId));
     if (first !== EXPIRED) return first;
 
@@ -286,9 +292,13 @@ export async function widgetFetch<T>(
   if (looksExpired(res.status, text)) return EXPIRED;
 
   if (res.status !== 200) {
-    throw new WidgetError(req.widgetId, `${new URL(req.url).host} answered HTTP ${res.status}${
-      summariseBody(text) ? ` — ${summariseBody(text)}` : ''
-    }`, res.status);
+    throw new WidgetError(
+      req.widgetId,
+      `${new URL(req.url).host} answered HTTP ${res.status}${
+        summariseBody(text) ? ` — ${summariseBody(text)}` : ''
+      }`,
+      res.status,
+    );
   }
 
   let parsed: unknown;

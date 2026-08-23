@@ -16,7 +16,13 @@ import { isRecord } from '../validation.ts';
 import { buildDateSupport, DA_MONTHS, DA_WEEKDAYS, unsupportedDateClaims } from './dates.ts';
 import { doneKeys } from './done.ts';
 import { parseJsonLoosely, runClaude, withPreferences } from './llm.ts';
-import type { ConversationMessage, RankedBrief, RankedSignal, SourceItem, SourceKind } from './types.ts';
+import type {
+  ConversationMessage,
+  RankedBrief,
+  RankedSignal,
+  SourceItem,
+  SourceKind,
+} from './types.ts';
 
 function danishDate(isoDay: string): string {
   const date = new Date(`${isoDay}T00:00:00`);
@@ -125,7 +131,12 @@ const SOURCE_LABEL: Record<SourceKind, string> = {
 };
 
 /** What the composer is allowed to know: facts, already checked. */
-function composePayload(brief: RankedBrief, topline: string | null, summaries: Record<string, string>, isNew: (key: string) => boolean) {
+function composePayload(
+  brief: RankedBrief,
+  topline: string | null,
+  summaries: Record<string, string>,
+  isNew: (key: string) => boolean,
+) {
   const signal = (s: RankedSignal) => ({
     signalId: s.id,
     sourceId: s.sourceKey,
@@ -227,7 +238,10 @@ export type ComposePlan = {
  * unknown ids are dropped, hidden-tier ids are refused (what the family's list
  * hid is not the composer's to reopen), duplicates keep their first placement.
  */
-export function parsePlan(raw: unknown, brief: RankedBrief): { plan: ComposePlan; problems: string[] } {
+export function parsePlan(
+  raw: unknown,
+  brief: RankedBrief,
+): { plan: ComposePlan; problems: string[] } {
   const problems: string[] = [];
   const byId = new Map(brief.signals.map((s) => [s.id, s]));
   const placed = new Set<string>();
@@ -279,12 +293,14 @@ export function parsePlan(raw: unknown, brief: RankedBrief): { plan: ComposePlan
       if (signal?.source.kind === 'personal' && (proposedTitle || proposedWhy)) {
         problems.push(`${field}: kalenderaftalen ${id} vises ordret og blev ikke fortolket`);
       }
-      const title = signal?.source.kind === 'personal'
-        ? undefined
-        : grounded(proposedTitle, `${field} (${id}) title`, signal);
-      const why = signal?.source.kind === 'personal'
-        ? undefined
-        : grounded(proposedWhy, `${field} (${id}) why`, signal);
+      const title =
+        signal?.source.kind === 'personal'
+          ? undefined
+          : grounded(proposedTitle, `${field} (${id}) title`, signal);
+      const why =
+        signal?.source.kind === 'personal'
+          ? undefined
+          : grounded(proposedWhy, `${field} (${id}) why`, signal);
       out.push({ signalId: id, ...(title ? { title } : {}), ...(why ? { why } : {}) });
     }
     return out;
@@ -379,9 +395,13 @@ export async function composePage(
   // The extractor decides what is true; the composer decides what leads. Both
   // are places a wish can land — "billeder må gerne ligge nederst" is nothing
   // the extractor can act on and everything this call can.
-  const answer = await runClaude(withPreferences(INSTRUCTIONS, brief.input.preferences), JSON.stringify(payload), {
-    timeoutMs: opts.timeoutMs ?? 300_000,
-  });
+  const answer = await runClaude(
+    withPreferences(INSTRUCTIONS, brief.input.preferences),
+    JSON.stringify(payload),
+    {
+      timeoutMs: opts.timeoutMs ?? 300_000,
+    },
+  );
   const { plan, problems } = parsePlan(parseJsonLoosely(answer), brief);
   const html = renderPlan(brief, plan, {
     topline: opts.topline ?? null,
@@ -420,7 +440,12 @@ export function fallbackPage(
 }
 
 /** The one place page markup is written. Both layouts come through here. */
-function buildPage(brief: RankedBrief, act: CardSpec[], week: CardSpec[], opts: PageOptions): string {
+function buildPage(
+  brief: RankedBrief,
+  act: CardSpec[],
+  week: CardSpec[],
+  opts: PageOptions,
+): string {
   const { input } = brief;
   const colour = new Map(input.family.children.map((c, i) => [c.firstName, `c${i + 1}`]));
   const card = ({ signal: s, title, why: reworded }: CardSpec) => {
@@ -488,7 +513,10 @@ function buildPage(brief: RankedBrief, act: CardSpec[], week: CardSpec[], opts: 
   <section><h2>Per barn</h2><div class="grid">
     ${input.family.children
       .map(
-        (c, i) => `<div class="cc"><h3><span class="dot c${i + 1}"></span>${escapeHtml(c.firstName)}</h3>
+        (
+          c,
+          i,
+        ) => `<div class="cc"><h3><span class="dot c${i + 1}"></span>${escapeHtml(c.firstName)}</h3>
         <div class="sub">${escapeHtml([c.className, c.institution].filter(Boolean).join(' · '))}</div>
         ${opts.summaries?.[c.firstName] ? `<ul><li><i>·</i><span>${escapeHtml(opts.summaries[c.firstName] ?? '')}</span></li></ul>` : ''}
         ${c.presence ? `<div class="times">Planlagt i dag ${escapeHtml((c.presence.plannedEntry ?? '').slice(0, 5))}–${escapeHtml((c.presence.plannedExit ?? '').slice(0, 5))} · ${escapeHtml(c.presence.statusDanish)}</div>` : ''}

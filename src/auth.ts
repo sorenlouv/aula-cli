@@ -13,7 +13,11 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { AulaSessionError } from './errors.ts';
-import { AulaCookieJar, AulaHttpClient, EncryptedFileTokenStore } from './vendor/aula-auth/index.ts';
+import {
+  AulaCookieJar,
+  AulaHttpClient,
+  EncryptedFileTokenStore,
+} from './vendor/aula-auth/index.ts';
 import type { StoredTokenRecord } from './vendor/aula-auth/index.ts';
 import {
   DEFAULT_OAUTH_CONFIG,
@@ -88,7 +92,9 @@ export function loginInstructions(): string {
 export async function resolveAuth(): Promise<Auth> {
   const record = await loadFreshTokens();
   if (!record) {
-    throw new AulaSessionError(`Not logged in — no MitID tokens in ${TOKEN_PATH}.\n\n${HOW_TO_LOGIN}`);
+    throw new AulaSessionError(
+      `Not logged in — no MitID tokens in ${TOKEN_PATH}.\n\n${HOW_TO_LOGIN}`,
+    );
   }
   const cookie = await loadCookieHeader();
   return {

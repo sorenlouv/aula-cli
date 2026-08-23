@@ -75,9 +75,9 @@ const COMMAND_OPTIONS = {
   widgets: [...TEXT, ...CACHED],
   'weekly-plan': [...TEXT, ...CACHED, 'week', 'next', 'child', 'widget', 'from', 'to'],
   'weekly-letter': [...TEXT, ...CACHED, 'week', 'next', 'child', 'widget', 'from', 'to'],
-  'tasks': [...TEXT, ...CACHED, 'week', 'next', 'child', 'widget', 'from', 'to'],
-  'assignments': [...TEXT, ...CACHED, 'week', 'next', 'child', 'widget', 'from', 'to'],
-  'reminders': [...TEXT, ...CACHED, 'week', 'next', 'child', 'widget', 'from', 'to'],
+  tasks: [...TEXT, ...CACHED, 'week', 'next', 'child', 'widget', 'from', 'to'],
+  assignments: [...TEXT, ...CACHED, 'week', 'next', 'child', 'widget', 'from', 'to'],
+  reminders: [...TEXT, ...CACHED, 'week', 'next', 'child', 'widget', 'from', 'to'],
   homework: [...TEXT, ...CACHED, 'week', 'next', 'child', 'from', 'to'],
   raw: [...TEXT, ...CACHED],
   digest: [...TEXT, ...CACHED, 'days', 'limit', 'week', 'next', 'child'],
@@ -165,9 +165,10 @@ export function parseCommandLine(command: CliCommand, args: string[]) {
     parsed.positionals.length < positional.min ||
     (positional.max !== undefined && parsed.positionals.length > positional.max)
   ) {
-    const reason = positional.max === 0 && parsed.positionals.length > 0
-      ? `"${command}" takes no arguments. `
-      : '';
+    const reason =
+      positional.max === 0 && parsed.positionals.length > 0
+        ? `"${command}" takes no arguments. `
+        : '';
     throw new UsageError(`${reason}Usage: aula ${positional.usage}`);
   }
 

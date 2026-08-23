@@ -37,17 +37,21 @@ type EasyIqEvent = {
 type EasyIqResponse = { Events?: EasyIqEvent[] | null };
 
 function isEasyIqEvent(value: unknown): value is EasyIqEvent {
-  return isRecord(value) &&
+  return (
+    isRecord(value) &&
     isOptional(value.start, isString) &&
     isOptional(value.itemType, isStringOrNumber) &&
     isOptional(value.title, isString) &&
     isOptional(value.ownername, isString) &&
-    isOptional(value.description, isString);
+    isOptional(value.description, isString)
+  );
 }
 
 function isEasyIqResponse(value: unknown): value is EasyIqResponse {
-  return isRecord(value) && isOptional(value.Events, (events): events is EasyIqEvent[] =>
-    isArrayOf(events, isEasyIqEvent));
+  return (
+    isRecord(value) &&
+    isOptional(value.Events, (events): events is EasyIqEvent[] => isArrayOf(events, isEasyIqEvent))
+  );
 }
 
 export async function getWeekPlan(
@@ -68,26 +72,29 @@ export async function getWeekPlan(
     }
     try {
       const data = await tokens.withToken(widgetId, async (token) => {
-        return widgetFetch({
-          url: EASYIQ_URL,
-          method: 'POST',
-          widgetId,
-          headers: {
-            authorization: `Bearer ${token}`,
-            accept: 'application/json',
-            origin: 'https://www.aula.dk',
-            referer: 'https://www.aula.dk/',
-            'x-aula-institutionfilter': ctx.institutionCodes.join(','),
-            'x-aula-userprofile': 'guardian',
+        return widgetFetch(
+          {
+            url: EASYIQ_URL,
+            method: 'POST',
+            widgetId,
+            headers: {
+              authorization: `Bearer ${token}`,
+              accept: 'application/json',
+              origin: 'https://www.aula.dk',
+              referer: 'https://www.aula.dk/',
+              'x-aula-institutionfilter': ctx.institutionCodes.join(','),
+              'x-aula-userprofile': 'guardian',
+            },
+            body: {
+              sessionId: ctx.guardianId,
+              currentWeekNr: ctx.isoWeek,
+              userProfile: 'guardian',
+              institutionFilter: ctx.institutionCodes,
+              childFilter: [child.userId],
+            },
           },
-          body: {
-            sessionId: ctx.guardianId,
-            currentWeekNr: ctx.isoWeek,
-            userProfile: 'guardian',
-            institutionFilter: ctx.institutionCodes,
-            childFilter: [child.userId],
-          },
-        }, (value) => expectOptionalType(value, isEasyIqResponse, 'an EasyIQ response', {}));
+          (value) => expectOptionalType(value, isEasyIqResponse, 'an EasyIQ response', {}),
+        );
       });
 
       for (const event of data?.Events ?? []) {

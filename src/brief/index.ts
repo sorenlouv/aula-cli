@@ -110,7 +110,11 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
 
   // ---------------------------------------------------------------- compose
   const state = loadState();
-  const newKeys = whichAreNew(state, input.items.map((item) => item.key), now);
+  const newKeys = whichAreNew(
+    state,
+    input.items.map((item) => item.key),
+    now,
+  );
   const isNew = (key: string) => newKeys.has(key);
 
   let body = '';
@@ -127,9 +131,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
         body = composed.html;
         origin = 'model';
       } else {
-        notes.push(
-          `Layout afvist: ${found.map((v) => `${v.rule} (${v.detail})`).join('; ')}`,
-        );
+        notes.push(`Layout afvist: ${found.map((v) => `${v.rule} (${v.detail})`).join('; ')}`);
       }
     } catch (err) {
       notes.push(`Layout fejlede: ${errorMessage(err)}`);
@@ -176,10 +178,15 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   // — where one is configured — was actually refreshed. With `--no-llm` the
   // rules-only page is what was asked for, so it is complete on its own terms.
   const complete =
-    (opts.useModel === false || (extractionRan && origin === 'model')) && deployment.status !== 'failed';
+    (opts.useModel === false || (extractionRan && origin === 'model')) &&
+    deployment.status !== 'failed';
 
   // Recorded only once the page exists, so a crash re-shows rather than hides.
-  markSeen(state, input.items.map((item) => item.key), now);
+  markSeen(
+    state,
+    input.items.map((item) => item.key),
+    now,
+  );
   pruneState(state);
   recordRun(state, { day: input.today, complete }, now);
   saveState(state);

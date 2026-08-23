@@ -43,7 +43,10 @@ test('draws exactly the modules the encoder produced', () => {
   const drawn = darkModules(qrSvg(qr1Json));
 
   assert.deepEqual([...drawn].sort(), [...dark].sort());
-  assert.match(qrSvg(qr1Json), new RegExp(`viewBox="0 0 ${count + QUIET * 2} ${count + QUIET * 2}"`));
+  assert.match(
+    qrSvg(qr1Json),
+    new RegExp(`viewBox="0 0 ${count + QUIET * 2} ${count + QUIET * 2}"`),
+  );
 });
 
 test('keeps the quiet zone clear', () => {

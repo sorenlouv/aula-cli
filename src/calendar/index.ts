@@ -85,7 +85,9 @@ export async function loadPersonalEvents(
     }
   }
 
-  events.sort((a, b) => `${a.date}${a.startTime ?? ''}`.localeCompare(`${b.date}${b.startTime ?? ''}`));
+  events.sort((a, b) =>
+    `${a.date}${a.startTime ?? ''}`.localeCompare(`${b.date}${b.startTime ?? ''}`),
+  );
   return { events, warnings, notConnected };
 }
 
@@ -113,7 +115,8 @@ function isRecordish(value: unknown): value is Record<string, unknown> {
  * 26th), so it is pulled back a day to give an inclusive `endDate`.
  */
 export function toPersonalEvent(raw: unknown, calendar: CalendarRef): PersonalEvent | null {
-  if (!isRecordish(raw)) throw new Error(`Kalenderen «${calendar.name}» gav en aftale, der ikke var et objekt.`);
+  if (!isRecordish(raw))
+    throw new Error(`Kalenderen «${calendar.name}» gav en aftale, der ikke var et objekt.`);
   // A cancelled occurrence of a repeating appointment still comes back; it is
   // not something anybody has to be anywhere for.
   if (raw.status === 'cancelled') return null;
@@ -123,9 +126,11 @@ export function toPersonalEvent(raw: unknown, calendar: CalendarRef): PersonalEv
 
   const start = isRecordish(raw.start) ? (raw.start as TimeRef) : null;
   const end = isRecordish(raw.end) ? (raw.end as TimeRef) : null;
-  if (!start || !end) throw new Error(`Aftalen ${id} i «${calendar.name}» mangler start eller slut.`);
+  if (!start || !end)
+    throw new Error(`Aftalen ${id} i «${calendar.name}» mangler start eller slut.`);
 
-  const title = typeof raw.summary === 'string' && raw.summary.trim() ? raw.summary.trim() : '(uden titel)';
+  const title =
+    typeof raw.summary === 'string' && raw.summary.trim() ? raw.summary.trim() : '(uden titel)';
   const allDay = typeof start.dateTime !== 'string';
 
   let date: string;
@@ -142,7 +147,8 @@ export function toPersonalEvent(raw: unknown, calendar: CalendarRef): PersonalEv
     if (Number.isNaN(startAt.getTime())) throw new Error(`Aftalen ${id} har en ugyldig start.`);
     date = localIsoDate(startAt);
     startTime = localTime(startAt);
-    if (typeof end.dateTime !== 'string') throw new Error(`Aftalen ${id} mangler et sluttidspunkt.`);
+    if (typeof end.dateTime !== 'string')
+      throw new Error(`Aftalen ${id} mangler et sluttidspunkt.`);
     const endAt = new Date(end.dateTime);
     if (Number.isNaN(endAt.getTime()) || endAt < startAt) {
       throw new Error(`Aftalen ${id} har en ugyldig slutning.`);

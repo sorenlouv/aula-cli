@@ -95,7 +95,8 @@ export function buildFamily(
 
   const institutions = (context.institutions ?? []).map((inst) => ({
     institutionCode: inst.institutionCode,
-    institutionName: inst.institutionName ?? nameByCode.get(inst.institutionCode) ?? inst.institutionCode,
+    institutionName:
+      inst.institutionName ?? nameByCode.get(inst.institutionCode) ?? inst.institutionCode,
     ...(inst.institutionType ? { institutionType: inst.institutionType } : {}),
     institutionProfileId: inst.institutionProfileId,
     groups: (inst.groups ?? []).map((g) => ({ id: g.id, name: g.name })),

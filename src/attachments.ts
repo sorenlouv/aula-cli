@@ -18,8 +18,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Attachment } from './types.ts';
 
-const ATTACHMENTS_DIR =
-  process.env.AULA_ATTACHMENTS_DIR ?? join(homedir(), '.aula', 'attachments');
+const ATTACHMENTS_DIR = process.env.AULA_ATTACHMENTS_DIR ?? join(homedir(), '.aula', 'attachments');
 
 /** Attachments are usually photos and PDFs; anything past this is a mistake. */
 const MAX_BYTES = 50 * 1024 * 1024;

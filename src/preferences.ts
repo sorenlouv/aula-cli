@@ -24,18 +24,12 @@
  *   stored path, which is what keeps the tests off the real one.
  */
 
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
-import { dirname, join } from "node:path";
-import { AULA_DIR } from "./auth.ts";
-import { UsageError } from "./errors.ts";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { AULA_DIR } from './auth.ts';
+import { UsageError } from './errors.ts';
 
-export const PREFERENCES_PATH = join(AULA_DIR, "preferences.md");
+export const PREFERENCES_PATH = join(AULA_DIR, 'preferences.md');
 
 /**
  * A ceiling, not a target. Every line goes into every brief prompt, so an
@@ -65,11 +59,11 @@ export const MAX_PREFERENCES = 30;
  * the model reads the new wording, drop it and the model stops applying it.
  */
 export const DEFAULT_PREFERENCES: readonly string[] = [
-  "Det vigtigste for mig er ting der skal medbringes, afleveres, tilmeldes eller besvares — og nye faste aftaler i ugen.",
-  "Beskeder og opslag fra mit barns egen klasse eller stue er næsten altid relevante.",
-  "En besked til hele skolen tæller kun, når den handler om mit barns dag: skolefoto, som hele klassen skal med til, er relevant — et forældrekursus er ikke.",
-  "Tilbud vi selv kan vælge til — kurser, forløb, netværk, temaaftener, foredrag — er mindre relevante.",
-  "Fællesbeskeder til alle forældre i kommunen er aldrig relevante for os.",
+  'Det vigtigste for mig er ting der skal medbringes, afleveres, tilmeldes eller besvares — og nye faste aftaler i ugen.',
+  'Beskeder og opslag fra mit barns egen klasse eller stue er næsten altid relevante.',
+  'En besked til hele skolen tæller kun, når den handler om mit barns dag: skolefoto, som hele klassen skal med til, er relevant — et forældrekursus er ikke.',
+  'Tilbud vi selv kan vælge til — kurser, forløb, netværk, temaaftener, foredrag — er mindre relevante.',
+  'Fællesbeskeder til alle forældre i kommunen er aldrig relevante for os.',
 ];
 
 /**
@@ -88,10 +82,10 @@ export const DEFAULT_PREFERENCES: readonly string[] = [
  */
 export function parsePreferences(raw: string): string[] {
   return raw
-    .split("\n")
+    .split('\n')
     .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith("#"))
-    .map((line) => line.replace(/^[-*]\s*/, "").trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'))
+    .map((line) => line.replace(/^[-*]\s*/, '').trim())
     .filter((line) => line.length > 0);
 }
 
@@ -101,7 +95,7 @@ export function parsePreferences(raw: string): string[] {
  */
 export function readPreferences(path = PREFERENCES_PATH): string[] {
   try {
-    return parsePreferences(readFileSync(path, "utf8"));
+    return parsePreferences(readFileSync(path, 'utf8'));
   } catch {
     return [];
   }
@@ -121,16 +115,11 @@ export function loadPreferences(path = PREFERENCES_PATH): string[] {
   return readPreferences(path);
 }
 
-export function writePreferences(
-  lines: string[],
-  path = PREFERENCES_PATH,
-): void {
+export function writePreferences(lines: string[], path = PREFERENCES_PATH): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   // Written as a Markdown list so the file reads well anywhere, parsed as if
   // the dashes were not there — see `parsePreferences`.
-  const body = lines.length
-    ? `${lines.map((line) => `- ${line}`).join("\n")}\n`
-    : "";
+  const body = lines.length ? `${lines.map((line) => `- ${line}`).join('\n')}\n` : '';
   writeFileSync(path, body, { mode: 0o600 });
   // `mode` on write only applies when the file is created, and this one may
   // predate the rule — or have been created by hand.
@@ -140,8 +129,8 @@ export function writePreferences(
 /** A preference is one line. Pasted newlines and stray bullets are the user's, not ours. */
 function normalise(text: string): string {
   return text
-    .replace(/^\s*[-*]\s+/, "")
-    .replace(/\s+/g, " ")
+    .replace(/^\s*[-*]\s+/, '')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
@@ -152,10 +141,7 @@ export type RememberResult = {
   preferences: string[];
 };
 
-export function addPreference(
-  text: string,
-  path = PREFERENCES_PATH,
-): RememberResult {
+export function addPreference(text: string, path = PREFERENCES_PATH): RememberResult {
   const line = normalise(text);
   if (!line) {
     throw new UsageError(
@@ -163,14 +149,12 @@ export function addPreference(
     );
   }
   const preferences = loadPreferences(path);
-  const already = preferences.find(
-    (existing) => existing.toLowerCase() === line.toLowerCase(),
-  );
+  const already = preferences.find((existing) => existing.toLowerCase() === line.toLowerCase());
   if (already) return { added: false, text: already, preferences };
   if (preferences.length >= MAX_PREFERENCES) {
     throw new UsageError(
       `There are already ${preferences.length} preferences, which is the limit.\n` +
-        "Run `aula preferences` to see them and `aula forget <nr>` to drop one first.",
+        'Run `aula preferences` to see them and `aula forget <nr>` to drop one first.',
     );
   }
   const next = [...preferences, line];

@@ -13,21 +13,10 @@ import {
 } from '../calendar/index.ts';
 import { readConfig } from '../config.ts';
 import { localIsoDate } from '../integrations/types.ts';
-import {
-  buildDigest,
-  collectAlbums,
-  type ChildGroups,
-  loadGroups,
-} from './../digest.ts';
+import { buildDigest, collectAlbums, type ChildGroups, loadGroups } from './../digest.ts';
 import { resolveFamily } from './../family.ts';
 import { loadPreferences } from './../preferences.ts';
-import type {
-  Audience,
-  BriefInput,
-  HealthNote,
-  PresenceRow,
-  SourceItem,
-} from './types.ts';
+import type { Audience, BriefInput, HealthNote, PresenceRow, SourceItem } from './types.ts';
 
 const AULA_PORTAL = 'https://www.aula.dk/portal/#';
 
@@ -306,7 +295,10 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
  * out before the line does.
  */
 function describeUnreadableThreads(subjects: string[]): string {
-  const named = subjects.slice(0, 2).map((s) => `«${s}»`).join(' og ');
+  const named = subjects
+    .slice(0, 2)
+    .map((s) => `«${s}»`)
+    .join(' og ');
   if (subjects.length === 1) {
     return `Beskederne i tråden ${named} kunne ikke hentes — kun emnet er med her.`;
   }
@@ -360,9 +352,7 @@ function summariseWarning(warning: string): string {
  * appointment that looks like a free afternoon is the worst thing this feature
  * could do.
  */
-async function collectPersonal(
-  now: Date,
-): Promise<{ items: SourceItem[]; health: HealthNote[] }> {
+async function collectPersonal(now: Date): Promise<{ items: SourceItem[]; health: HealthNote[] }> {
   const calendars = readConfig().calendars ?? [];
   if (calendars.length === 0) return { items: [], health: [] };
 

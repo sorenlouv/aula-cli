@@ -67,14 +67,19 @@ export async function runDoctor(
     return {
       value: found,
       detail: `${found.length} profile(s), ${children} child(ren), API v${client.apiVersion}`,
-      ...(found.length === 0 ? { status: 'warn' as const, note: 'no profiles — nothing else can work' } : {}),
+      ...(found.length === 0
+        ? { status: 'warn' as const, note: 'no profiles — nothing else can work' }
+        : {}),
     };
   });
 
   const context = await run('profiles.getProfileContext', async () => {
     const ctx = await client.getProfileContext();
     const widgets = (ctx.pageConfiguration?.widgetConfigurations ?? []).length;
-    return { value: ctx, detail: `userId=${ctx.userId ?? 'missing'}, ${widgets} widget(s) configured` };
+    return {
+      value: ctx,
+      detail: `userId=${ctx.userId ?? 'missing'}, ${widgets} widget(s) configured`,
+    };
   });
 
   if (!profiles || profiles.length === 0 || !context) {
@@ -138,7 +143,10 @@ export async function runDoctor(
       value: detail,
       detail: `thread ${first.id}: ${messages}/${detail.totalMessageCount ?? '?'} message(s)`,
       ...(messages === 0
-        ? { status: 'warn' as const, note: 'a thread with no readable messages is the step-up symptom' }
+        ? {
+            status: 'warn' as const,
+            note: 'a thread with no readable messages is the step-up symptom',
+          }
         : {}),
     };
   });
@@ -171,7 +179,10 @@ export async function runDoctor(
       value: real,
       detail: `${real.length} album(s)`,
       ...(real.length === 0
-        ? { status: 'warn' as const, note: 'an empty gallery and a wrong id set look identical here' }
+        ? {
+            status: 'warn' as const,
+            note: 'an empty gallery and a wrong id set look identical here',
+          }
         : {}),
     };
   });
@@ -192,7 +203,10 @@ export async function runDoctor(
       value: entries,
       detail: `${entries.length} entry/entries`,
       ...(entries.length === 0
-        ? { status: 'skip' as const, detail: 'no entries — these institutions may not use komme/gå' }
+        ? {
+            status: 'skip' as const,
+            detail: 'no entries — these institutions may not use komme/gå',
+          }
         : {}),
     };
   });
@@ -218,7 +232,8 @@ export async function runDoctor(
 
   await run('profiles.getContactlist', async () => {
     const groupId = groups?.flatMap((c) => c.groups ?? [])[0]?.id;
-    if (groupId === undefined) return { value: null, status: 'skip' as const, detail: 'no group id to ask about' };
+    if (groupId === undefined)
+      return { value: null, status: 'skip' as const, detail: 'no group id to ask about' };
     const contacts = await client.getContactList({ groupId, page: 1 });
     const birthdays = contacts.filter((c) => c.birthday).length;
     return {
@@ -233,7 +248,10 @@ export async function runDoctor(
   });
 
   await run('commonFiles.getCommonFiles', async () => {
-    const page = await client.getCommonFiles({ institutionCodes: family.institutionCodes, limit: 5 });
+    const page = await client.getCommonFiles({
+      institutionCodes: family.institutionCodes,
+      limit: 5,
+    });
     return { value: page, detail: `${page.totalAmount} shared file(s) on the shelf` };
   });
 
@@ -383,7 +401,9 @@ function renderDoctor(report: DoctorReport): string {
       `in ${(report.summary.totalMs / 1000).toFixed(1)}s`,
   ];
   if (report.summary.warned > 0) {
-    lines.push(fmt.dim('Warnings are successful calls that returned a known symptom — see API.md.'));
+    lines.push(
+      fmt.dim('Warnings are successful calls that returned a known symptom — see API.md.'),
+    );
   }
   return lines.join('\n');
 }

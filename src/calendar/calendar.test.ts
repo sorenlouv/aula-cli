@@ -69,10 +69,7 @@ describe('reading one connector event', () => {
   });
 
   test('a one-day all-day event does not end before it starts', () => {
-    const event = toPersonalEvent(
-      { ...ALL_DAY, end: { date: '2026-08-26T00:00:00Z' } },
-      CAL,
-    );
+    const event = toPersonalEvent({ ...ALL_DAY, end: { date: '2026-08-26T00:00:00Z' } }, CAL);
     expect(event?.date).toBe('2026-08-25');
     expect(event?.endDate).toBe('2026-08-25');
   });
@@ -95,10 +92,7 @@ describe('reading one connector event', () => {
       },
       CAL,
     );
-    const original = toPersonalEvent(
-      { ...TIMED, id: 'evt1_x', recurringEventId: 'series7' },
-      CAL,
-    );
+    const original = toPersonalEvent({ ...TIMED, id: 'evt1_x', recurringEventId: 'series7' }, CAL);
     expect(moved?.key).toBe(original?.key);
     expect(moved?.startTime).toBe('15:00');
   });
@@ -115,9 +109,7 @@ describe('the bounded calendar window', () => {
     expect([from.getFullYear(), from.getMonth(), from.getDate(), from.getHours()]).toEqual([
       2026, 2, 22, 0,
     ]);
-    expect([to.getFullYear(), to.getMonth(), to.getDate(), to.getHours()]).toEqual([
-      2026, 3, 5, 0,
-    ]);
+    expect([to.getFullYear(), to.getMonth(), to.getDate(), to.getHours()]).toEqual([2026, 3, 5, 0]);
     // Copenhagen moves forward during this fortnight. Fixed millisecond
     // arithmetic would end at 01:00 and silently spill into a fifteenth day.
     expect(to.getTime() - from.getTime()).toBe(14 * 86_400_000 - 3_600_000);
@@ -143,11 +135,24 @@ describe('appointment presentation', () => {
 // --------------------------------------------------------------- the wire
 
 const STREAM = [
-  JSON.stringify({ type: 'system', subtype: 'init', mcp_servers: [{ name: 'claude.ai Google Calendar', status: 'connected' }] }),
+  JSON.stringify({
+    type: 'system',
+    subtype: 'init',
+    mcp_servers: [{ name: 'claude.ai Google Calendar', status: 'connected' }],
+  }),
   'not json at all',
   JSON.stringify({
     type: 'assistant',
-    message: { content: [{ type: 'tool_use', id: 'tu_1', name: 'mcp__claude_ai_Google_Calendar__list_events', input: { calendarId: 'a@b.c' } }] },
+    message: {
+      content: [
+        {
+          type: 'tool_use',
+          id: 'tu_1',
+          name: 'mcp__claude_ai_Google_Calendar__list_events',
+          input: { calendarId: 'a@b.c' },
+        },
+      ],
+    },
   }),
   JSON.stringify({
     type: 'user',
@@ -173,7 +178,15 @@ describe('reading the tool call off the stream', () => {
   test('a tool result delivered as content blocks reads the same', () => {
     const line = JSON.stringify({
       type: 'user',
-      message: { content: [{ type: 'tool_result', tool_use_id: 'tu_2', content: [{ type: 'text', text: '{"ok":1}' }] }] },
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'tu_2',
+            content: [{ type: 'text', text: '{"ok":1}' }],
+          },
+        ],
+      },
     });
     expect(parseStream(line).results.get('tu_2')?.text).toBe('{"ok":1}');
   });
@@ -201,7 +214,9 @@ describe('connector payload contracts', () => {
 
   test('one malformed calendar rejects the listing', () => {
     expect(() =>
-      parseCalendarsPayload({ calendars: [{ id: 'family', summary: 'Familie' }, { summary: 'Privat' }] }),
+      parseCalendarsPayload({
+        calendars: [{ id: 'family', summary: 'Familie' }, { summary: 'Privat' }],
+      }),
     ).toThrow('ugyldig kalender');
   });
 

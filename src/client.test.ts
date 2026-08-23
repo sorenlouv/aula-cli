@@ -52,7 +52,10 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 const OK_PROFILES = { status: { code: 0 }, data: { profiles: [] } };
 /** Distinguishable from OK_PROFILES, so a replayed request proves it carried data. */
-const ONE_PROFILE = { status: { code: 0 }, data: { profiles: [{ profileId: 1, institutionProfiles: [] }] } };
+const ONE_PROFILE = {
+  status: { code: 0 },
+  data: { profiles: [{ profileId: 1, institutionProfiles: [] }] },
+};
 
 test('API versions must be finite integers in the supported range', () => {
   assert.throws(() => new AulaClient({ cookie: COOKIE, apiVersion: 0 }), /integer from 1 to 99/);
@@ -83,11 +86,7 @@ test('the guard refuses every write method Aula exposes', () => {
     'presence.registerVacation',
   ];
   for (const method of writeMethods) {
-    assert.throws(
-      () => assertReadOnly(method, 'GET'),
-      AulaApiError,
-      `${method} must be refused`,
-    );
+    assert.throws(() => assertReadOnly(method, 'GET'), AulaApiError, `${method} must be refused`);
   }
 });
 
@@ -265,7 +264,7 @@ test('getCommonFiles sends the parameters Aula silently requires', async () => {
   );
 });
 
-test('a shared file is read off the right level of Aula\'s double nesting', () => {
+test("a shared file is read off the right level of Aula's double nesting", () => {
   const f = normaliseCommonFile(COMMON_FILE);
   assert.equal(f.title, '2e skema uge 33-43 2026');
   assert.equal(f.filename, '2e Uge 33-43 2026.pdf');
@@ -364,10 +363,13 @@ test('an expired credential points at the MitID login', async () => {
   ]) {
     await withFetch(expired, async () => {
       const client = new AulaClient(opts);
-      await assert.rejects(() => client.getProfiles(), (err: unknown) => {
-        assert.match((err as Error).message, /bun run login/);
-        return true;
-      });
+      await assert.rejects(
+        () => client.getProfiles(),
+        (err: unknown) => {
+          assert.match((err as Error).message, /bun run login/);
+          return true;
+        },
+      );
     });
   }
 });
@@ -377,11 +379,14 @@ test('status 448 is reported as expired credentials, not a permission problem', 
     async () => jsonResponse({ status: { code: 448 }, data: null }, 403),
     async () => {
       const client = new AulaClient({ cookie: COOKIE });
-      await assert.rejects(() => client.getProfiles(), (err: unknown) => {
-        assert.ok(err instanceof AulaAuthError, 'should be an auth error');
-        assert.match(err.message, /rejected the credentials/);
-        return true;
-      });
+      await assert.rejects(
+        () => client.getProfiles(),
+        (err: unknown) => {
+          assert.ok(err instanceof AulaAuthError, 'should be an auth error');
+          assert.match(err.message, /rejected the credentials/);
+          return true;
+        },
+      );
     },
   );
 });
@@ -392,12 +397,19 @@ test('status 403 is reported as a refusal, and does not claim the session expire
     async () => {
       call++;
       // First call is the API-version probe, which must succeed.
-      return call === 1 ? jsonResponse(OK_PROFILES) : jsonResponse({ status: { code: 403 }, data: null }, 403);
+      return call === 1
+        ? jsonResponse(OK_PROFILES)
+        : jsonResponse({ status: { code: 403 }, data: null }, 403);
     },
     async () => {
       const client = new AulaClient({ cookie: COOKIE });
       await assert.rejects(
-        () => client.getCalendarEvents({ childInstitutionProfileIds: [1], start: new Date(), end: new Date() }),
+        () =>
+          client.getCalendarEvents({
+            childInstitutionProfileIds: [1],
+            start: new Date(),
+            end: new Date(),
+          }),
         (err: unknown) => {
           assert.ok(err instanceof AulaApiError, 'should be an API error, not an auth error');
           assert.ok(!(err instanceof AulaAuthError));
@@ -430,17 +442,22 @@ test('status 10 is split by HTTP status rather than collapsed', async () => {
     await withFetch(
       async () => {
         call++;
-        return call === 1 ? jsonResponse(OK_PROFILES) : jsonResponse({ status: { code: 10 }, data: null }, http);
+        return call === 1
+          ? jsonResponse(OK_PROFILES)
+          : jsonResponse({ status: { code: 10 }, data: null }, http);
       },
       async () => {
         const client = new AulaClient({ cookie: COOKIE });
-        await assert.rejects(() => client.getThreads(), (err: unknown) => {
-          assert.ok(err instanceof AulaApiError, `HTTP ${http} should be an API error`);
-          assert.equal(err.code, 10);
-          assert.match(err.message, expect);
-          if (not) assert.doesNotMatch(err.message, not);
-          return true;
-        });
+        await assert.rejects(
+          () => client.getThreads(),
+          (err: unknown) => {
+            assert.ok(err instanceof AulaApiError, `HTTP ${http} should be an API error`);
+            assert.equal(err.code, 10);
+            assert.match(err.message, expect);
+            if (not) assert.doesNotMatch(err.message, not);
+            return true;
+          },
+        );
       },
     );
   }
@@ -457,16 +474,19 @@ test('status 20 says the token was superseded, not that the login died', async (
     },
     async () => {
       const client = new AulaClient({ cookie: COOKIE });
-      await assert.rejects(() => client.getThreads(), (err: unknown) => {
-        // An OAuth refresh retires the previous access token immediately, so this
-        // resolves itself on the next run. Reporting it as an auth error would
-        // send the user to MitID for something a retry fixes.
-        assert.ok(err instanceof AulaApiError, 'should not be an auth error');
-        assert.ok(!(err instanceof AulaAuthError));
-        assert.match(err.message, /replaced by a newer one/i);
-        assert.match(err.message, /again/i);
-        return true;
-      });
+      await assert.rejects(
+        () => client.getThreads(),
+        (err: unknown) => {
+          // An OAuth refresh retires the previous access token immediately, so this
+          // resolves itself on the next run. Reporting it as an auth error would
+          // send the user to MitID for something a retry fixes.
+          assert.ok(err instanceof AulaApiError, 'should not be an auth error');
+          assert.ok(!(err instanceof AulaAuthError));
+          assert.match(err.message, /replaced by a newer one/i);
+          assert.match(err.message, /again/i);
+          return true;
+        },
+      );
     },
   );
 });
@@ -517,10 +537,13 @@ test('a superseded token is not retried forever', async () => {
       });
       // Aula rejects the replacement too, so the failure has to surface rather
       // than the client renewing its way around in circles.
-      await assert.rejects(() => client.getProfiles(), (err: unknown) => {
-        assert.match((err as Error).message, /replaced by a newer one/i);
-        return true;
-      });
+      await assert.rejects(
+        () => client.getProfiles(),
+        (err: unknown) => {
+          assert.match((err as Error).message, /replaced by a newer one/i);
+          return true;
+        },
+      );
       assert.equal(renewals, 1, 'exactly one recovery attempt per request');
     },
   );
@@ -541,10 +564,13 @@ test('a token that cannot be renewed surfaces the failure instead of replaying',
         // No login on disk, or the store still holds the dead token.
         renewToken: async () => undefined,
       });
-      await assert.rejects(() => client.getProfiles(), (err: unknown) => {
-        assert.match((err as Error).message, /replaced by a newer one/i);
-        return true;
-      });
+      await assert.rejects(
+        () => client.getProfiles(),
+        (err: unknown) => {
+          assert.match((err as Error).message, /replaced by a newer one/i);
+          return true;
+        },
+      );
       assert.equal(call, 2, 'no replay when there is no better token to replay with');
     },
   );
@@ -573,9 +599,14 @@ test('concurrent requests share one token recovery', async () => {
           return 'fresh';
         },
       });
-      const all = await Promise.all([client.getProfiles(), client.getProfiles(), client.getProfiles()]);
+      const all = await Promise.all([
+        client.getProfiles(),
+        client.getProfiles(),
+        client.getProfiles(),
+      ]);
       assert.equal(all.length, 3);
-      for (const profiles of all) assert.equal(profiles.length, 1, 'every caller gets the replayed payload');
+      for (const profiles of all)
+        assert.equal(profiles.length, 1, 'every caller gets the replayed payload');
       assert.equal(renewals, 1, 'one renewal shared by all three');
     },
   );
@@ -592,10 +623,13 @@ test('cookie auth has no token to recover, so code 20 surfaces immediately', asy
     },
     async () => {
       const client = new AulaClient({ cookie: COOKIE });
-      await assert.rejects(() => client.getProfiles(), (err: unknown) => {
-        assert.match((err as Error).message, /replaced by a newer one/i);
-        return true;
-      });
+      await assert.rejects(
+        () => client.getProfiles(),
+        (err: unknown) => {
+          assert.match((err as Error).message, /replaced by a newer one/i);
+          return true;
+        },
+      );
       assert.equal(call, 2, 'nothing to renew, so nothing replayed');
     },
   );
@@ -608,14 +642,19 @@ test('an unknown status code reports the HTTP status it arrived with', async () 
       call++;
       // Aula leaves `message` empty far more often than not, so when a code this
       // client has never seen turns up, the HTTP status is the only clue there is.
-      return call === 1 ? jsonResponse(OK_PROFILES) : jsonResponse({ status: { code: 77, message: '' } }, 418);
+      return call === 1
+        ? jsonResponse(OK_PROFILES)
+        : jsonResponse({ status: { code: 77, message: '' } }, 418);
     },
     async () => {
       const client = new AulaClient({ cookie: COOKIE });
-      await assert.rejects(() => client.getThreads(), (err: unknown) => {
-        assert.match((err as Error).message, /status code 77 \(HTTP 418\)/);
-        return true;
-      });
+      await assert.rejects(
+        () => client.getThreads(),
+        (err: unknown) => {
+          assert.match((err as Error).message, /status code 77 \(HTTP 418\)/);
+          return true;
+        },
+      );
     },
   );
 });
@@ -667,7 +706,10 @@ test('the retirement probe searches above whatever version is configured', async
       const client = new AulaClient({ cookie: COOKIE, apiVersion: 34 });
       await client.getProfiles();
       assert.equal(client.apiVersion, 38);
-      assert.ok(tried.includes(38), `never probed above the fallback constant: ${tried.join(', ')}`);
+      assert.ok(
+        tried.includes(38),
+        `never probed above the fallback constant: ${tried.join(', ')}`,
+      );
     },
   );
 });
@@ -681,7 +723,9 @@ test('an empty result is an empty result, not an API error', async () => {
   await withFetch(
     async () => {
       call++;
-      return call === 1 ? jsonResponse(OK_PROFILES) : jsonResponse({ status: { code: 0 }, data: null });
+      return call === 1
+        ? jsonResponse(OK_PROFILES)
+        : jsonResponse({ status: { code: 0 }, data: null });
     },
     async () => {
       const client = new AulaClient({ cookie: COOKIE });
@@ -710,7 +754,9 @@ test('a payload of the wrong shape still fails, and says what arrived', async ()
   await withFetch(
     async () => {
       call++;
-      return call === 1 ? jsonResponse(OK_PROFILES) : jsonResponse({ status: { code: 0 }, data: 'nope' });
+      return call === 1
+        ? jsonResponse(OK_PROFILES)
+        : jsonResponse({ status: { code: 0 }, data: 'nope' });
     },
     async () => {
       const client = new AulaClient({ cookie: COOKIE });
@@ -747,15 +793,21 @@ test('array query parameters use the PHP-style repeated-key form Aula expects', 
   );
 });
 
-test('calendar dates use Aula\'s non-ISO format', () => {
+test("calendar dates use Aula's non-ISO format", () => {
   const formatted = formatAulaDate(new Date(2026, 7, 12, 9, 5, 3));
   assert.match(formatted, /^2026-08-12 09:05:03\.0000[+-]\d{4}$/);
 });
 
 test('htmlToText flattens Aula message markup', () => {
   assert.equal(htmlToText('Hej<br />Vitus'), 'Hej\nVitus');
-  assert.equal(htmlToText('<div>Tusind tak.</div>\n<div>God sommer</div>'), 'Tusind tak.\nGod sommer');
-  assert.equal(htmlToText('m&oslash;de p&aring; fredag &amp; l&oslash;rdag'), 'møde på fredag & lørdag');
+  assert.equal(
+    htmlToText('<div>Tusind tak.</div>\n<div>God sommer</div>'),
+    'Tusind tak.\nGod sommer',
+  );
+  assert.equal(
+    htmlToText('m&oslash;de p&aring; fredag &amp; l&oslash;rdag'),
+    'møde på fredag & lørdag',
+  );
   assert.equal(htmlToText('<ul><li>Et</li><li>To</li></ul>'), '- Et\n- To');
   assert.equal(htmlToText('&#127774; sol'), '🌞 sol');
   assert.equal(htmlToText(null), '');
@@ -775,7 +827,10 @@ test('htmlToText handles the markup Aula really produces', () => {
     'Hej Valdemar\n\nJeg håber…',
   );
   // Consecutive <br> is the other way it writes one.
-  assert.equal(htmlToText('Kære alle.<br /><br />I dag har vi leget.'), 'Kære alle.\n\nI dag har vi leget.');
+  assert.equal(
+    htmlToText('Kære alle.<br /><br />I dag har vi leget.'),
+    'Kære alle.\n\nI dag har vi leget.',
+  );
   // Plain divs are single line breaks, not paragraph breaks.
   assert.equal(htmlToText('<div>Linje et</div>\n<div>Linje to</div>'), 'Linje et\nLinje to');
 });
@@ -785,7 +840,10 @@ test('htmlToText never leaves more than one blank line', () => {
 });
 
 test('htmlToText keeps link targets that carry the real information', () => {
-  assert.equal(htmlToText('<a href="https://x.dk/a">Tilmelding</a>'), 'Tilmelding (https://x.dk/a)');
+  assert.equal(
+    htmlToText('<a href="https://x.dk/a">Tilmelding</a>'),
+    'Tilmelding (https://x.dk/a)',
+  );
   assert.equal(htmlToText('<a href="https://x.dk/a">https://x.dk/a</a>'), 'https://x.dk/a');
 });
 
@@ -823,8 +881,12 @@ test('parseSince understands relative and absolute forms', () => {
 test('the raw escape hatch reaches unwrapped reads but still refuses writes', () => {
   // Not in the named allowlist, but unmistakably a read.
   assert.doesNotThrow(() => assertReadOnly('gallery.getAlbums', 'GET', { allowAnyGetter: true }));
-  assert.doesNotThrow(() => assertReadOnly('posts.hasUnreadPosts', 'GET', { allowAnyGetter: true }));
-  assert.doesNotThrow(() => assertReadOnly('presence.isCheckedIn', 'GET', { allowAnyGetter: true }));
+  assert.doesNotThrow(() =>
+    assertReadOnly('posts.hasUnreadPosts', 'GET', { allowAnyGetter: true }),
+  );
+  assert.doesNotThrow(() =>
+    assertReadOnly('presence.isCheckedIn', 'GET', { allowAnyGetter: true }),
+  );
 
   for (const method of [
     'messaging.sendMessage',
@@ -843,7 +905,10 @@ test('the raw escape hatch reaches unwrapped reads but still refuses writes', ()
 });
 
 test('the raw escape hatch cannot POST, not even to an allowlisted read', () => {
-  assert.throws(() => assertReadOnly('gallery.getAlbums', 'POST', { allowAnyGetter: true }), AulaApiError);
+  assert.throws(
+    () => assertReadOnly('gallery.getAlbums', 'POST', { allowAnyGetter: true }),
+    AulaApiError,
+  );
   assert.throws(
     () => assertReadOnly('messaging.getThreads', 'POST', { allowAnyGetter: true }),
     AulaApiError,
@@ -1042,7 +1107,11 @@ test('resolveWeek accepts an explicit week, --next, or defaults to this week', (
   assert.match(resolveWeek(undefined, false), /^\d{4}-W\d{2}$/);
   assert.notEqual(resolveWeek(undefined, true), resolveWeek(undefined, false));
   assert.throws(() => resolveWeek('week 33', false));
-  assert.throws(() => resolveWeek('2025-W53', false), /must look like/, 'week 53 does not exist in 2025');
+  assert.throws(
+    () => resolveWeek('2025-W53', false),
+    /must look like/,
+    'week 53 does not exist in 2025',
+  );
   // A hand-typed one-digit week is padded rather than refused; everything
   // downstream keys on the canonical form.
   assert.equal(resolveWeek('2026-W3', false), '2026-W03');
@@ -1052,7 +1121,10 @@ test('resolveWeek accepts an explicit week, --next, or defaults to this week', (
 });
 
 test('raw key=value pairs collapse repeats into an array', () => {
-  assert.deepEqual(parseKeyValues(['groupId=5', 'filter=child']), { groupId: '5', filter: 'child' });
+  assert.deepEqual(parseKeyValues(['groupId=5', 'filter=child']), {
+    groupId: '5',
+    filter: 'child',
+  });
   assert.deepEqual(parseKeyValues(['childIds=1', 'childIds=2', 'childIds=3']), {
     childIds: ['1', '2', '3'],
   });
@@ -1145,7 +1217,10 @@ function sessionEnforcingAula(): { handler: FetchStub; sessions: number } & { se
     if (method === 'profiles.getProfileContext') {
       activated.add(sid);
       return new Response(
-        JSON.stringify({ status: { code: 0 }, data: { userId: 'vald42a1', institutionProfiles: [] } }),
+        JSON.stringify({
+          status: { code: 0 },
+          data: { userId: 'vald42a1', institutionProfiles: [] },
+        }),
         { status: 200, headers },
       );
     }
@@ -1155,9 +1230,10 @@ function sessionEnforcingAula(): { handler: FetchStub; sessions: number } & { se
         headers,
       });
     }
-    const data = method === 'messaging.getThreads'
-      ? { threads: [], moreMessagesExist: false, page: Number(url.searchParams.get('page') ?? 0) }
-      : [];
+    const data =
+      method === 'messaging.getThreads'
+        ? { threads: [], moreMessagesExist: false, page: Number(url.searchParams.get('page') ?? 0) }
+        : [];
     return new Response(JSON.stringify({ status: { code: 0 }, data }), {
       status: 200,
       headers,
@@ -1259,13 +1335,19 @@ test('a 500 with a success envelope is reported as a rejected login, not a shape
       const client = new AulaClient({
         auth: { kind: 'token', accessToken: 'stale', username: 'u' },
       });
-      await assert.rejects(() => client.getProfiles(), (err: unknown) => {
-        assert.ok(err instanceof AulaAuthError, 'a token Aula will not accept is an auth problem');
-        assert.match(err.message, /rejected your login/i);
-        assert.match(err.message, /bun run login/);
-        assert.doesNotMatch(err.message, /malformed|payload/i, 'the old, misleading complaint');
-        return true;
-      });
+      await assert.rejects(
+        () => client.getProfiles(),
+        (err: unknown) => {
+          assert.ok(
+            err instanceof AulaAuthError,
+            'a token Aula will not accept is an auth problem',
+          );
+          assert.match(err.message, /rejected your login/i);
+          assert.match(err.message, /bun run login/);
+          assert.doesNotMatch(err.message, /malformed|payload/i, 'the old, misleading complaint');
+          return true;
+        },
+      );
     },
   );
 
@@ -1283,15 +1365,18 @@ test('a 500 that Aula gives everyone is reported as an outage, not as a login pr
       const client = new AulaClient({
         auth: { kind: 'token', accessToken: 'fine', username: 'u' },
       });
-      await assert.rejects(() => client.getProfiles(), (err: unknown) => {
-        assert.ok(err instanceof AulaApiError);
-        assert.ok(!(err instanceof AulaAuthError), 'logging in again would not help');
-        assert.match(err.message, /having trouble/i);
-        // Sending someone through a MitID round-trip on their phone to fix an
-        // outage is the specific waste this distinction buys.
-        assert.doesNotMatch(err.message, /bun run login/);
-        return true;
-      });
+      await assert.rejects(
+        () => client.getProfiles(),
+        (err: unknown) => {
+          assert.ok(err instanceof AulaApiError);
+          assert.ok(!(err instanceof AulaAuthError), 'logging in again would not help');
+          assert.match(err.message, /having trouble/i);
+          // Sending someone through a MitID round-trip on their phone to fix an
+          // outage is the specific waste this distinction buys.
+          assert.doesNotMatch(err.message, /bun run login/);
+          return true;
+        },
+      );
     },
   );
 });
@@ -1310,14 +1395,17 @@ test('a success envelope of the wrong shape says what arrived and how to look at
       const client = new AulaClient({
         auth: { kind: 'token', accessToken: 'tok', username: 'u' },
       });
-      await assert.rejects(() => client.getProfiles(), (err: unknown) => {
-        // The detail is wrapped to the terminal, so match on the flattened text.
-        const flat = (err as Error).message.replace(/\s+/g, ' ');
-        assert.match(flat, /does not understand/i);
-        assert.match(flat, /a string \("intern fejl"\)/, 'name what actually arrived');
-        assert.match(flat, /aula raw profiles\.getProfilesByLogin/, 'and how to go and see it');
-        return true;
-      });
+      await assert.rejects(
+        () => client.getProfiles(),
+        (err: unknown) => {
+          // The detail is wrapped to the terminal, so match on the flattened text.
+          const flat = (err as Error).message.replace(/\s+/g, ' ');
+          assert.match(flat, /does not understand/i);
+          assert.match(flat, /a string \("intern fejl"\)/, 'name what actually arrived');
+          assert.match(flat, /aula raw profiles\.getProfilesByLogin/, 'and how to go and see it');
+          return true;
+        },
+      );
     },
   );
 });

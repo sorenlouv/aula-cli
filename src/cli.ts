@@ -2,7 +2,13 @@
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { downloadAttachment, listAttachments, type ResolvedAttachment } from './attachments.ts';
-import { type CliCommand, isCliCommand, optionsFor, parseCommandLine, usageFor } from './cli-options.ts';
+import {
+  type CliCommand,
+  isCliCommand,
+  optionsFor,
+  parseCommandLine,
+  usageFor,
+} from './cli-options.ts';
 import {
   type BirthdayContact,
   formatDate,
@@ -188,7 +194,8 @@ async function main(): Promise<number> {
     console.log(USAGE);
     return 0;
   }
-  if (!isCliCommand(command)) throw new UsageError(`Unknown command "${command}". Run \`aula --help\`.`);
+  if (!isCliCommand(command))
+    throw new UsageError(`Unknown command "${command}". Run \`aula --help\`.`);
   if (wantsHelp) {
     console.log(commandHelp(command));
     return 0;
@@ -216,14 +223,16 @@ async function main(): Promise<number> {
   const fromDate = optionalIsoDate(values.from, '--from');
   const toDate = optionalIsoDate(values.to, '--to');
   const contactRole = parseContactRole(values.role);
-  const threadId = command === 'thread' || command === 'attachments' || command === 'attachment'
-    ? requireId(positionals[0], `${command} <threadId>`)
-    : undefined;
+  const threadId =
+    command === 'thread' || command === 'attachments' || command === 'attachment'
+      ? requireId(positionals[0], `${command} <threadId>`)
+      : undefined;
   // The index is optional and defaults to the first attachment, which is the
   // only one most threads have.
-  const attachmentIndex = command === 'attachment'
-    ? requireInteger(positionals[1] ?? '0', 'attachment index', { min: 0 })
-    : undefined;
+  const attachmentIndex =
+    command === 'attachment'
+      ? requireInteger(positionals[1] ?? '0', 'attachment index', { min: 0 })
+      : undefined;
   if (fromDate && toDate && fromDate > toDate) {
     throw new UsageError(`--from (${fromDate}) must not be after --to (${toDate}).`);
   }
@@ -246,7 +255,9 @@ async function main(): Promise<number> {
     if (todayIsComplete(state)) {
       return emit({ skipped: true, lastRun: state.lastRun ?? null }, asText, (r) => {
         const at = r.lastRun ? new Date(r.lastRun.at) : null;
-        const when = at ? at.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' }) : '';
+        const when = at
+          ? at.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' })
+          : '';
         return `Dagens oversigt er allerede komplet${when ? ` (kl. ${when})` : ''} — intet at gøre.`;
       });
     }
@@ -484,7 +495,12 @@ async function main(): Promise<number> {
         );
       }
       const saved = await downloadAttachment({
-        attachment: { index: 0, name: wanted.filename ?? wanted.title, url: wanted.url, kind: 'file' },
+        attachment: {
+          index: 0,
+          name: wanted.filename ?? wanted.title,
+          url: wanted.url,
+          kind: 'file',
+        },
         prefix: `commonfile-${wanted.id}`,
         ...(values.out ? { out: values.out } : {}),
       });
@@ -692,7 +708,11 @@ async function runPublish(off: boolean): Promise<number> {
   const target = readTarget();
   if (off) {
     setTarget(null);
-    console.log(target ? `The hosted copy is off — ${target} will not be updated again.` : 'No hosted copy was configured.');
+    console.log(
+      target
+        ? `The hosted copy is off — ${target} will not be updated again.`
+        : 'No hosted copy was configured.',
+    );
     return 0;
   }
   const artifactPath = join(BRIEF_DIR, 'artifact.html');
@@ -716,7 +736,9 @@ async function runPublish(off: boolean): Promise<number> {
   const state = loadState();
   recordDeploy(state, result.url);
   saveState(state);
-  console.error('Every `aula new` (and the schedule) keeps it current; `aula publish --off` stops it.');
+  console.error(
+    'Every `aula new` (and the schedule) keeps it current; `aula publish --off` stops it.',
+  );
   console.log(result.url);
   return 0;
 }
@@ -752,9 +774,7 @@ async function runCalendars(positionals: string[]): Promise<number> {
   const sub = positionals[0];
   const refs = positionals.slice(1);
   if (sub !== undefined && sub !== 'set') {
-    throw new UsageError(
-      `Unknown subcommand "${sub}". Usage: aula ${usageFor('calendars')}`,
-    );
+    throw new UsageError(`Unknown subcommand "${sub}". Usage: aula ${usageFor('calendars')}`);
   }
 
   try {
@@ -941,11 +961,14 @@ async function setCalendars(refs: string[]): Promise<number> {
         const count = load.events.filter((event) => event.calendarId === c.id).length;
         return `  ${c.name}: ${count} appointment(s) in the next ${PERSONAL_CALENDAR_DAYS} days`;
       }),
-      ...load.events.slice(0, 3).map(
-        (event) => `  · ${event.date}${event.startTime ? ` ${event.startTime}` : ''}  ${event.title}`,
-      ),
+      ...load.events
+        .slice(0, 3)
+        .map(
+          (event) =>
+            `  · ${event.date}${event.startTime ? ` ${event.startTime}` : ''}  ${event.title}`,
+        ),
       '',
-      'They are in the next overview — `aula new` builds it now.',
+      'The calendar events will be included next time you run `aula new`.',
     ].join('\n'),
   );
   return 0;
@@ -971,7 +994,9 @@ function runPreferences(positionals: string[]): number {
   const sub = positionals[0];
   if (sub === 'reset') return runPreferencesReset();
   if (sub !== undefined) {
-    throw new UsageError(`Unknown subcommand "${sub}". Use \`aula preferences\` or \`aula preferences reset\`.`);
+    throw new UsageError(
+      `Unknown subcommand "${sub}". Use \`aula preferences\` or \`aula preferences reset\`.`,
+    );
   }
   // Seeds on first use: the tool's own opinions are the first thing this
   // prints, which is the only way a user finds out they can be argued with.
@@ -1122,7 +1147,8 @@ function threadAttachments(detail: ThreadDetail): ThreadAttachment[] {
 
 function requireId(raw: string | undefined, usage: string): number {
   const id = parseInteger(raw, { min: 1 });
-  if (id === undefined) throw new UsageError(`Usage: ${usage} — the id must be a positive integer.`);
+  if (id === undefined)
+    throw new UsageError(`Usage: ${usage} — the id must be a positive integer.`);
   return id;
 }
 
@@ -1143,14 +1169,17 @@ function requireInteger(
   const value = parseInteger(raw, range);
   if (value === undefined) {
     const upper = range.max === undefined ? '' : ` and at most ${range.max}`;
-    throw new UsageError(`${name} must be an integer of at least ${range.min}${upper} (got "${raw ?? ''}").`);
+    throw new UsageError(
+      `${name} must be an integer of at least ${range.min}${upper} (got "${raw ?? ''}").`,
+    );
   }
   return value;
 }
 
 function optionalIsoDate(raw: string | undefined, name: string): string | undefined {
   if (raw === undefined) return undefined;
-  if (!parseIsoDateParts(raw)) throw new UsageError(`${name} must be a real date in YYYY-MM-DD form (got "${raw}").`);
+  if (!parseIsoDateParts(raw))
+    throw new UsageError(`${name} must be a real date in YYYY-MM-DD form (got "${raw}").`);
   return raw;
 }
 
@@ -1310,7 +1339,10 @@ function renderContacts(contacts: ContactRow[]): string {
   return contacts
     .map((c) => {
       const details = [c.mobilePhone, c.homePhone, c.email].filter(Boolean).join(' · ');
-      const relations = (c.relations ?? []).map((r) => r.name).filter(Boolean).join(', ');
+      const relations = (c.relations ?? [])
+        .map((r) => r.name)
+        .filter(Boolean)
+        .join(', ');
       return (
         `${c.fullName ?? 'unknown'} — ${c.group}${c.birthday ? `  (b. ${c.birthday})` : ''}\n` +
         `${details ? `    ${details}\n` : ''}` +
@@ -1334,7 +1366,7 @@ function renderPlans(plans: WeekPlan[]): string {
         // "husk skiftetøj og badeting".
         return warnings
           ? `${head}\n  COULD NOT BE READ — the vendor did not answer. ` +
-            `This is NOT an empty week; the plan may contain items.\n${warnings}`
+              `This is NOT an empty week; the plan may contain items.\n${warnings}`
           : `${head}\n  (nothing published — the vendor answered, the week is genuinely empty)`;
       }
       // Grouped by child, then by the vendor's own date label — the shape a
@@ -1420,7 +1452,8 @@ function renderBrief(result: {
   if (result.png) lines.push(`PNG:  ${result.png}`);
   if (result.deployed) lines.push(`Delt: ${result.deployed}`);
   if (result.notes.length) lines.push('', ...result.notes.map((n) => `! ${n}`));
-  if (!result.complete) lines.push('! Ufuldstændig kørsel — planlæggerens næste forsøg gør det om.');
+  if (!result.complete)
+    lines.push('! Ufuldstændig kørsel — planlæggerens næste forsøg gør det om.');
   return lines.join('\n');
 }
 

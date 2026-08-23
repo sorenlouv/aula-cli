@@ -406,7 +406,9 @@ export async function loadCalendar(
   });
 
   const nameById = new Map(family.children.map((c) => [c.id, c.name]));
-  return events.map((e) => normaliseEvent(e, nameById)).sort((a, b) => a.start.localeCompare(b.start));
+  return events
+    .map((e) => normaliseEvent(e, nameById))
+    .sort((a, b) => a.start.localeCompare(b.start));
 }
 
 function emptyMessages(): Array<ReturnType<typeof normaliseMessage>> {
@@ -519,7 +521,9 @@ export function normaliseAlbum(album: Album) {
     description: album.description?.trim() || null,
     author: album.creator?.name ?? null,
     institution: album.creator?.institutionName ?? null,
-    groups: (album.sharedWithGroups ?? []).map((g) => g.name).filter((n): n is string => Boolean(n)),
+    groups: (album.sharedWithGroups ?? [])
+      .map((g) => g.name)
+      .filter((n): n is string => Boolean(n)),
   };
 }
 

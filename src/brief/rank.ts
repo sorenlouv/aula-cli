@@ -191,13 +191,17 @@ function scoreOf(
   let score = 0;
 
   score += AUDIENCE_SCORE[audience];
-  reasons.push(`audience:${audience} ${AUDIENCE_SCORE[audience] >= 0 ? '+' : ''}${AUDIENCE_SCORE[audience]}`);
+  reasons.push(
+    `audience:${audience} ${AUDIENCE_SCORE[audience] >= 0 ? '+' : ''}${AUDIENCE_SCORE[audience]}`,
+  );
 
   score += KIND_SCORE[signal.kind];
   reasons.push(`kind:${signal.kind} +${KIND_SCORE[signal.kind]}`);
 
   score += URGENCY_SCORE[signal.urgency];
-  reasons.push(`urgency:${signal.urgency} ${URGENCY_SCORE[signal.urgency] >= 0 ? '+' : ''}${URGENCY_SCORE[signal.urgency]}`);
+  reasons.push(
+    `urgency:${signal.urgency} ${URGENCY_SCORE[signal.urgency] >= 0 ? '+' : ''}${URGENCY_SCORE[signal.urgency]}`,
+  );
 
   if (important) {
     score += 12;
@@ -252,7 +256,11 @@ function tierOf(
   // broad message earns a card only when it asks something of us about our own
   // child: photo-day sign-up does, a parenting course on offer does not — and
   // a municipal offer with a genuine deadline is still an offer.
-  if ((audience === 'institution' || audience === 'municipal') && !signal.concernsChild && !important) {
+  if (
+    (audience === 'institution' || audience === 'municipal') &&
+    !signal.concernsChild &&
+    !important
+  ) {
     return 'context';
   }
 
@@ -343,8 +351,7 @@ function interchangeable(a: RankedSignal, b: RankedSignal): boolean {
   // dentist visit and a school meeting are the same thing.
   if (a.source.kind === 'personal' || b.source.kind === 'personal') return false;
   return (
-    (a.tier === 'hidden') === (b.tier === 'hidden') &&
-    a.source.important === b.source.important
+    (a.tier === 'hidden') === (b.tier === 'hidden') && a.source.important === b.source.important
   );
 }
 
@@ -370,24 +377,27 @@ export function rank(
     if (!source) {
       // A signal citing a source that is not in the input is a bug or a
       // fabrication; either way it must not reach the page.
-      degraded.push(`Udeladt: signal "${signal.title}" peger på en ukendt kilde (${signal.sourceKey}).`);
+      degraded.push(
+        `Udeladt: signal "${signal.title}" peger på en ukendt kilde (${signal.sourceKey}).`,
+      );
       continue;
     }
-    const effective: Signal = source.kind === 'personal'
-      ? {
-          ...signal,
-          // The model ranks the appointment; the connector remains the source
-          // of its factual shape. This prevents an appointment titled
-          // "deadline" from becoming an action or being assigned to a child.
-          kind: 'event',
-          title: source.title,
-          child: null,
-          dueAt: isoOf(source.at),
-          quote: null,
-          why: null,
-          concernsChild: false,
-        }
-      : signal;
+    const effective: Signal =
+      source.kind === 'personal'
+        ? {
+            ...signal,
+            // The model ranks the appointment; the connector remains the source
+            // of its factual shape. This prevents an appointment titled
+            // "deadline" from becoming an action or being assigned to a child.
+            kind: 'event',
+            title: source.title,
+            child: null,
+            dueAt: isoOf(source.at),
+            quote: null,
+            why: null,
+            concernsChild: false,
+          }
+        : signal;
     const verdict = verdictOf(source.key);
     const { score, reasons } = scoreOf(effective, source.audience, source.important, verdict);
     const tier = tierOf(effective, source.audience, source.important, verdict);
@@ -408,9 +418,7 @@ export function rank(
   // The rules layer is a floor, not a peer: where the model has spoken about a
   // source, its wording and reasoning are better, so the rule hits for that
   // source are dropped rather than shown alongside as near-duplicates.
-  const modelSources = new Set(
-    scored.filter((s) => s.origin === 'model').map((s) => s.sourceKey),
-  );
+  const modelSources = new Set(scored.filter((s) => s.origin === 'model').map((s) => s.sourceKey));
   const preferred = scored.filter((s) => s.origin === 'model' || !modelSources.has(s.sourceKey));
 
   // Then within a source, but only for hits that are actually the same thing.
@@ -446,7 +454,10 @@ export function rank(
       candidates.push(signal);
       continue;
     }
-    if (!standsFor.mergedSourceKeys.includes(signal.sourceKey) && signal.sourceKey !== standsFor.sourceKey) {
+    if (
+      !standsFor.mergedSourceKeys.includes(signal.sourceKey) &&
+      signal.sourceKey !== standsFor.sourceKey
+    ) {
       standsFor.mergedSourceKeys.push(signal.sourceKey);
     }
   }
@@ -574,7 +585,9 @@ export function rank(
 
 /** Human-readable score breakdown for `--explain`. */
 export function explain(brief: RankedBrief): string {
-  const lines = [`${brief.signals.length} signal(er), ${brief.unusedSources.length} ubrugt kilde(r)`];
+  const lines = [
+    `${brief.signals.length} signal(er), ${brief.unusedSources.length} ubrugt kilde(r)`,
+  ];
   for (const signal of brief.signals) {
     lines.push(
       `\n[${signal.tier}] ${signal.score}  ${signal.title}` +

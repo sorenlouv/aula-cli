@@ -177,10 +177,22 @@ test('digest --child narrows every read, not just the ones that were wired up', 
   const digest = json(box.run('digest', '--child', 'Alma', '--no-cache'));
 
   assert.deepEqual(digest.scope, { child: 'Alma', children: ['Alma Eksempelsen'] });
-  assert.deepEqual(digest.family.children.map((c: any) => c.name), ['Alma Eksempelsen']);
-  assert.deepEqual(digest.threads.map((t: any) => t.subject), ['Lejrskole for 2E']);
-  assert.deepEqual(digest.calendar.map((e: any) => e.title), ['Lejrskole']);
-  assert.deepEqual(digest.presence.map((p: any) => p.child), ['Alma Eksempelsen']);
+  assert.deepEqual(
+    digest.family.children.map((c: any) => c.name),
+    ['Alma Eksempelsen'],
+  );
+  assert.deepEqual(
+    digest.threads.map((t: any) => t.subject),
+    ['Lejrskole for 2E'],
+  );
+  assert.deepEqual(
+    digest.calendar.map((e: any) => e.title),
+    ['Lejrskole'],
+  );
+  assert.deepEqual(
+    digest.presence.map((p: any) => p.child),
+    ['Alma Eksempelsen'],
+  );
   assert.deepEqual(
     digest.weeklyPlans.flatMap((p: any) => p.items.map((i: any) => i.childName)),
     ['Alma Eksempelsen'],
@@ -199,7 +211,10 @@ test('digest without --child still covers the whole family', () => {
   assert.equal(digest.scope.child, null);
   assert.equal(digest.family.children.length, 2);
   assert.equal(digest.threads.length, 3);
-  assert.deepEqual(digest.calendar.map((e: any) => e.title), ['Lejrskole', 'Bedsteforældredag']);
+  assert.deepEqual(
+    digest.calendar.map((e: any) => e.title),
+    ['Lejrskole', 'Bedsteforældredag'],
+  );
 });
 
 test('digest --child reaches the standalone commands too', () => {
@@ -450,16 +465,26 @@ test('galleries carries the metadata that makes an album worth reading', () => {
 test('galleries honours --child, --since and --limit', () => {
   const box = sandbox();
   const viggo = json(box.run('galleries', '--child', 'Viggo', '--no-cache'));
-  assert.deepEqual(viggo.map((a: any) => a.title), ['Sommerfest i Myretuen']);
+  assert.deepEqual(
+    viggo.map((a: any) => a.title),
+    ['Sommerfest i Myretuen'],
+  );
 
   // The Myretuen album is 9 days old, so a 7-day window must exclude it —
   // even though it sits above a newer one in the order Aula returns.
   const recent = json(box.run('galleries', '--since', '7d', '--no-cache'));
-  assert.deepEqual(recent.map((a: any) => a.title), ['Tur til stranden', 'Fastelavn i 2E']);
+  assert.deepEqual(
+    recent.map((a: any) => a.title),
+    ['Tur til stranden', 'Fastelavn i 2E'],
+  );
 
   const one = json(box.run('galleries', '--limit', '1', '--no-cache'));
   assert.equal(one.length, 1);
-  assert.equal(one[0].title, 'Tur til stranden', '--limit keeps the newest, not the first on the wire');
+  assert.equal(
+    one[0].title,
+    'Tur til stranden',
+    '--limit keeps the newest, not the first on the wire',
+  );
 });
 
 test('galleries --text renders titles, dates and photographers', () => {
@@ -587,7 +612,10 @@ test('publish creates the artifact, saves its url to config.json, and records th
   assert.equal(created.code, 0, created.stderr);
   assert.equal(created.stdout.trim(), ARTIFACT);
   assert.match(created.stderr, /new artifact/);
-  assert.equal(JSON.parse(readFileSync(join(box.dir, 'config.json'), 'utf8')).artifactUrl, ARTIFACT);
+  assert.equal(
+    JSON.parse(readFileSync(join(box.dir, 'config.json'), 'utf8')).artifactUrl,
+    ARTIFACT,
+  );
   const state = JSON.parse(readFileSync(join(box.dir, 'brief', 'state.json'), 'utf8'));
   assert.equal(state.lastDeploy.url, ARTIFACT);
 
@@ -599,7 +627,10 @@ test('publish creates the artifact, saves its url to config.json, and records th
   const off = box.run('publish', '--off');
   assert.equal(off.code, 0);
   assert.match(off.stdout, /off/);
-  assert.equal(JSON.parse(readFileSync(join(box.dir, 'config.json'), 'utf8')).artifactUrl, undefined);
+  assert.equal(
+    JSON.parse(readFileSync(join(box.dir, 'config.json'), 'utf8')).artifactUrl,
+    undefined,
+  );
 });
 
 test('publish takes no arguments — there is one way to get a url, and it is publish itself', () => {
@@ -685,7 +716,10 @@ test('a thread whose messages cannot be fetched is named on the page, not silent
   // rule 3 checks each `warn` note reached the HTML, and a miss would land in
   // `notes` as a rejected layout rather than failing the run.
   const notes: string[] = JSON.parse(result.stdout).notes;
-  assert.deepEqual(notes.filter((n) => /datastatus/.test(n)), []);
+  assert.deepEqual(
+    notes.filter((n) => /datastatus/.test(n)),
+    [],
+  );
 });
 
 test('a total messaging outage is one line naming a few, not one warning per thread', () => {
@@ -717,11 +751,17 @@ test('remember, preferences, forget — the curation round trip', () => {
   const remembered = box.run('remember', 'beskeder fra John (Hjaltes far) er altid vigtige');
   assert.equal(remembered.code, 0, remembered.stderr);
   assert.match(remembered.stdout, /Remembered:/);
-  assert.match(readFileSync(path, 'utf8'), /^- beskeder fra John \(Hjaltes far\) er altid vigtige$/m);
+  assert.match(
+    readFileSync(path, 'utf8'),
+    /^- beskeder fra John \(Hjaltes far\) er altid vigtige$/m,
+  );
   assert.match(box.run('preferences').stdout, /6\. beskeder fra John/);
 
   // Claude will say it twice sooner or later; twice is still once.
-  assert.match(box.run('remember', 'Beskeder fra John (Hjaltes far) er ALTID vigtige').stdout, /Already remembered/);
+  assert.match(
+    box.run('remember', 'Beskeder fra John (Hjaltes far) er ALTID vigtige').stdout,
+    /Already remembered/,
+  );
 
   // The point of the exercise: a shipped opinion the family disagrees with
   // can be dropped, and stays dropped.
@@ -804,7 +844,11 @@ test('preferences reset puts the shipped list back and names the casualties', ()
   assert.match(reset.stdout, /beskeder fra John \(Hjaltes far\)/);
 
   const listed = box.run('preferences').stdout;
-  assert.match(listed, /5\. Fællesbeskeder til alle forældre i kommunen/, 'the dropped default is back');
+  assert.match(
+    listed,
+    /5\. Fællesbeskeder til alle forældre i kommunen/,
+    'the dropped default is back',
+  );
   assert.ok(!/John/.test(listed), "the user's own line is gone");
 
   const bad = box.run('preferences', 'nulstil');

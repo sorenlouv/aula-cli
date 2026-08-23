@@ -30,7 +30,12 @@ const CACHE_DIR = join(BRIEF_DIR, 'cache');
  */
 const CONTRACT_VERSION = 3;
 const KINDS: ReadonlySet<string> = new Set<SignalKind>([
-  'action', 'deadline', 'event', 'bring', 'info', 'social',
+  'action',
+  'deadline',
+  'event',
+  'bring',
+  'info',
+  'social',
 ]);
 const URGENCIES: ReadonlySet<string> = new Set<Urgency>(['now', 'week', 'later', 'fyi']);
 const RELEVANCES: ReadonlySet<string> = new Set<Relevance>(['hide', 'low', 'normal', 'high']);
@@ -134,7 +139,10 @@ export async function spawnClaude(
 }
 
 /** Structural on purpose: Bun's reader type and TypeScript's lib disagree on the details. */
-async function drain<T>(reader: { read(): Promise<{ done: boolean; value?: T }> }, into: T[]): Promise<void> {
+async function drain<T>(
+  reader: { read(): Promise<{ done: boolean; value?: T }> },
+  into: T[],
+): Promise<void> {
   try {
     for (;;) {
       const { done, value } = await reader.read();
@@ -219,7 +227,16 @@ export async function runClaude(
   const timeoutMs = opts.timeoutMs ?? 240_000;
   for (let attempt = 1; attempt <= 2; attempt++) {
     const run = await spawnClaude(
-      ['-p', instructions, '--tools', '', '--strict-mcp-config', '--output-format', 'json', ...modelEffortArgs()],
+      [
+        '-p',
+        instructions,
+        '--tools',
+        '',
+        '--strict-mcp-config',
+        '--output-format',
+        'json',
+        ...modelEffortArgs(),
+      ],
       { stdin, timeoutMs, ...(opts.graceMs !== undefined ? { graceMs: opts.graceMs } : {}) },
     );
     if (run.timedOut) continue;
@@ -316,9 +333,7 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
 
     const quote = typeof row.quote === 'string' ? row.quote.trim() : '';
     if (quote && !containsQuote(source.text, quote)) {
-      problems.push(
-        `signals[${index}] ("${title}"): quote findes ikke ordret i ${sourceKey}`,
-      );
+      problems.push(`signals[${index}] ("${title}"): quote findes ikke ordret i ${sourceKey}`);
       continue;
     }
 
@@ -341,7 +356,10 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
     }
 
     const why = typeof row.why === 'string' && row.why.trim() ? row.why.trim() : null;
-    const inventedDates = unsupportedDateClaims(`${title} ${why ?? ''}`, dates, { dueAt, sourceKey });
+    const inventedDates = unsupportedDateClaims(`${title} ${why ?? ''}`, dates, {
+      dueAt,
+      sourceKey,
+    });
     if (inventedDates.length > 0) {
       problems.push(
         `signals[${index}] ("${title}"): dato uden kilde: ${inventedDates.map((d) => `"${d}"`).join(', ')}`,
@@ -372,7 +390,9 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
     if (firstNames.has(name) && typeof value === 'string' && value.trim()) {
       const invented = unsupportedDateClaims(value, dates);
       if (invented.length > 0) {
-        problems.push(`childSummaries.${name}: dato uden kilde: ${invented.map((d) => `"${d}"`).join(', ')}`);
+        problems.push(
+          `childSummaries.${name}: dato uden kilde: ${invented.map((d) => `"${d}"`).join(', ')}`,
+        );
         continue;
       }
       summaries[name] = value.trim();
@@ -407,7 +427,8 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
     conversationSummaries[key] = value.trim();
   }
 
-  let topline = typeof root.topline === 'string' && root.topline.trim() ? root.topline.trim() : null;
+  let topline =
+    typeof root.topline === 'string' && root.topline.trim() ? root.topline.trim() : null;
   if (topline) {
     const invented = unsupportedDateClaims(topline, dates);
     if (invented.length > 0) {
