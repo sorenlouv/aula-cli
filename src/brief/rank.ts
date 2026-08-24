@@ -280,8 +280,14 @@ export function rank(
     const date = source.at?.slice(0, 10) || null;
     // Production collection uses this same boundary. Keep the guard here so a
     // stale cache or hand-built input still cannot put a later appointment on
-    // the page.
-    if (date && date > overviewThrough) continue;
+    // the page — and name it explicitly so that defensive path cannot look like
+    // a genuinely empty calendar.
+    if (date && date > overviewThrough) {
+      degraded.push(
+        `Kalenderaftalen "${source.title}" den ${date} ligger efter oversigtens slutdato ${overviewThrough} og blev ikke vist.`,
+      );
+      continue;
+    }
     const event: RankedPersonalEvent = {
       entryType: 'personal',
       id: `personal:${source.key}`,

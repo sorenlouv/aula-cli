@@ -261,7 +261,7 @@ describe('rank: personal appointments in the shared timeline', () => {
     expect(brief.folded).toHaveLength(1);
   });
 
-  test('an appointment after next week cannot enter the timeline', () => {
+  test('an appointment after next week is excluded explicitly, never silently', () => {
     const later = item({
       ...DENTIST,
       key: 'cal:family:later',
@@ -283,6 +283,9 @@ describe('rank: personal appointments in the shared timeline', () => {
 
     expect(brief.timeline).toEqual([]);
     expect(brief.personalEvents).toEqual([]);
+    expect(brief.degraded).toEqual([
+      'Kalenderaftalen "Tandlæge" den 2026-08-24 ligger efter oversigtens slutdato 2026-08-23 og blev ikke vist.',
+    ]);
   });
 });
 

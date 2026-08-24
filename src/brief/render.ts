@@ -314,7 +314,7 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
   const timeline = groups
     .map(
       (group) => `<div class="timeline-group" data-timeline-group>
-        <h2>${escapeHtml(group.label)}</h2>
+        <h3 class="timeline-heading">${escapeHtml(group.label)}</h3>
         ${group.entries
           .map((entry) => (entry.entryType === 'card' ? card(entry) : personal(entry)))
           .join('')}
@@ -365,7 +365,7 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
   ${hasHealthWarning ? `<section><h2>Datastatus</h2>${datastatus}</section>` : ''}
 
   <section data-section="cards" aria-label="Kommende">
-    ${timeline}
+    <div class="timeline">${timeline}</div>
     <div class="panel" data-empty${brief.timeline.length ? ' hidden' : ''}>Ingen punkter i dag. Det, der blev læst, står nederst under Øvrigt fra Aula.</div>
     <button class="done-toggle" type="button" aria-expanded="false" data-done-toggle hidden></button>
   </section>

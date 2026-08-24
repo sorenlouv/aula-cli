@@ -68,9 +68,9 @@ h1{margin:0;font-size:34px;letter-spacing:-.02em;font-weight:650}
 .topline{font-size:20px;line-height:1.5;letter-spacing:-.01em;margin:0 0 34px;padding:20px 22px;
   background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
 section{margin-bottom:34px}
-h2{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);
+h2,.timeline-heading{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);
   font-weight:650;margin:0 0 12px;display:flex;align-items:center;gap:10px}
-h2::after{content:"";flex:1;height:1px;background:var(--line)}
+h2::after,.timeline-heading::after{content:"";flex:1;height:1px;background:var(--line)}
 .count{color:var(--ink-3);font-weight:500;letter-spacing:0}
 .card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:14px;
   padding:18px 58px 16px 20px;
@@ -146,7 +146,7 @@ section.reveal .card.is-done .calendar-title{text-decoration:line-through}
 /* The timeline is led by dates rather than one generic heading. Each wrapper
    also lets the done-state script hide an empty heading with its cards. */
 .timeline-group{margin-bottom:22px}
-.timeline-group:last-of-type{margin-bottom:0}
+.timeline-group:last-child{margin-bottom:0}
 
 /* The empty-state line under two visible cards reads as a contradiction,
    however true the count is. While they are on show, the toggle says it. */

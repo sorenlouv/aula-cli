@@ -163,8 +163,8 @@ describe('a card', () => {
     const today = card({ ...SIGNUP, id: 'a', date: TODAY });
     const tomorrow = card({ ...MEETING, id: 'b', date: '2026-08-18' });
     const { html } = page([today, tomorrow]);
-    expect(html).toContain('<h2>I dag (d. 17. august)</h2>');
-    expect(html).toContain('<h2>I morgen (d. 18. august)</h2>');
+    expect(html).toContain('<h3 class="timeline-heading">I dag (d. 17. august)</h3>');
+    expect(html).toContain('<h3 class="timeline-heading">I morgen (d. 18. august)</h3>');
     expect(html).toContain('<span class="chip now">I dag</span>');
     expect(html).toContain('<span class="chip soon">I morgen</span>');
   });
@@ -280,17 +280,20 @@ describe('the list', () => {
 
   test('next week is one group and there is no visible Kommende heading', () => {
     const html = page([SIGNUP, MEETING]).html;
-    expect(html.match(/<h2>Næste uge<\/h2>/g)).toHaveLength(1);
+    expect(html.match(/<h3 class="timeline-heading">Næste uge<\/h3>/g)).toHaveLength(1);
     expect(html).not.toContain('<h2>Kommende');
     expect(html).toContain('<section data-section="cards" aria-label="Kommende">');
+    expect(html).toContain('<div class="timeline"><div class="timeline-group"');
+    expect(BRIEF_CSS).toContain('.timeline-group:last-child{margin-bottom:0}');
+    expect(BRIEF_CSS).not.toContain('.timeline-group:last-of-type');
   });
 
   test('remaining days this week use weekday headings', () => {
     const wednesday = card({ ...MEETING, id: 'wednesday', date: '2026-08-19' });
     const html = page([wednesday]).html;
 
-    expect(html).toContain('<h2>Onsdag (d. 19. august)</h2>');
-    expect(html).not.toContain('<h2>Næste uge</h2>');
+    expect(html).toContain('<h3 class="timeline-heading">Onsdag (d. 19. august)</h3>');
+    expect(html).not.toContain('<h3 class="timeline-heading">Næste uge</h3>');
   });
 
   test('tomorrow keeps its own heading when it is the first day of next week', () => {
@@ -306,8 +309,8 @@ describe('the list', () => {
     ]);
     const html = renderPage(brief);
 
-    expect(html).toContain('<h2>I morgen (d. 31. august)</h2>');
-    expect(html).toContain('<h2>Næste uge</h2>');
+    expect(html).toContain('<h3 class="timeline-heading">I morgen (d. 31. august)</h3>');
+    expect(html).toContain('<h3 class="timeline-heading">Næste uge</h3>');
   });
 
   test('the empty state follows the cards without a generic count', () => {
@@ -413,6 +416,33 @@ describe('the family’s calendar', () => {
     ]);
     expect(html).not.toContain('calendar-title">Tandlæge');
     expect(html).toContain('<summary>1 skjult</summary>');
+    expect(validatePage(html, brief)).toEqual([]);
+  });
+
+  test('a defensive out-of-window appointment leaves a visible degraded note', () => {
+    const later = {
+      ...DENTIST,
+      key: 'cal:family:later',
+      at: '2026-09-07T13:30:00',
+      endsAt: '2026-09-07T14:15:00',
+    };
+    const input = briefInput({ today: '2026-08-24', items: [later] });
+    const brief = rankedBrief(input, [], {
+      personalEvents: [
+        {
+          sourceKey: later.key,
+          relevant: true,
+          summary: 'En senere tandlægetid.',
+          reason: 'Aftalen vedrører et barn.',
+        },
+      ],
+    });
+    const html = renderPage(brief);
+
+    expect(html).not.toContain(`data-signal-id="personal:${later.key}"`);
+    expect(html).toContain(
+      'Kalenderaftalen &quot;Tandlæge&quot; den 2026-09-07 ligger efter oversigtens slutdato 2026-09-06 og blev ikke vist.',
+    );
     expect(validatePage(html, brief)).toEqual([]);
   });
 });

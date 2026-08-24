@@ -37,7 +37,6 @@ import {
   CalendarNotConnectedError,
   listCalendars,
   loadPersonalEvents,
-  PERSONAL_CALENDAR_DAYS,
 } from './calendar/index.ts';
 import {
   calendarChoices,
@@ -68,6 +67,7 @@ import {
   withFullMessages,
 } from './digest.ts';
 import { BRIEF_TITLE, runBrief } from './brief/index.ts';
+import { overviewWindow } from './brief/dates.ts';
 import { deployArtifact, readTarget, setTarget } from './brief/deploy.ts';
 import { explain } from './brief/rank.ts';
 import { BRIEF_DIR, loadState, recordDeploy, saveState, todayIsComplete } from './brief/state.ts';
@@ -984,7 +984,9 @@ async function setCalendars(refs: string[]): Promise<number> {
   // chain works for a calendar nobody has seen answer yet; re-reading one that
   // was already being read every morning proves nothing and costs a round trip.
   if (started.length === 0) return 0;
-  const load = await loadPersonalEvents(started, calendarWindow(new Date()));
+  const receiptNow = new Date();
+  const { days: receiptDays } = overviewWindow(localIsoDate(receiptNow));
+  const load = await loadPersonalEvents(started, calendarWindow(receiptNow, receiptDays));
   for (const warning of load.warnings) console.error(warning);
   if (load.warnings.length > 0) return 1;
 
@@ -994,7 +996,7 @@ async function setCalendars(refs: string[]): Promise<number> {
     [
       ...started.map((c) => {
         const count = load.events.filter((event) => event.calendarId === c.id).length;
-        return `  ${c.name}: ${count} appointment(s) in the next ${PERSONAL_CALENDAR_DAYS} days`;
+        return `  ${c.name}: ${count} appointment(s) in the next ${receiptDays} days`;
       }),
       ...load.events
         .slice(0, 3)

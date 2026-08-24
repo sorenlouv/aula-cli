@@ -154,4 +154,61 @@ describe('the page behaviour', () => {
     expect(group.hidden).toBe(true);
     expect(listeners.has('click')).toBe(true);
   });
+
+  test('a live personal card keeps a mixed date group visible', () => {
+    const classSet = () => {
+      const names = new Set<string>();
+      return {
+        names,
+        classList: {
+          contains: (name: string) => names.has(name),
+          toggle: (name: string, force?: boolean) => {
+            const enabled = force ?? !names.has(name);
+            if (enabled) names.add(name);
+            else names.delete(name);
+            return enabled;
+          },
+        },
+      };
+    };
+    const aula = classSet();
+    const personal = classSet();
+    const card = (classes: ReturnType<typeof classSet>, keys: string) => ({
+      classList: classes.classList,
+      getAttribute: () => keys,
+      querySelector: () => null,
+    });
+    const aulaCard = card(aula, 'post:1|2026-08-17');
+    const personalCard = card(personal, 'cal:family:1|2026-08-17');
+    const cards = [aulaCard, personalCard];
+    const group = {
+      hidden: false,
+      querySelectorAll: (selector: string) => (selector === '[data-done-keys]' ? cards : []),
+    };
+    const section = {
+      classList: {
+        contains: () => false,
+        remove: () => undefined,
+        toggle: () => undefined,
+      },
+      querySelectorAll: (selector: string) =>
+        selector === '[data-done-keys]'
+          ? cards
+          : selector === '[data-timeline-group]'
+            ? [group]
+            : [],
+      querySelector: () => null,
+    };
+    const document = { querySelectorAll: () => [section] };
+    const localStorage = {
+      getItem: () => JSON.stringify({ 'post:1|2026-08-17': new Date().toISOString() }),
+      setItem: () => undefined,
+    };
+
+    new Function('document', 'localStorage', DONE_SCRIPT)(document, localStorage);
+
+    expect(aula.names.has('is-done')).toBe(true);
+    expect(personal.names.has('is-done')).toBe(false);
+    expect(group.hidden).toBe(false);
+  });
 });

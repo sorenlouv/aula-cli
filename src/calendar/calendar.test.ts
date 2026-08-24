@@ -6,6 +6,8 @@ import { describe, expect, test } from 'bun:test';
 process.env.TZ = 'Europe/Copenhagen';
 
 import { toPersonalSourceItem } from '../brief/collect.ts';
+import { overviewWindow } from '../brief/dates.ts';
+import { localIsoDate } from '../integrations/types.ts';
 import { parseCalendarsPayload, parseEventsPayload, parseStream } from './connector.ts';
 import { calendarWindow, toPersonalEvent } from './index.ts';
 
@@ -113,6 +115,16 @@ describe('the bounded calendar window', () => {
     // Copenhagen moves forward during this fortnight. Fixed millisecond
     // arithmetic would end at 01:00 and silently spill into a fifteenth day.
     expect(to.getTime() - from.getTime()).toBe(14 * 86_400_000 - 3_600_000);
+  });
+
+  test('uses the overview horizon as the same exclusive calendar end', () => {
+    const now = new Date(2026, 7, 30, 16, 30); // Sunday
+    const overview = overviewWindow(localIsoDate(now));
+    const { from, to } = calendarWindow(now, overview.days);
+
+    expect(localIsoDate(from)).toBe(overview.from);
+    expect(localIsoDate(to)).toBe(overview.to);
+    expect(overview).toMatchObject({ through: '2026-09-06', days: 8 });
   });
 });
 

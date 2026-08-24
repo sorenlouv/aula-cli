@@ -88,14 +88,15 @@ describe('extractionPayload', () => {
 });
 
 describe('overview horizon contract', () => {
-  test('keeps later items out of highlighted model output without hiding their sources', () => {
+  test('lets later items keep a card while excluding them from highlighted prose', () => {
     const schema = extractionSchema(INPUT).properties;
     const instructions = extractionInstructions(INPUT);
 
-    expect(schema.cards.description).toContain('senest 2026-08-23');
+    expect(schema.cards.description).toContain('også efter 2026-08-23');
     expect(schema.childSummaries.description).toContain('til og med 2026-08-23');
     expect(schema.hidden.description).toContain('ikke i sig selv en grund til at skjule');
-    expect(instructions).toContain('fra "today" til og med "overviewThrough"');
+    expect(instructions).toContain('Noget senere må stadig blive et kort');
+    expect(instructions).not.toContain('noget senere må ikke blive et kort');
   });
 });
 
