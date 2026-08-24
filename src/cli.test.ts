@@ -707,6 +707,31 @@ test('new --catch-up runs when the last run was incomplete', () => {
   assert.equal(state.lastRun.day, day);
 });
 
+test('a model outage is prominent on the page and leaves private diagnostics', () => {
+  const box = sandboxWithClaude('error');
+  const result = box.run('new', '--no-deploy', '--no-open');
+  assert.equal(result.code, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.layout, 'fallback');
+  assert.equal(output.complete, false);
+
+  const page = readFileSync(join(box.dir, 'brief', 'latest.html'), 'utf8');
+  const warningAt = page.indexOf('data-block="overview-warning"');
+  assert.ok(warningAt >= 0, 'the model failure must be visible without opening a fold');
+  assert.ok(warningAt < page.indexOf('class="topline"'));
+  assert.ok(warningAt < page.indexOf('data-section="cards"'));
+  assert.match(page, /Modellen kunne ikke prioritere indholdet/);
+  assert.doesNotMatch(page, /Not logged in/, 'technical detail belongs in the developer log');
+  assert.match(page, /<footer>Genereret \d{1,2}\. \S+ \d{4} kl\. \d{2}:\d{2}<\/footer>/);
+
+  const logPath = join(box.dir, 'logs', 'brief.jsonl');
+  const logged = JSON.parse(readFileSync(logPath, 'utf8'));
+  assert.equal(logged.event, 'brief.model.failed');
+  assert.match(logged.details.message, /Not logged in/);
+  assert.match(logged.details.details.attempts[0].stdout, /Not logged in/);
+  assert.ok(output.notes.includes(`Udviklerlog: ${logPath}`));
+});
+
 test('a retryable read failure is rendered and leaves catch-up eligible', () => {
   const box = sandbox({ FAKE_AULA_FAIL: 'presence.getDailyOverview' });
   const result = box.run('new', '--no-llm', '--no-deploy', '--no-open');

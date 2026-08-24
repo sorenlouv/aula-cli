@@ -116,12 +116,14 @@ Sections render only when they have content, and never change order.
    `CARD_CAP`. The name says what it is; *Godt at vide* did not.
 6. **Skjult** — the muted foot naming the sources the model kept off the page
    entirely, so a hide is visible as a count, never silent.
-7. **Datastatus** — what was fetched, **what failed**, step-up state. Only a
-   `health` warning — a failed fetch or a persistent session/configuration
-   problem — hoists it under the topline, because a thin list must not look like
-   a quiet week. Otherwise it folds shut at the very foot with a summary that
-   says so unopened. A `degraded` note (the model's answer was partial) does
-   **not** hoist it: nothing is missing from Aula because of it.
+7. **Datastatus** — what was fetched, **what failed**, step-up state. A `health`
+   warning — a failed fetch or a persistent session/configuration problem —
+   hoists it under the topline, because a thin list must not look like a quiet
+   week. Otherwise it folds shut at the very foot with a summary that says so
+   unopened. A partial model answer remains a folded `degraded` note because
+   validated model cards and rule obligations still cover it. A model transport
+   failure is different: the page is rules-only and shows a prominent warning
+   before the topline instead of resembling a fully prioritised overview.
 
 ### Reading the original
 
@@ -211,6 +213,7 @@ aula new [--days 60] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 | --- | --- |
 | `brief/index.ts` | The pipeline |
 | `brief/collect.ts` | Assemble `BriefInput`; the history window and source health |
+| `brief/log.ts` | Private JSONL diagnostics for failed/incomplete model runs |
 | `brief/types.ts` | The `Card` / `SourceItem` vocabulary |
 | `brief/rules.ts` | Danish date and obligation extractors |
 | `llm/claude.ts` | Shared bounded `claude -p` process transport |
@@ -258,6 +261,13 @@ hit: the source's title, the matched sentence verbatim as the summary. Without a
 model, those are the page. A complete model answer owns the cards. If the model
 answer is partial, its validated survivors remain and exact-deduplicated rule
 cards fill obligations the invalid portion might otherwise have lost.
+
+If the model cannot run, the rules-only overview is still published but carries
+a visible warning that its prioritisation may be incomplete. The terminal keeps
+the technical error, and a private developer record is appended to
+`~/.aula/logs/brief.jsonl` (or `$AULA_DIR/logs/brief.jsonl`) with the stack,
+model settings and bounded Claude stdout/stderr. Prompts and source payloads are
+not logged.
 
 ### The model contract
 

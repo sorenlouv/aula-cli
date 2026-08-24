@@ -219,9 +219,22 @@ export type PageOptions = {
   topline?: string | null;
   summaries?: Record<string, string>;
   isNew?: (key: string) => boolean;
+  /** The run timestamp, kept stable across validation and a second render. */
+  generatedAt?: Date;
+  /** A parent-facing failure that must stay visible without opening a fold. */
+  overviewWarning?: string;
   /** Shown in the header's meta line — "kun reglerne" on a day without a model. */
   note?: string;
 };
+
+function generatedWhen(value: Date): string {
+  if (Number.isNaN(value.getTime())) return 'ukendt tidspunkt';
+  const day = value.getDate();
+  const month = DA_MONTHS[value.getMonth()] ?? '';
+  const year = value.getFullYear();
+  const time = `${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`;
+  return `${day}. ${month} ${year} kl. ${time}`;
+}
 
 /** The one place page markup is written. */
 export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
@@ -332,6 +345,11 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
         .join('')}
     </div>
   </header>
+  ${
+    opts.overviewWarning
+      ? `<section class="overview-warning" data-block="overview-warning"><h2>Vigtigt om denne oversigt</h2><div class="panel"><div class="st bad"><i>⚠</i><span>${escapeHtml(opts.overviewWarning)}</span></div></div></section>`
+      : ''
+  }
   <p class="topline">${escapeHtml(opts.topline ?? fallbackTopline)}</p>
 
   ${hasHealthWarning ? `<section><h2>Datastatus</h2>${datastatus}</section>` : ''}
@@ -392,6 +410,6 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
 
   ${hasHealthWarning ? '' : `<details class="muted"><summary>${escapeHtml(datastatusSummary)}</summary>${datastatus}</details>`}
 
-  <footer>Genereret lokalt af aula-cli · kun modelkald til Claude forlader maskinen</footer>
+  <footer>Genereret ${escapeHtml(generatedWhen(opts.generatedAt ?? new Date()))}</footer>
 </div>`;
 }

@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ClaudeRunError } from '../llm/claude.ts';
 import { briefInput, sourceItem } from '../testing/brief-fixtures.ts';
 import { installFakeClaude } from '../testing/fake-claude.ts';
 import {
@@ -563,7 +564,17 @@ describe('the claude subprocess', () => {
 
     test('an error envelope throws its text, without a retry', async () => {
       const f = fake('error');
-      await expect(runClaude('instr', '{}', { timeoutMs: 5_000 })).rejects.toThrow(/Not logged in/);
+      try {
+        await runClaude('instr', '{}', { timeoutMs: 5_000 });
+        throw new Error('expected runClaude to fail');
+      } catch (err) {
+        expect(err).toBeInstanceOf(ClaudeRunError);
+        expect((err as ClaudeRunError).message).toContain('Not logged in');
+        expect((err as ClaudeRunError).details.attempts).toMatchObject([
+          { code: 1, timedOut: false, stdoutTruncated: false },
+        ]);
+        expect((err as ClaudeRunError).details.attempts[0]?.stdout).toContain('Not logged in');
+      }
       expect(f.calls()).toHaveLength(1);
     });
 

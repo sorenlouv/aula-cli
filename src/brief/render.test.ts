@@ -435,6 +435,28 @@ describe('the rest of the page', () => {
     expect(html).toContain('Modellens svar var ufuldstændigt (1 fejl).');
   });
 
+  test('a model failure is visible above the cards without opening datastatus', () => {
+    const warning =
+      'Modellen kunne ikke prioritere indholdet. Oversigten bruger kun simple regler.';
+    const { html } = page([SIGNUP], { overviewWarning: warning });
+
+    expect(html.indexOf('data-block="overview-warning"')).toBeLessThan(
+      html.indexOf('class="topline"'),
+    );
+    expect(html.indexOf('data-block="overview-warning"')).toBeLessThan(
+      html.indexOf('data-section="cards"'),
+    );
+    expect(html).toContain('<h2>Vigtigt om denne oversigt</h2>');
+    expect(html).toContain(warning);
+  });
+
+  test('the footer says exactly when this overview was generated', () => {
+    const generatedAt = new Date(2026, 7, 24, 14, 5);
+    const { html } = page([SIGNUP], { generatedAt });
+
+    expect(html).toContain('<footer>Genereret 24. august 2026 kl. 14:05</footer>');
+  });
+
   test('the note for a day without a model lands in the header meta', () => {
     expect(page([SIGNUP], { note: 'kun reglerne' }).html).toContain('uge 2026-W33 · kun reglerne');
   });
