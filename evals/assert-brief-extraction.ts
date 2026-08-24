@@ -1,4 +1,5 @@
 import type { ExtractResult } from '../src/brief/llm.ts';
+import { rank } from '../src/brief/rank.ts';
 import type { BriefExtractionEvalCase, EvalFailure, ExpectedCard } from './types.ts';
 
 function includesInsensitive(value: string, needle: string): boolean {
@@ -69,6 +70,12 @@ export function assertBriefExtraction(
   result: ExtractResult,
 ): EvalFailure[] {
   const failures: EvalFailure[] = [];
+  const ranked = rank(evalCase.input, {
+    model: result.cards,
+    personalEvents: result.personalEvents,
+    rules: [],
+    hidden: result.hidden,
+  });
 
   if (result.problems.length > 0) {
     failures.push({
@@ -106,16 +113,47 @@ export function assertBriefExtraction(
       });
       continue;
     }
+    const relatedCards = result.cards.filter((candidate) =>
+      matchesCardIdentity(candidate, expected),
+    );
     if (expected.needsAction !== undefined && card.needsAction !== expected.needsAction) {
       failures.push({
         assertion: `${expected.sourceKeys.join(', ')} has needsAction=${expected.needsAction}`,
         actual: card.needsAction,
       });
     }
-    if (expected.date !== undefined && card.date !== expected.date) {
+    const matchedCards = expected.childrenCovered ? relatedCards : [card];
+    if (matchedCards.some((candidate) => candidate.actionableNow !== expected.actionableNow)) {
+      failures.push({
+        assertion: `${expected.sourceKeys.join(', ')} has actionableNow=${expected.actionableNow}`,
+        actual: matchedCards.map((candidate) => candidate.actionableNow),
+      });
+    }
+    const actualPlacement = matchedCards.map((candidate) => {
+      const visible = ranked.cards.find((rankedCard) => rankedCard.id === candidate.id);
+      if (visible) return { id: candidate.id, placement: visible.placement, folded: false };
+      const folded = ranked.folded.find((rankedCard) => rankedCard.id === candidate.id);
+      return folded
+        ? { id: candidate.id, placement: folded.placement, folded: true }
+        : { id: candidate.id, placement: null, folded: false };
+    });
+    if (
+      actualPlacement.some(
+        (candidate) => candidate.placement !== expected.placement || candidate.folded,
+      )
+    ) {
+      failures.push({
+        assertion: `${expected.sourceKeys.join(', ')} is visible in placement=${expected.placement}`,
+        actual: actualPlacement,
+      });
+    }
+    if (
+      expected.date !== undefined &&
+      matchedCards.some((candidate) => candidate.date !== expected.date)
+    ) {
       failures.push({
         assertion: `${expected.sourceKeys.join(', ')} has date=${String(expected.date)}`,
-        actual: card.date,
+        actual: matchedCards.map((candidate) => candidate.date),
       });
     }
     if (expected.recurring !== undefined && card.recurring !== expected.recurring) {
@@ -129,6 +167,15 @@ export function assertBriefExtraction(
         assertion: `${expected.sourceKeys.join(', ')} concerns ${expected.children.join(', ')}`,
         actual: card.children,
       });
+    }
+    if (expected.childrenCovered) {
+      const covered = [...new Set(relatedCards.flatMap((candidate) => candidate.children))];
+      if (!sameStrings(covered, expected.childrenCovered)) {
+        failures.push({
+          assertion: `${expected.sourceKeys.join(', ')} covers ${expected.childrenCovered.join(', ')}`,
+          actual: covered,
+        });
+      }
     }
     if (expected.maxRank !== undefined && cardIndex + 1 > expected.maxRank) {
       failures.push({

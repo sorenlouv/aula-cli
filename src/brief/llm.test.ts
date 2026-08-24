@@ -89,14 +89,17 @@ describe('extractionPayload', () => {
 });
 
 describe('overview horizon contract', () => {
-  test('lets later items keep a card while excluding them from highlighted prose', () => {
+  test('places later items under Senere while allowing a task that can be done now to lead', () => {
     const schema = extractionSchema(INPUT).properties;
     const instructions = extractionInstructions(INPUT);
 
     expect(schema.cards.description).toContain('også efter 2026-08-23');
     expect(schema.childSummaries.description).toContain('til og med 2026-08-23');
+    expect(schema.topline.description).toContain('actionableNow=true');
     expect(schema.hidden.description).toContain('ikke i sig selv en grund til at skjule');
     expect(instructions).toContain('Noget senere må stadig blive et kort');
+    expect(instructions).toContain('siden placerer det under "Senere"');
+    expect(instructions).toContain('står øverst under "Skal gøres"');
     expect(instructions).not.toContain('noget senere må ikke blive et kort');
   });
 });
@@ -179,6 +182,16 @@ describe('independent Aula actions', () => {
     expect(instructions).toContain('aflevere biblioteksbøger');
     expect(instructions).toContain('prioriteres over almindelig orientering');
   });
+
+  test('the structured contract distinguishes tasks that can be completed now', () => {
+    const cardProperties = extractionSchema(INPUT).properties.cards.items.properties;
+
+    expect(cardProperties.actionableNow.description).toContain('tilmelde, svare, betale');
+    expect(cardProperties.actionableNow.description).toContain('reserver/sæt kryds');
+    expect(cardProperties.actionableNow.description).toContain(
+      'actionableNow=true kræver needsAction=true',
+    );
+  });
 });
 
 describe('model cost controls', () => {
@@ -238,6 +251,7 @@ describe('validateExtraction', () => {
     date: '2026-08-17',
     recurring: true,
     needsAction: true,
+    actionableNow: false,
     reason: 'Noget Viggo skal have med; rettet mod hans egen stue.',
     sourceKeys: ['post:1'],
   };
@@ -268,12 +282,25 @@ describe('validateExtraction', () => {
       date: '2026-08-17',
       recurring: true,
       needsAction: true,
+      actionableNow: false,
       reason: good.reason,
       sourceKeys: ['post:1'],
       origin: 'model',
     });
     expect(result.topline).toBe('Løbetøj mandag.');
     expect(result.childSummaries).toEqual({ Viggo: 'Løbedag mandag.' });
+  });
+
+  test('rejects actionableNow when the card says no action is required', () => {
+    const result = validateExtraction(
+      input,
+      answer({ cards: [{ ...good, needsAction: false, actionableNow: true }] }),
+    );
+
+    expect(result.cards).toEqual([]);
+    expect(result.problems).toContain(
+      'cards[0] ("Løbetøj med til Viggo på mandag"): actionableNow=true kræver needsAction=true',
+    );
   });
 
   test('normalises enum values whose capitalization changed', () => {
@@ -399,6 +426,20 @@ describe('validateExtraction', () => {
     expect(result.problems.filter((p) => p.includes('dato uden belæg'))).toHaveLength(2);
     // The cards were fine; only the two lines were dropped.
     expect(result.cards).toHaveLength(1);
+  });
+
+  test('overview prose may name the system-provided final Sunday', () => {
+    const result = validateExtraction(
+      input,
+      answer({
+        topline: 'Oversigten går til søndag den 23. august.',
+        childSummaries: { Viggo: 'Ingen flere punkter frem til søndag den 23. august.' },
+      }),
+    );
+
+    expect(result.topline).toBe('Oversigten går til søndag den 23. august.');
+    expect(result.childSummaries.Viggo).toBe('Ingen flere punkter frem til søndag den 23. august.');
+    expect(result.problems).toEqual([]);
   });
 
   test('every personal appointment gets one explicit, grounded verdict', () => {
@@ -629,6 +670,7 @@ describe('the claude subprocess', () => {
       date: null,
       recurring: false,
       needsAction: false,
+      actionableNow: false,
       reason: 'Relevant.',
       sourceKeys: [`post:${index}`],
     });

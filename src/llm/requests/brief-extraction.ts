@@ -101,11 +101,11 @@ export function extractionSchema(input: BriefInput) {
     properties: {
       topline: {
         type: 'string',
-        description: `Én sætning med det vigtigste først — det, forælderen skal gøre eller vide fra i dag til og med ${through}. Nævn ikke noget senere.`,
+        description: `Én sætning med det vigtigste først — det, forælderen skal gøre eller vide fra i dag til og med ${through}, plus en konkret opgave med actionableNow=true selv om dens arrangement ligger senere. Nævn ellers ikke noget senere.`,
       },
       cards: {
         type: 'array',
-        description: `Kortene i prioriteret rækkefølge, vigtigst først. 5–10 en normal morgen. Hvert kort er én selvstændig ting, forælderen skal vide eller gøre, også efter ${through}; siden folder selv senere kort og dem over visningsgrænsen sammen nederst. Handlinger, der kan klares hver for sig, er separate kort.`,
+        description: `Kortene i prioriteret rækkefølge, vigtigst først. 5–10 en normal morgen. Hvert kort er én selvstændig ting, forælderen skal vide eller gøre, også efter ${through}; siden placerer selv senere kort under "Senere" og folder kun overskud over sektionsgrænserne sammen nederst. Handlinger, der kan klares hver for sig, er separate kort.`,
         items: {
           type: 'object',
           properties: {
@@ -141,6 +141,11 @@ export function extractionSchema(input: BriefInput) {
               description:
                 'True når forælderen skal gøre noget: medbringe, tilmelde, svare, betale, møde op anderledes. False når det er til orientering.',
             },
+            actionableNow: {
+              type: 'boolean',
+              description:
+                'True kun for en konkret opgave, forælderen kan afslutte nu før den viste dato: tilmelde, svare, betale, give samtykke eller udfylde. False for noget, der først gøres på dagen (medbringe, møde, hente anderledes), og for en orienterende "reserver/sæt kryds i kalenderen" uden krav om svar. actionableNow=true kræver needsAction=true.',
+            },
             reason: {
               type: 'string',
               description:
@@ -161,6 +166,7 @@ export function extractionSchema(input: BriefInput) {
             'date',
             'recurring',
             'needsAction',
+            'actionableNow',
             'reason',
             'sourceKeys',
           ],
@@ -211,7 +217,7 @@ export function extractionSchema(input: BriefInput) {
         type: 'array',
         items: { $ref: '#/$defs/aulaKey' },
         description:
-          'Aula-kilder, der slet ikke skal vises — irrelevante efter relevans-tegnene, eller noget forælderens præferencer siger aldrig skal med. En dato efter overviewThrough er ikke i sig selv en grund til at skjule en kilde eller undlade et relevant kort; siden folder selv senere kort sammen nederst. Personlige kalenderaftaler vurderes kun i personalEvents. En kilde med important=true bør ikke skjules uden en konkret grund i indholdet. Alt andet uden kort vises foldet sammen nederst.',
+          'Aula-kilder, der slet ikke skal vises — irrelevante efter relevans-tegnene, eller noget forælderens præferencer siger aldrig skal med. En dato efter overviewThrough er ikke i sig selv en grund til at skjule en kilde eller undlade et relevant kort; siden placerer selv senere kort under "Senere" og folder kun sektionens overskud sammen nederst. Personlige kalenderaftaler vurderes kun i personalEvents. En kilde med important=true bør ikke skjules uden en konkret grund i indholdet. Alt andet uden kort vises foldet sammen nederst.',
       },
     },
     required: ['topline', 'cards', 'personalEvents', 'childSummaries', 'hidden'],
@@ -223,7 +229,7 @@ const INSTRUCTIONS = `Du læser de seneste ugers indhold fra Aula — opslag, be
 
 Du afgør fire ting:
 
-1. Aula-kortene. En normal morgen giver 5–10. Skriv kortene i prioriteret rækkefølge — vigtigst først; bliver der for mange, er det de sidste, siden folder sammen. Sidens fremhævede tidslinje går fra "today" til og med "overviewThrough". Noget senere må stadig blive et kort, så det beholder sit resumé og sine kilder, men siden folder det selv sammen nederst; det må ikke nævnes i topline eller childSummaries, og en Aula-kilde må ikke skjules alene på grund af datoen. Hvert kort er én selvstændig ting, forælderen skal vide eller gøre: en titel, der nævner barnet og står i bydeform, når der skal gøres noget; et resumé på én til tre sætninger, der siger det vigtige, uden at læseren behøver kilden; datoen kortet sorteres efter — fristen, hvis der er én, ellers dagen det sker; om det kræver handling af forælderen; en begrundelse for, hvorfor kortet er med; og de Aula-kilder, det bygger på. To handlinger, som forælderen kan klare hver for sig, er to kort — også når de gælder samme barn og dag, står i samme ugeplan eller ligger ved siden af det samme arrangement. En påmindelse om at aflevere biblioteksbøger er derfor sit eget kort og må ikke gemmes i et kort om skolefoto, bare fordi begge dele sker tirsdag. Den samme kilde må gerne stå under flere kort, når den rummer flere selvstændige ting. Ved en fast ugentlig aftale uden en enkelt dato er datoen den næste forekomst på eller efter "today", regnet fra ugedagen i kilden: læses oversigten på selve ugedagen, er datoen "today", ikke en uge senere og ikke null. Siden mærker selv kortet som gentaget, så datoen ikke ligner en enkeltstående Aula-dato. Ét kort må samle flere Aula-kilder, og skal gøre det, når de underbygger den samme konkrete handling eller besked: et opslag fra juli med datoen og en besked fra i dag om samme arrangement er ét kort med juli-datoen og begge kilder. Forælderen har for længst glemt juli-opslaget — når du binder dem sammen, hjælper du forælderen meget. En personlig kalenderaftale må aldrig indgå i et Aula-kort.
+1. Aula-kortene. En normal morgen giver 5–10. Skriv kortene i prioriteret rækkefølge — vigtigst først; bliver der for mange i en sektion, er det de sidste, siden folder sammen. Sidens nære tidslinje går fra "today" til og med "overviewThrough". Noget senere må stadig blive et kort, så det beholder sit resumé og sine kilder; siden placerer det under "Senere". Det må ikke nævnes i childSummaries eller topline, medmindre actionableNow er true, og en Aula-kilde må ikke skjules alene på grund af datoen. Et kort med actionableNow=true står øverst under "Skal gøres", også når arrangementet sker efter "overviewThrough". Hvert kort er én selvstændig ting, forælderen skal vide eller gøre: en titel, der nævner barnet og står i bydeform, når der skal gøres noget; et resumé på én til tre sætninger, der siger det vigtige, uden at læseren behøver kilden; datoen kortet sorteres efter — fristen, hvis der er én, ellers dagen det sker; om det kræver handling af forælderen; om handlingen kan afsluttes nu; en begrundelse for, hvorfor kortet er med; og de Aula-kilder, det bygger på. At tilmelde, svare, betale, give samtykke eller udfylde er typisk actionableNow. At medbringe noget, møde op, hente anderledes eller blot reservere/sætte kryds ved en fremtidig dato er ikke actionableNow. To handlinger, som forælderen kan klare hver for sig, er to kort — også når de gælder samme barn og dag, står i samme ugeplan eller ligger ved siden af det samme arrangement. En påmindelse om at aflevere biblioteksbøger er derfor sit eget kort og må ikke gemmes i et kort om skolefoto, bare fordi begge dele sker tirsdag. Den samme kilde må gerne stå under flere kort, når den rummer flere selvstændige ting. Ved en fast ugentlig aftale uden en enkelt dato er datoen den næste forekomst på eller efter "today", regnet fra ugedagen i kilden: læses oversigten på selve ugedagen, er datoen "today", ikke en uge senere og ikke null. Siden mærker selv kortet som gentaget, så datoen ikke ligner en enkeltstående Aula-dato. Ét kort må samle flere Aula-kilder, og skal gøre det, når de underbygger den samme konkrete handling eller besked: et opslag fra juli med datoen og en besked fra i dag om samme arrangement er ét kort med juli-datoen og begge kilder. Forælderen har for længst glemt juli-opslaget — når du binder dem sammen, hjælper du forælderen meget. En personlig kalenderaftale må aldrig indgå i et Aula-kort.
 
 2. De personlige kalenderaftaler. Svar med præcis én vurdering per kilde med type "personal", også når den er irrelevant. Skriv vurderingerne i prioriteret rækkefølge, og brug den snævre inklusionsregel i svarskemaets beskrivelse af "relevant". Skriv én kort, faktuel opsummering og én kort begrundelse. En aftale med relevant=false må ikke bruges i topline eller childSummaries. Gæt aldrig hvilket barn aftalen handler om, gør den aldrig til en handling, og bland den aldrig sammen med en Aula-kilde. Siden bruger selv kildens titel, dato, tid, sted og link.
 

@@ -1,4 +1,4 @@
-import type { BriefInput } from '../src/brief/types.ts';
+import type { BriefInput, Placement } from '../src/brief/types.ts';
 
 export type ExpectedCard = {
   /** At least one returned card must cite every key in this list. */
@@ -8,16 +8,22 @@ export type ExpectedCard = {
   /** Sources that would prove the model merged an unrelated subject. */
   excludedSourceKeys?: string[];
   needsAction?: boolean;
+  /** Every expected card pins whether it can be completed now. */
+  actionableNow: boolean;
+  /** Final visible section after the production ranker has placed the card. */
+  placement: Placement;
   date?: string | null;
   recurring?: boolean;
   children?: string[];
+  /** Children covered across one combined card or several child-specific cards. */
+  childrenCovered?: string[];
   /** Stable wording that must be visible in the card title itself. */
   titleContains?: string;
   /** Disambiguates several obligations carried by the same source. */
   textContains?: string;
   /** Wording from an unrelated subject that must not leak into the card. */
   textNotContains?: string[];
-  /** One-based position in the model answer; cards after 12 are folded. */
+  /** One-based position in the model answer; used to protect priority-sensitive cases. */
   maxRank?: number;
 };
 

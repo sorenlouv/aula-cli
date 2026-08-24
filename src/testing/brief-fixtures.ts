@@ -57,6 +57,7 @@ export function card(overrides: Partial<Card> & Pick<Card, 'id' | 'sourceKeys'>)
     date: null,
     recurring: false,
     needsAction: false,
+    actionableNow: false,
     reason: null,
     origin: 'model',
     ...overrides,

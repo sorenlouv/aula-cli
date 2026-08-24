@@ -70,10 +70,17 @@ const WEEKDAYS: Record<string, number> = {
 /**
  * Words that turn a sentence into something the reader has to *do*.
  *
- * Ordered most-specific first; the first match decides the signal kind, so
- * "husk at aflevere senest fredag" is a `bring`, not a `deadline`.
+ * Ordered most-specific first; the first match decides the signal kind. A
+ * concrete task that can be completed now must therefore precede the broad
+ * `husk` and deadline markers: "husk at svare senest fredag" is actionable,
+ * while "mød senest fredag" is only a date-bound obligation.
  */
-const MARKERS: Array<{ re: RegExp; kind: RuleKind; urgency: Urgency }> = [
+const MARKERS: Array<{
+  re: RegExp;
+  kind: RuleKind;
+  urgency: Urgency;
+  actionableNow: boolean;
+}> = [
   // Danish compounds mean a `\b`-anchored keyword misses most real uses:
   // "ansøgningsfristen" contains "frist", "Mødet" contains "møde". So these
   // deliberately match inside words.
@@ -81,18 +88,41 @@ const MARKERS: Array<{ re: RegExp; kind: RuleKind; urgency: Urgency }> = [
   // "have noget sporty tøj og sko med" — the object sits between verb and
   // particle, so those two cannot be matched as adjacent words either.
   {
+    re: /\b(?:tilmeld|besvar|svar|udfyld|betal)\b|\b(?:i|du)\s+(?:skal|bedes)\s+(?:tilmelde|besvare|svare|udfylde|betale)\b|\bkan\s+i\s+(?:tilmelde|besvare|svare|udfylde|betale)\b|\bhusk\s+at\s+(?:tilmelde|besvare|svare|udfylde|betale)\b|\bmeld\s+afbud\b/i,
+    kind: 'action',
+    urgency: 'week',
+    actionableNow: true,
+  },
+  {
     re: /husk\w*|medbring\w*|\b(have|tage|tag)\b[^.!?]{0,60}\bmed\b/i,
     kind: 'bring',
     urgency: 'week',
+    actionableNow: false,
   },
-  { re: /\b(aflyst|aflyses|lukke[rt]|ændret tidspunkt)\b/i, kind: 'action', urgency: 'now' },
-  { re: /\w*frist\w*|\bsenest\b|\bdeadline\b/i, kind: 'deadline', urgency: 'week' },
   {
-    re: /tilmeld\w*|\bafbud\b|besvar\w*|udfyld\w*|aflever\w*|\bsvar (os|tilbage)\b/i,
+    re: /\b(aflyst|aflyses|lukke[rt]|ændret tidspunkt)\b/i,
+    kind: 'action',
+    urgency: 'now',
+    actionableNow: false,
+  },
+  {
+    re: /\w*frist\w*|\bsenest\b|\bdeadline\b/i,
+    kind: 'deadline',
+    urgency: 'week',
+    actionableNow: false,
+  },
+  {
+    re: /aflever\w*/i,
     kind: 'action',
     urgency: 'week',
+    actionableNow: false,
   },
-  { re: /\w*møde\w*|\bsamtale\w*|\bskole-hjem\b/i, kind: 'event', urgency: 'later' },
+  {
+    re: /\w*møde\w*|\bsamtale\w*|\bskole-hjem\b/i,
+    kind: 'event',
+    urgency: 'later',
+    actionableNow: false,
+  },
 ];
 
 /** Abbreviations that must not end a sentence. */
@@ -267,9 +297,12 @@ export function extractDates(sentence: string, today: Date): string[] {
     if (monday) push(monday);
   }
 
-  // "i dag", "i morgen", "på mandag"
-  if (/\bi dag\b/i.test(sentence)) push(today);
-  if (/\bi morgen\b/i.test(sentence)) {
+  // "i dag", "i morgen", "på mandag". When the same sentence already gives
+  // an explicit calendar date or week, the relative weekday merely names that
+  // date ("på fredag den 28. august") and must not create a second occurrence.
+  const hasExplicitDate = found.length > 0;
+  if (!hasExplicitDate && /\bi dag\b/i.test(sentence)) push(today);
+  if (!hasExplicitDate && /\bi morgen\b/i.test(sentence)) {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
     push(tomorrow);
@@ -280,7 +313,7 @@ export function extractDates(sentence: string, today: Date): string[] {
   const weekday =
     /\b(?:på|om)\s+(mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag)(?:en)?\b/i.exec(sentence);
   const weekdayIndex = weekday ? WEEKDAYS[weekday[1]?.toLowerCase() ?? ''] : undefined;
-  if (weekdayIndex !== undefined) push(nextWeekday(weekdayIndex, today));
+  if (!hasExplicitDate && weekdayIndex !== undefined) push(nextWeekday(weekdayIndex, today));
 
   return found;
 }
@@ -290,6 +323,7 @@ export type RuleHit = {
   quote: string;
   dueAt: string | null;
   urgency: Urgency;
+  actionableNow: boolean;
 };
 
 /**
@@ -325,22 +359,29 @@ export function extractHits(text: string, reference: Date, now: Date = reference
     // "I morgen" in a post from 10 August means 11 August; reading it as
     // tomorrow turns every old narrative post into an urgent action.
     const dates = extractDates(sentence, reference);
+    // For a task that can be completed now, two dates usually mean "event +
+    // deadline". One action card is enough, and the earliest date is the safe
+    // deterministic deadline. Date-bound events still keep every expressed
+    // date because they may genuinely describe separate occurrences.
+    if (marker.actionableNow) dates.sort();
     const dueAt = dates[0] ?? null;
     hits.push({
       kind: marker.kind,
       quote: sentence,
       dueAt,
       urgency: urgencyFor(dueAt, now, marker.urgency),
+      actionableNow: marker.actionableNow,
     });
 
     // A second date in the same sentence is usually the pair "event date +
     // application deadline"; keep it so the later one is not lost.
-    for (const extra of dates.slice(1)) {
+    for (const extra of marker.actionableNow ? [] : dates.slice(1)) {
       hits.push({
         kind: marker.kind === 'bring' ? 'bring' : 'deadline',
         quote: sentence,
         dueAt: extra,
         urgency: urgencyFor(extra, now, marker.urgency),
+        actionableNow: marker.actionableNow,
       });
     }
   }

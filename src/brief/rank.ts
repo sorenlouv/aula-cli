@@ -2,14 +2,15 @@
  * From cards to a page order.
  *
  * The model chooses the Aula cards, puts them in priority order, and gives every
- * personal appointment a relevance verdict. Code keeps the first `CARD_CAP`
- * full cards, folds the rest, turns relevant appointments into compact entries,
- * then sorts both shapes into one chronological timeline.
+ * personal appointment a relevance verdict. Code keeps every actionable-now
+ * card, caps the primary and future sections separately, turns relevant
+ * appointments into compact entries, then sorts both shapes into one timeline.
  *
  * Two things stay deterministic here:
  *
- * - **The cap.** `CARD_CAP` full Aula cards render; anything after them is
- *   folded. Compact personal cards do not crowd an Aula card out.
+ * - **The caps.** `CARD_CAP` primary Aula cards and `FUTURE_CARD_CAP` later
+ *   cards render. Actionable-now cards always render. Compact personal cards do
+ *   not crowd an Aula card out.
  * - **The rules fallback.** Without a model the Danish extractors make the
  *   cards: weaker titles, the matched sentence for a summary, but a page.
  */
@@ -29,8 +30,10 @@ import type {
   SourceItem,
 } from './types.ts';
 
-/** At most this many full Aula cards render. Compact calendar cards are separate. */
+/** At most this many non-future, non-action Aula cards render. */
 export const CARD_CAP = 12;
+/** Later cards have their own restrained section and never crowd out the primary overview. */
+export const FUTURE_CARD_CAP = 6;
 
 function isoOf(value: string | null): string | null {
   if (!value) return null;
@@ -95,6 +98,7 @@ export function cardsFromRules(input: BriefInput, now = new Date()): Card[] {
           date,
           recurring: findRecurringWeekdays(hit.quote).length === 1,
           needsAction: hit.kind === 'bring' || hit.kind === 'action' || hit.kind === 'deadline',
+          actionableNow: hit.actionableNow,
           reason: null,
           sourceKeys: [item.key],
           origin: 'rule',
@@ -105,9 +109,16 @@ export function cardsFromRules(input: BriefInput, now = new Date()): Card[] {
   return cards;
 }
 
-function placementOf(date: string | null, today: string): Placement {
+function placementOf(
+  date: string | null,
+  today: string,
+  overviewThrough: string,
+  actionableNow: boolean,
+): Placement {
+  if (date && date < today) return 'past';
+  if (actionableNow) return 'action';
   if (!date) return 'undated';
-  return date < today ? 'past' : 'upcoming';
+  return date > overviewThrough ? 'future' : 'upcoming';
 }
 
 /**
@@ -147,7 +158,13 @@ function cardSortAt(date: string | null, sources: SourceItem[]): string | null {
   return starts.size === 1 ? ([...starts][0] ?? null) : null;
 }
 
-const placementOrder: Record<Placement, number> = { upcoming: 0, undated: 1, past: 2 };
+const placementOrder: Record<Placement, number> = {
+  action: 0,
+  upcoming: 1,
+  future: 2,
+  undated: 3,
+  past: 4,
+};
 
 /**
  * Shared page order. Different days are always chronological. On one day,
@@ -157,6 +174,14 @@ const placementOrder: Record<Placement, number> = { upcoming: 0, undated: 1, pas
 function compareTimeline(a: RankedTimelineEntry, b: RankedTimelineEntry): number {
   if (placementOrder[a.placement] !== placementOrder[b.placement]) {
     return placementOrder[a.placement] - placementOrder[b.placement];
+  }
+  // The schema asks for a deadline when one is known and otherwise the event
+  // date. Within the action section the earliest dated task is therefore the
+  // safest order; equal dates and undated tasks retain stable model priority.
+  if (a.placement === 'action') {
+    if (a.date && b.date && a.date !== b.date) return a.date.localeCompare(b.date);
+    if (Boolean(a.date) !== Boolean(b.date)) return a.date ? -1 : 1;
+    return 0;
   }
   const ad = a.date ?? '';
   const bd = b.date ?? '';
@@ -220,6 +245,7 @@ export function rank(
         ? dedupeCards([...modelCards, ...ruleCards])
         : modelCards;
 
+  const { through: overviewThrough } = overviewWindow(input.today);
   const ranked: RankedCard[] = chosen.map((card) => {
     const sources = card.sourceKeys.map((key) => itemByKey.get(key)!);
     const recurrenceWeekday = recurrenceWeekdayOf(card, sources);
@@ -228,7 +254,12 @@ export function rank(
       ...card,
       date,
       entryType: 'card',
-      placement: placementOf(date, input.today),
+      placement: placementOf(
+        date,
+        input.today,
+        overviewThrough,
+        card.needsAction && card.actionableNow,
+      ),
       recurrenceWeekday,
       sources,
       sortAt: null,
@@ -248,19 +279,24 @@ export function rank(
   }
 
   // ------------------------------------------------------------------ cap
-  // Model order is the ranking, but a later card must not spend one of the N
-  // slots the current overview can actually show. Keep today's remainder of
-  // the week plus next week, and fold later cards alongside ordinary overflow
-  // so their source and model-written summary remain available below.
-  const { through: overviewThrough } = overviewWindow(input.today);
-  const inOverview = ranked.filter(
-    (card) => card.placement !== 'upcoming' || !card.date || card.date <= overviewThrough,
+  // Actionable-now tasks always stay visible: folding one is the exact missed
+  // obligation this overview exists to prevent. The primary and future lists
+  // have independent caps, so September cannot crowd out this week and an
+  // unusually long future list cannot take over the daily page.
+  const actions = ranked.filter((card) => card.placement === 'action');
+  const primary = ranked.filter(
+    (card) => card.placement !== 'action' && card.placement !== 'future',
   );
-  const kept = new Set(inOverview.slice(0, CARD_CAP));
+  const future = ranked.filter((card) => card.placement === 'future');
+  const kept = new Set([
+    ...actions,
+    ...primary.slice(0, CARD_CAP),
+    ...future.slice(0, FUTURE_CARD_CAP),
+  ]);
   const folded = ranked.filter((card) => !kept.has(card));
   for (const card of folded) {
-    if (card.placement === 'upcoming' && card.date && card.date > overviewThrough) {
-      card.reasons.push(`after overview(${overviewThrough}) → folded`);
+    if (card.placement === 'future') {
+      card.reasons.push(`over FUTURE_CARD_CAP(${FUTURE_CARD_CAP}) → folded`);
     } else {
       card.reasons.push(`over CARD_CAP(${CARD_CAP}) → folded`);
     }
@@ -296,7 +332,7 @@ export function rank(
       summary: verdict?.summary ?? '',
       reason: verdict?.reason ?? null,
       date,
-      placement: placementOf(date, input.today),
+      placement: placementOf(date, input.today, overviewThrough, false),
       source,
       sortAt: source.allDay ? null : source.at,
       modelRank: verdict ? (personalRanks.get(verdict) ?? null) : null,
@@ -310,8 +346,9 @@ export function rank(
   }
 
   // ---------------------------------------------------------------- order
-  // Upcoming by date, then undated, then past (most recent first — the nearer
-  // the day, the more likely it still says something).
+  // Actionable-now by known deadline/date, upcoming/future by date, then
+  // undated and past (most recent first — the nearer the day, the more likely
+  // it still says something).
   const page = ranked.filter((card) => kept.has(card)).sort(compareTimeline);
   const timeline = [...page, ...personalEvents].sort(compareTimeline);
   const personalPage = timeline.filter(

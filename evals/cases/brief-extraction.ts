@@ -254,8 +254,117 @@ const almaDentist = personal(
   '2026-08-26T13:30:00+02:00',
   'Almas tandlægetid',
 );
+const futurePhotoRegistration = aulaSource({
+  key: 'post:future-photo-registration',
+  title: 'Fotografering i Børnehuset Eksemplet',
+  text: 'Fotograferingen er onsdag den 9. september 2026. Tilmeld Alma og Otto til fotografering.',
+  groups: ['2.E', 'Sommerfuglene'],
+  childNames: ['Alma Eksempelsen', 'Otto Eksempelsen'],
+  audience: 'child',
+  important: true,
+});
+const futureSfoParty = aulaSource({
+  key: 'event:future-sfo-party',
+  kind: 'event',
+  title: 'SFO-sommerfest for Otto',
+  text: 'SFO-sommerfest for Otto onsdag den 9. september 2026.',
+  groups: ['Sommerfuglene'],
+  childNames: ['Otto Eksempelsen'],
+  important: true,
+});
+const futureSleepover = aulaSource({
+  key: 'post:future-sleepover',
+  title: 'Overnatning for Sommerfuglene',
+  text: 'Overnatning for Sommerfuglene fredag den 11. september 2026.',
+  groups: ['Sommerfuglene'],
+  childNames: ['Otto Eksempelsen'],
+  important: true,
+});
+const futureNetworkMeeting = aulaSource({
+  key: 'thread:future-network-meeting',
+  kind: 'thread',
+  title: 'Netværksmøde om Alma',
+  text: 'Netværksmøde om Alma fredag den 18. september 2026 kl. 13-14.',
+  childNames: ['Alma Eksempelsen'],
+  important: true,
+});
+const futureBirthday = aulaSource({
+  key: 'post:future-birthday',
+  title: 'Fællesfødselsdag i 2.E',
+  text: 'Reserver lørdag den 19. september 2026 kl. 10-12 til fællesfødselsdag i 2.E.',
+  childNames: ['Alma Eksempelsen'],
+  important: true,
+});
 
 export const briefExtractionCases: BriefExtractionEvalCase[] = [
+  {
+    id: 'actionable-now-and-future-sections',
+    description:
+      'A registration that can be completed now leads the page while four later events remain visible under the future section.',
+    provenance: 'user-labelled',
+    input: input(
+      [
+        futurePhotoRegistration,
+        futureSfoParty,
+        futureSleepover,
+        futureNetworkMeeting,
+        futureBirthday,
+      ],
+      { today: '2026-08-24', isoWeek: '2026-W35' },
+    ),
+    expected: {
+      requiredCards: [
+        {
+          sourceKeys: [futurePhotoRegistration.key],
+          needsAction: true,
+          actionableNow: true,
+          placement: 'action',
+          date: '2026-09-09',
+          childrenCovered: ['Alma', 'Otto'],
+          textContains: 'fotografer',
+        },
+        {
+          sourceKeys: [futureSfoParty.key],
+          actionableNow: false,
+          placement: 'future',
+          date: '2026-09-09',
+          children: ['Otto'],
+          textContains: 'sommerfest',
+        },
+        {
+          sourceKeys: [futureSleepover.key],
+          actionableNow: false,
+          placement: 'future',
+          date: '2026-09-11',
+          children: ['Otto'],
+          textContains: 'overnatning',
+        },
+        {
+          sourceKeys: [futureNetworkMeeting.key],
+          actionableNow: false,
+          placement: 'future',
+          date: '2026-09-18',
+          children: ['Alma'],
+          textContains: 'netværksmøde',
+        },
+        {
+          sourceKeys: [futureBirthday.key],
+          actionableNow: false,
+          placement: 'future',
+          date: '2026-09-19',
+          children: ['Alma'],
+          textContains: 'fødselsdag',
+        },
+      ],
+      hiddenExcludes: [
+        futurePhotoRegistration.key,
+        futureSfoParty.key,
+        futureSleepover.key,
+        futureNetworkMeeting.key,
+        futureBirthday.key,
+      ],
+    },
+  },
   {
     id: 'personal-calendar-relevance',
     description:
@@ -292,12 +401,16 @@ export const briefExtractionCases: BriefExtractionEvalCase[] = [
         {
           sourceKeys: [photoPost.key],
           needsAction: true,
+          actionableNow: false,
+          placement: 'future',
           date: '2026-08-31',
           children: ['Alma'],
         },
         {
           sourceKeys: [consentThread.key],
           needsAction: true,
+          actionableNow: true,
+          placement: 'action',
           date: '2026-08-25',
           children: ['Alma'],
         },
@@ -313,7 +426,14 @@ export const briefExtractionCases: BriefExtractionEvalCase[] = [
     input: input([weekReply]),
     expected: {
       requiredCards: [
-        { sourceKeys: [weekReply.key], needsAction: true, date: '2026-10-05', children: ['Alma'] },
+        {
+          sourceKeys: [weekReply.key],
+          needsAction: true,
+          actionableNow: true,
+          placement: 'action',
+          date: '2026-10-05',
+          children: ['Alma'],
+        },
       ],
     },
   },
@@ -328,6 +448,8 @@ export const briefExtractionCases: BriefExtractionEvalCase[] = [
         {
           sourceKeys: [oldCampAnnouncement.key, campReminder.key],
           needsAction: true,
+          actionableNow: false,
+          placement: 'future',
           date: '2026-09-30',
           children: ['Alma'],
         },
@@ -344,12 +466,16 @@ export const briefExtractionCases: BriefExtractionEvalCase[] = [
         {
           sourceKeys: [twoObligations.key],
           needsAction: true,
+          actionableNow: false,
+          placement: 'future',
           date: '2026-08-31',
           textContains: 'badetøj',
         },
         {
           sourceKeys: [twoObligations.key],
           needsAction: true,
+          actionableNow: false,
+          placement: 'future',
           date: '2026-08-31',
           textContains: 'madpakke',
         },
@@ -371,6 +497,8 @@ export const briefExtractionCases: BriefExtractionEvalCase[] = [
           sourceKeys: [photoDayMessage.key],
           excludedSourceKeys: [libraryReturnPlan.key],
           needsAction: true,
+          actionableNow: false,
+          placement: 'upcoming',
           date: '2026-08-25',
           children: ['Alma'],
           textContains: 'foto',
@@ -381,6 +509,8 @@ export const briefExtractionCases: BriefExtractionEvalCase[] = [
           sourceKeys: [libraryReturnPlan.key],
           sourceKeysExactly: true,
           needsAction: true,
+          actionableNow: false,
+          placement: 'upcoming',
           date: '2026-08-25',
           children: ['Alma'],
           titleContains: 'bibliotek',
@@ -407,6 +537,8 @@ export const briefExtractionCases: BriefExtractionEvalCase[] = [
         {
           sourceKeys: [broadPhotoAction.key],
           needsAction: true,
+          actionableNow: true,
+          placement: 'action',
           date: '2026-09-01',
           children: ['Alma'],
         },
@@ -425,7 +557,14 @@ export const briefExtractionCases: BriefExtractionEvalCase[] = [
       ],
     }),
     expected: {
-      requiredCards: [{ sourceKeys: [fatherMessage.key], date: null }],
+      requiredCards: [
+        {
+          sourceKeys: [fatherMessage.key],
+          actionableNow: true,
+          placement: 'action',
+          date: null,
+        },
+      ],
       hiddenIncludes: [municipalNewsletter.key],
       hiddenExcludes: [fatherMessage.key],
     },
@@ -440,7 +579,8 @@ export const briefExtractionCases: BriefExtractionEvalCase[] = [
       requiredCards: [
         {
           sourceKeys: [ongoingChange.key],
-          needsAction: false,
+          actionableNow: false,
+          placement: 'past',
           date: '2026-08-01',
           children: ['Alma'],
         },
@@ -458,6 +598,8 @@ export const briefExtractionCases: BriefExtractionEvalCase[] = [
         {
           sourceKeys: [partialThread.key],
           needsAction: true,
+          actionableNow: true,
+          placement: 'action',
           date: '2026-08-25',
           children: ['Alma'],
         },
@@ -474,6 +616,8 @@ export const briefExtractionCases: BriefExtractionEvalCase[] = [
         {
           sourceKeys: [longTailAction.key],
           needsAction: true,
+          actionableNow: true,
+          placement: 'action',
           date: '2026-08-28',
           children: ['Alma'],
         },
@@ -503,6 +647,8 @@ export const briefExtractionCases: BriefExtractionEvalCase[] = [
         {
           sourceKeys: [runningRoutine.key],
           needsAction: true,
+          actionableNow: false,
+          placement: 'upcoming',
           date: '2026-08-24',
           recurring: true,
           children: ['Otto'],

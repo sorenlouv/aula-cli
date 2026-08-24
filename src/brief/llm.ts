@@ -19,6 +19,7 @@ import {
   buildDateSupport,
   dueAtSupported,
   findRecurringWeekdays,
+  overviewWindow,
   unsupportedDateClaims,
 } from './dates.ts';
 import { BRIEF_DIR } from './state.ts';
@@ -45,7 +46,7 @@ const CACHE_FILE_LIMIT = 32;
  * read back with a field missing — the first run after an upgrade must not
  * spend its day on yesterday's answer shape.
  */
-const CONTRACT_VERSION = 6;
+const CONTRACT_VERSION = 7;
 /** Whitespace-insensitive containment. Aula's HTML flattening leaves odd runs of spaces. */
 export type ExtractResult = {
   topline: string | null;
@@ -183,6 +184,12 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
           .map(canonicalFirstName)
           .filter((name): name is string => name !== undefined)
       : [];
+    const needsAction = raw.needsAction === true;
+    const actionableNow = raw.actionableNow === true;
+    if (actionableNow && !needsAction) {
+      problems.push(`${label}: actionableNow=true kræver needsAction=true`);
+      continue;
+    }
     cards.push({
       id: `model:${index}`,
       title,
@@ -190,7 +197,8 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
       children,
       date,
       recurring,
-      needsAction: raw.needsAction === true,
+      needsAction,
+      actionableNow,
       reason,
       sourceKeys,
       origin: 'model',
@@ -251,7 +259,12 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
 
   const grounded = (value: unknown, where: string): string | null => {
     if (typeof value !== 'string' || !value.trim()) return null;
-    const bad = unsupportedDateClaims(value, support);
+    // The prompt supplies this boundary and asks the overview prose to respect
+    // it. It is system-grounded context for topline/child summaries, but not a
+    // source-grounded date that a card may borrow.
+    const bad = unsupportedDateClaims(value, support, {
+      dueAt: overviewWindow(input.today).through,
+    });
     if (bad.length === 0) return value.trim();
     problems.push(`${where}: dato uden belæg: ${bad.map((d) => `"${d}"`).join(', ')}`);
     return null;

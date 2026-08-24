@@ -104,6 +104,7 @@ const SIGNUP: Card = card({
   children: ['Alma'],
   date: '2026-08-24',
   needsAction: true,
+  actionableNow: true,
   reason: 'Kræver tilmelding af Alma; fristen er hård.',
   sourceKeys: ['post:1', 'thread:2'],
 });
@@ -147,20 +148,23 @@ const calendarPage = (
 describe('a card', () => {
   const { brief, html } = page([SIGNUP, MEETING]);
 
-  test('carries title, summary, children, date chip and the action badge', () => {
+  test('carries title, summary, children, date chip and action styling', () => {
     expect(html).toContain('<p class="title">Tilmeld Alma til skolefoto inden mandag</p>');
     expect(html).toContain('<p class="summary">Eksempel Foto fotograferer 24.–28. august');
     expect(html).toContain('<span class="chip soon">Mandag 24. august</span>');
-    expect(html).toContain('<span class="chip act">Skal gøres</span>');
+    expect(html).not.toContain('<span class="chip act">Skal gøres</span>');
     expect(html).toContain('<span class="who"><span class="dot c1"></span>Alma</span>');
     expect(html).toMatch(/<div class="card act" data-signal-id="model:0"/);
     // A card to merely know is drawn without the badge or the warm edge.
     expect(html).toMatch(/<div class="card " data-signal-id="model:1"/);
+    expect(page([{ ...SIGNUP, actionableNow: false }]).html).toContain(
+      '<span class="chip act">Kræver handling</span>',
+    );
     expect(validatePage(html, brief)).toEqual([]);
   });
 
   test('today and tomorrow are named as such on the chip', () => {
-    const today = card({ ...SIGNUP, id: 'a', date: TODAY });
+    const today = card({ ...SIGNUP, id: 'a', date: TODAY, actionableNow: false });
     const tomorrow = card({ ...MEETING, id: 'b', date: '2026-08-18' });
     const { html } = page([today, tomorrow]);
     expect(html).toContain('<h3 class="timeline-heading">I dag (d. 17. august)</h3>');
@@ -282,10 +286,31 @@ describe('the list', () => {
     const html = page([SIGNUP, MEETING]).html;
     expect(html.match(/<h3 class="timeline-heading">Næste uge<\/h3>/g)).toHaveLength(1);
     expect(html).not.toContain('<h2>Kommende');
-    expect(html).toContain('<section data-section="cards" aria-label="Kommende">');
+    expect(html).toContain('<section data-section="cards" aria-label="Aula-overblik">');
     expect(html).toContain('<div class="timeline"><div class="timeline-group"');
     expect(BRIEF_CSS).toContain('.timeline-group:last-child{margin-bottom:0}');
     expect(BRIEF_CSS).not.toContain('.timeline-group:last-of-type');
+  });
+
+  test('actionable-now leads the page and later events follow next week under Senere', () => {
+    const action = card({ ...SIGNUP, id: 'action', date: '2026-09-09' });
+    const nextWeek = card({ ...MEETING, id: 'next-week', date: '2026-08-26' });
+    const future = card({
+      ...MEETING,
+      id: 'future',
+      title: 'Overnatning for Sommerfuglene',
+      date: '2026-09-11',
+      sourceKeys: [DIARY.key],
+    });
+    const { brief, html } = page([future, nextWeek, action]);
+    const at = (needle: string) => html.indexOf(needle);
+
+    expect(brief.cards.map((entry) => entry.placement)).toEqual(['action', 'upcoming', 'future']);
+    expect(at('>Skal gøres</h3>')).toBeLessThan(at('>Næste uge</h3>'));
+    expect(at('>Næste uge</h3>')).toBeLessThan(at('>Senere</h3>'));
+    expect(html).toContain('data-timeline-group="action"');
+    expect(html).toContain('data-timeline-group="future"');
+    expect(validatePage(html, brief)).toEqual([]);
   });
 
   test('remaining days this week use weekday headings', () => {
@@ -324,6 +349,16 @@ describe('the list', () => {
       '<p class="topline">1 ting kræver handling.</p>',
     );
     expect(page([MEETING]).html).toContain('<p class="topline">Intet kræver handling lige nu.</p>');
+    expect(page([card({ ...MEETING, needsAction: true })]).html).toContain(
+      '<p class="topline">1 ting kræver handling.</p>',
+    );
+    expect(
+      page([card({ ...MEETING, date: '2026-09-11', needsAction: true, actionableNow: false })])
+        .html,
+    ).toContain('<p class="topline">Intet kræver handling lige nu.</p>');
+    expect(
+      page([card({ ...MEETING, date: '2026-09-11', needsAction: true, actionableNow: true })]).html,
+    ).toContain('<p class="topline">1 ting kræver handling.</p>');
     expect(page([MEETING], { topline: 'Alt er roligt.' }).html).toContain(
       '<p class="topline">Alt er roligt.</p>',
     );

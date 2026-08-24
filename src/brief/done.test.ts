@@ -69,7 +69,7 @@ describe('the rendered page', () => {
 
   test('the section the script drives is marked up for it', () => {
     expect(html).toContain('data-section="cards"');
-    expect(html).toContain('aria-label="Kommende"');
+    expect(html).toContain('aria-label="Aula-overblik"');
     expect(html).toContain('data-timeline-group');
     expect(html).not.toContain('data-count');
     expect(html).toContain('data-done-toggle');
