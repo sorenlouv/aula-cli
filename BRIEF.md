@@ -17,12 +17,13 @@ inputs but not a sufficient ranking. The model is therefore load-bearing.
 
 The model reads every source once and answers in a schema: the Aula cards,
 finished — title, summary, the day to sort by, whether the family must do
-something, a reason, the sources — plus one relevance/summary verdict per
-personal calendar event, one topline, one line per child, and the Aula sources
-to keep off the page. A local renderer draws that. The model decides **what the
-cards are, which sources matter, and their priority**; the renderer keeps the
-first twelve full Aula cards, folds the rest, and merges relevant personal
-events into the same chronological list as compact cards.
+something, whether that task can be completed now, a reason, the sources — plus
+one relevance/summary verdict per personal calendar event, one topline, one
+line per child, and the Aula sources to keep off the page. A local renderer
+draws that. The model decides **what the cards are, which sources matter, and
+their priority**; the ranker always keeps actionable-now cards, caps the primary
+and later sections separately, and merges relevant personal events into the
+same timeline as compact cards.
 
 There used to be two calls: an extractor returning "signals" with a verbatim
 quote each, a scorer tiering them, and a second call ordering and rewording.
@@ -78,6 +79,7 @@ from `hidden` before rendering.
 | Invariant | Check |
 | --- | --- |
 | Nothing required was dropped | every full or compact timeline card appears as `data-signal-id` |
+| Placement is explicit | every timeline card carries its ranked `data-placement`, appears inside the matching timeline group, and fixed groups keep their label and order |
 | Every claim is attributable | each card carries `data-source-id` and its sources are linked |
 | Every card can be ticked off | each card carries `data-done-keys` |
 | Failures are visible | the datastatus block exists and names every failed fetch |
@@ -94,20 +96,25 @@ only the *Læs mere* source dumps collapsed.
 Sections render only when they have content, and never change order.
 
 1. **Topline** — date and one Danish sentence, the most important thing first.
-2. **The dated timeline** — no generic *Kommende* heading. *I dag (d. 24.
-   august)* and *I morgen (d. 25. august)* always head their own non-empty
-   groups. Each remaining date in the current ISO week gets its own weekday
-   heading; the following ISO week is one *Næste uge* group, with exact dates
-   retained on the cards. Nothing later than the Sunday ending next week is a
-   timeline card: Monday therefore shows at most fourteen dates, Sunday eight.
-   A later Aula card is folded into *Øvrigt fra Aula*, never dropped and never
-   allowed to consume one of the twelve visible-card slots. Five to ten full
-   Aula cards is normal. A card that asks something of the family
-   (`needsAction`) is drawn with the warm left edge and a *Skal gøres* badge, so
-   the work stands out in a list that is otherwise chronological; the reader's
-   eye finds it without it having to be first. Two tails remain: *Uden fast
-   dato* for cards with no day, *Tidligere* for cards whose day has passed but
-   that still say something (a decision, a new standing arrangement). Each
+2. **The timeline** — *Skal gøres* comes first and contains every discrete task
+   the parent can complete now, including a registration for an event after
+   next week. This is `actionableNow`, narrower than `needsAction`: registering,
+   replying, paying, consenting or filling in a form qualifies; bringing
+   something on the day, attending, changed pickup logistics and an
+   informational *reserver datoen* do not. An actionable-now card is never
+   folded. After it, *I dag (d. 24. august)* and *I morgen (d. 25. august)* head
+   their own non-empty groups. Each remaining date in the current ISO week gets
+   its own weekday heading; the following ISO week is one *Næste uge* group.
+   Aula cards after that Sunday appear under *Senere*, directly after *Næste
+   uge*, with exact dates retained on their chips. The primary list keeps the
+   first `CARD_CAP` (12) cards and *Senere* the first `FUTURE_CARD_CAP` (6), so
+   later events cannot crowd out this week; overflow is folded, never dropped.
+   Five to ten full Aula cards is normal. Any card with `needsAction` is drawn
+   with the warm left edge; chronological actions carry a *Kræver handling*
+   badge, while cards already under *Skal gøres* do not repeat the heading as a
+   badge. Two tails remain: *Uden fast dato*
+   for cards with no day, *Tidligere* for cards whose day has passed but that
+   still say something (a decision, a new standing arrangement). Each
    card: date chip (*I dag*, *I morgen*, else the day), a *Gentages hver …*
    badge when the day is the next occurrence of a weekly routine, the children,
    title, summary, and *Læs mere* — which opens with *Vist fordi:* the model's
@@ -117,14 +124,14 @@ Sections render only when they have content, and never change order.
    individually collapsed card: the closed face keeps the source's date, time
    and title; opening it reveals the model's summary and relevance reason,
    location, calendar and link. They never get action styling and never consume
-   the twelve-card Aula cap. Neither the model nor the page computes a clash or
+   either Aula-card cap. Neither the model nor the page computes a clash or
    claims the absence of one.
 3. **Per barn** — one card per child: check-in state, planned pickup, and the
    model's one calendar-like line for the child.
 4. **Galleri** — album tiles.
 5. **Øvrigt fra Aula** — collapsed: every source that did not become a card and
-   was not hidden (title, when, author, *Læs mere*), plus any cards over
-   `CARD_CAP`. The name says what it is; *Godt at vide* did not.
+   was not hidden (title, when, author, *Læs mere*), plus cards over `CARD_CAP`
+   or `FUTURE_CARD_CAP`. The name says what it is; *Godt at vide* did not.
 6. **Skjult** — the muted foot naming the sources the model kept off the page
    entirely, so a hide is visible as a count, never silent.
 7. **Datastatus** — what was fetched, **what failed**, step-up state. A `health`
@@ -215,7 +222,7 @@ aula new [--days 60] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 
   collect   →  BriefInput    reuse buildDigest + galleries; every source in the 60-day window
   extract   →  cards/verdicts one model call, answered in a schema, dates grounded
-  rank      →  RankedBrief   in-window first 12 plus compact events; group by date
+  rank      →  RankedBrief   actions + capped primary/future cards + compact events
   render    →  HTML          the page, built locally; invariants checked
   publish   →  files         HTML (+ PDF/PNG), open, update state
 ```
@@ -231,7 +238,7 @@ aula new [--days 60] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 | `llm/requests/brief-extraction.ts` | Prompt, compact source projection and schema |
 | `brief/llm.ts` | Extraction validation, corrective retry and bounded content-hash cache |
 | `brief/dates.ts` | Date grounding against the sources |
-| `brief/rank.ts` | The model-order cap, placement by date, and the rules fallback |
+| `brief/rank.ts` | Action/date placement, section caps, and the rules fallback |
 | `brief/render.ts` | The page |
 | `brief/validate.ts` | The invariant table above |
 | `brief/styles.ts` | Tokens and components |
@@ -297,6 +304,7 @@ parsed `structured_output`. What the schema can state, the prompt does not say:
 | `cards[].children` | an `enum` of the children |
 | `cards[].date` | `format: "date"` — a day, never a timestamp |
 | `cards[].recurring` | `true` only for a fixed weekly routine whose displayed date is its next occurrence |
+| `cards[].actionableNow` | `true` only for a discrete requested task the parent can complete now; it implies `needsAction` |
 | `hidden` | an `enum` of Aula sources; personal appointments use `relevant=false` |
 | field semantics | `description`s on the field they govern, written once each |
 
@@ -335,19 +343,25 @@ thousands of tokens of one sentence into the schema.
 
 ### The model ranks; placement is deterministic
 
-The model's list order is the ranking. `rank.ts` first folds any card after the
-Sunday ending next ISO week, then keeps the first `CARD_CAP` (12) eligible full
-Aula cards and folds the rest into *Øvrigt fra Aula*. A later card therefore
-cannot crowd an in-window card out. Relevant personal appointments are compact
-and do not consume that cap. Code then merges both shapes for display: upcoming
-by date, then undated, then past (most recent first), and the renderer groups
-the dated entries as described above. Known calendar starts on the same day
-sort by time; all-day/date-only entries precede them, and ties retain stable
-model order. A weekly routine with no future one-off date is projected onto its
-next weekday on or after the brief date before the horizon check and sorting;
-an explicitly future date still wins. `--explain` prints the one-based model
-rank beside each entry. Without a model, rule-made Aula cards use the same cap
-and every personal appointment fails open as a source-only compact card.
+The model's list order is the ranking. Code gives each card one deterministic
+placement: `action` for a non-past actionable-now task, `upcoming` through the
+Sunday ending next ISO week, `future` after that, then `undated` and `past`.
+Every action card renders. The first `CARD_CAP` (12) primary cards and first
+`FUTURE_CARD_CAP` (6) future cards render; later overflow goes to *Øvrigt fra
+Aula*. Separate caps mean September cannot crowd out this week. Relevant
+personal appointments are compact and consume neither cap. Code merges the
+visible shapes for display: actions by their known deadline/date with stable
+model priority for ties, upcoming and future by date, then undated, then past
+(most recent first). Known calendar
+starts on the same day sort by time; all-day/date-only entries precede them, and
+ties retain stable model order. A weekly routine with no future one-off date is
+projected onto its next weekday on or after the brief date before placement and
+sorting; an explicitly future date still wins. `--explain` prints the one-based
+model rank beside each entry. Without a model, narrow rule-made registration,
+reply, form and payment requests can still become actionable now. A generic
+deadline word such as *senest* is not enough by itself; date-bound deadlines,
+bring, delivery and attendance reminders stay chronological. Every personal
+appointment fails open as a source-only compact card.
 
 ### Preferences: one list, and the built-in cues it tunes
 
@@ -389,7 +403,7 @@ source-only compact card, so model degradation cannot look like a free day.
 The source owns identity, title, date, time, location and link. The model may
 summarise and judge relevance but cannot rewrite those facts, infer a child,
 promote an appointment to an action, or merge it with Aula content. Compact
-cards do not consume `CARD_CAP`, so a busy family calendar cannot fold an
+cards consume neither Aula-card cap, so a busy family calendar cannot fold an
 important Aula card away.
 
 The personal-event threshold is intentionally asymmetric. The source itself

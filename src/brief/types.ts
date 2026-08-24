@@ -174,14 +174,16 @@ export type Card = {
   children: string[];
   /**
    * `YYYY-MM-DD` — the deadline when there is one, else the day it happens.
-   * For a weekly routine it is the next occurrence. The page sorts on it; a
-   * day that has passed lands under *Tidligere*.
+   * For a weekly routine it is the next occurrence. Chronological sections
+   * sort on it; a day that has passed lands under *Tidligere*.
    */
   date: string | null;
   /** True when the date is an occurrence projected from a weekly source schedule. */
   recurring: boolean;
   /** Something the family must do, not merely know. Drawn with emphasis. */
   needsAction: boolean;
+  /** A discrete requested task the parent can complete now, before the dated event. */
+  actionableNow: boolean;
   /** Why the card is on the page. Shown under *Læs mere*, never on the card. */
   reason: string | null;
   /** Keys into `BriefInput.items`; at least one. */
@@ -204,10 +206,10 @@ export type PersonalEventVerdict = {
 };
 
 /**
- * Where a card sits on the page. Decided by the date alone, in code: the model
- * chooses the cards and says what they are; it never orders the page.
+ * Where a card sits on the page. Decided in code from its date and the model's
+ * narrow actionable-now verdict; the model never chooses a section directly.
  */
-export type Placement = 'upcoming' | 'undated' | 'past';
+export type Placement = 'action' | 'upcoming' | 'future' | 'undated' | 'past';
 
 export type RankedCard = Card & {
   entryType: 'card';
@@ -246,16 +248,15 @@ export type RankedTimelineEntry = RankedCard | RankedPersonalEvent;
 
 export type RankedBrief = {
   input: BriefInput;
-  /** In-window full Aula cards, in page order: upcoming by date, then undated, then past. */
+  /** Full Aula cards in page order: actions, upcoming, future, undated, then past. */
   cards: RankedCard[];
   /** Relevant personal appointments in chronological page order. */
   personalEvents: RankedPersonalEvent[];
   /** Full Aula cards and compact personal cards in their shared page order. */
   timeline: RankedTimelineEntry[];
   /**
-   * Cards outside the overview window or after its first `CARD_CAP` entries,
-   * in model priority order. Listed in the fold with their title and summary —
-   * demoted, never dropped.
+   * Cards after the primary or future section caps, in model priority order.
+   * Listed in the fold with their title and summary — demoted, never dropped.
    */
   folded: RankedCard[];
   /** Sources no card covers and the model did not hide: the fold. */

@@ -42,6 +42,9 @@ that production rejects missing, additional or changed tool calls.
    data may appear outside `data/`.
 
 An expectation should describe a product decision: which sources become cards
-or stay folded, whether an item requires action, which personal appointments are
-relevant, and what is hidden. Only constrain generated wording when the wording
-itself is the behaviour being tested.
+or stay folded, whether an item requires action, whether it can be completed
+now, which final section the production ranker places it in, which personal
+appointments are relevant, and what is hidden. Only constrain generated wording
+when the wording itself is the behaviour being tested. Every required card pins
+both `actionableNow` and final `placement`; this keeps ordinary dated obligations
+from silently draining into the top action section.

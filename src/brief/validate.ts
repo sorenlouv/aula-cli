@@ -34,14 +34,85 @@ const EXTERNAL_RESOURCE = /<(?:img|script|link|style|iframe|object|embed|base)\b
 
 export function validatePage(html: string, brief: RankedBrief): Violation[] {
   const violations: Violation[] = [];
+  const groups = [...html.matchAll(/<div class="timeline-group" data-timeline-group="([^"]+)">/g)]
+    .map((match) => ({ key: match[1] ?? '', index: match.index ?? -1 }))
+    .filter((group) => group.index >= 0);
+  const groupFor = (index: number) => groups.findLast((group) => group.index < index);
+  const expectedGroup = (placement: string): string[] => {
+    if (placement === 'upcoming') return ['day:', 'next-week'];
+    return [placement];
+  };
 
   // 1. Nothing required was dropped: every full or compact timeline entry the
-  //    ranker kept is on the page.
+  //    ranker kept is on the page, in the section its placement requires.
   for (const entry of brief.timeline) {
     if (!html.includes(`data-signal-id="${entry.id}"`)) {
       violations.push({
         rule: 'must-show',
         detail: `"${entry.title}" (${entry.id}) mangler på siden`,
+      });
+      continue;
+    }
+    const index = html.indexOf(`data-signal-id="${entry.id}"`);
+    const openTagStart = html.lastIndexOf('<', index);
+    const openTagEnd = html.indexOf('>', index);
+    const tag = html.slice(openTagStart, openTagEnd + 1);
+    if (!tag.includes(`data-placement="${entry.placement}"`)) {
+      violations.push({
+        rule: 'placement',
+        detail: `"${entry.title}" (${entry.id}) står ikke som ${entry.placement}`,
+      });
+    }
+    const group = groupFor(index);
+    const expected = expectedGroup(entry.placement);
+    if (
+      !group ||
+      !expected.some((key) => (key.endsWith(':') ? group.key.startsWith(key) : group.key === key))
+    ) {
+      violations.push({
+        rule: 'placement',
+        detail: `"${entry.title}" (${entry.id}) står i sektionen ${group?.key || 'ingen'}, ikke ${expected.join(' eller ')}`,
+      });
+    }
+  }
+
+  // The section names and order are part of the parent-facing contract. The
+  // card-level data attribute alone cannot catch a template that labels the
+  // future group as next week or moves actions below the dated timeline.
+  const fixedLabels: Record<string, string> = {
+    action: 'Skal gøres',
+    'next-week': 'Næste uge',
+    future: 'Senere',
+    undated: 'Uden fast dato',
+    past: 'Tidligere',
+  };
+  const groupOrder = (key: string): number => {
+    if (key === 'action') return 0;
+    if (key.startsWith('day:')) return 1;
+    if (key === 'next-week') return 2;
+    if (key === 'future') return 3;
+    if (key === 'undated') return 4;
+    if (key === 'past') return 5;
+    return Number.POSITIVE_INFINITY;
+  };
+  let previousOrder = -1;
+  for (const [groupIndex, group] of groups.entries()) {
+    const order = groupOrder(group.key);
+    if (order < previousOrder) {
+      violations.push({
+        rule: 'section-order',
+        detail: `sektionen ${group.key} står i forkert rækkefølge`,
+      });
+    }
+    previousOrder = order;
+    const label = fixedLabels[group.key];
+    if (!label) continue;
+    const nextGroupIndex = groups[groupIndex + 1]?.index ?? html.length;
+    const section = html.slice(group.index, nextGroupIndex);
+    if (!section.includes(`<h3 class="timeline-heading">${label}</h3>`)) {
+      violations.push({
+        rule: 'section-label',
+        detail: `sektionen ${group.key} mangler overskriften "${label}"`,
       });
     }
   }

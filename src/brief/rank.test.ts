@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { briefInput, card, sourceItem } from '../testing/brief-fixtures.ts';
 import { classifyAudience } from './collect.ts';
-import { CARD_CAP, cardsFromRules, explain, rank } from './rank.ts';
+import { CARD_CAP, FUTURE_CARD_CAP, cardsFromRules, explain, rank } from './rank.ts';
 import type { BriefInput, Card, SourceItem } from './types.ts';
 
 const TODAY = new Date(2026, 7, 13); // Thursday 13 August 2026
@@ -78,6 +78,59 @@ describe('rank: placement', () => {
     const today = card({ id: 't', date: '2026-08-13', sourceKeys: ['post:1'] });
     const b = rank(input([POST]), { model: [today], rules: [], hidden: [] });
     expect(b.cards[0]?.placement).toBe('upcoming');
+  });
+
+  test('an actionable-now task leads the page even when its event is after next week', () => {
+    const source = item({ key: 'post:action-later' });
+    const task = card({
+      id: 'action-later',
+      date: '2026-09-09',
+      needsAction: true,
+      actionableNow: true,
+      sourceKeys: [source.key],
+    });
+    const b = rank(input([source]), { model: [task], rules: [], hidden: [] });
+
+    expect(b.cards[0]?.placement).toBe('action');
+    expect(b.folded).toEqual([]);
+  });
+
+  test("today's actionable deadline leads a later actionable event", () => {
+    const today = card({
+      id: 'today-action',
+      date: '2026-08-13',
+      needsAction: true,
+      actionableNow: true,
+      sourceKeys: [THREAD.key],
+    });
+    const september = card({
+      id: 'september-action',
+      date: '2026-09-09',
+      needsAction: true,
+      actionableNow: true,
+      sourceKeys: [POST.key],
+    });
+    const b = rank(input([POST, THREAD]), {
+      model: [september, today],
+      rules: [],
+      hidden: [],
+    });
+
+    expect(b.cards.map((entry) => entry.id)).toEqual(['today-action', 'september-action']);
+  });
+
+  test('a date-bound action after next week remains future', () => {
+    const source = item({ key: 'post:save-date' });
+    const saveDate = card({
+      id: 'save-date',
+      date: '2026-09-19',
+      needsAction: true,
+      actionableNow: false,
+      sourceKeys: [source.key],
+    });
+    const b = rank(input([source]), { model: [saveDate], rules: [], hidden: [] });
+
+    expect(b.cards[0]?.placement).toBe('future');
   });
 
   test('an undated weekly routine is placed on today when today is its weekday', () => {
@@ -168,7 +221,7 @@ describe('rank: the cap', () => {
     expect(brief.rest).toHaveLength(0);
   });
 
-  test('a card after next week is folded without consuming an in-window slot', () => {
+  test('a card after next week gets its own visible section without consuming an in-window slot', () => {
     const items = Array.from({ length: CARD_CAP + 1 }, (_, i) => item({ key: `post:${i}` }));
     const later = card({
       id: 'later',
@@ -191,11 +244,43 @@ describe('rank: the cap', () => {
       hidden: [],
     });
 
-    expect(brief.cards).toHaveLength(CARD_CAP);
-    expect(brief.cards.some((entry) => entry.id === 'later')).toBe(false);
-    expect(brief.folded.map((entry) => entry.id)).toEqual(['later']);
-    expect(brief.folded[0]?.reasons).toContain('after overview(2026-08-23) → folded');
+    expect(brief.cards).toHaveLength(CARD_CAP + 1);
+    expect(brief.cards.find((entry) => entry.id === 'later')?.placement).toBe('future');
+    expect(brief.cards.filter((entry) => entry.placement === 'upcoming')).toHaveLength(CARD_CAP);
+    expect(brief.folded).toEqual([]);
     expect(brief.rest).toEqual([]);
+  });
+
+  test('future overflow folds without reducing the primary card allowance', () => {
+    const futureItems = Array.from({ length: FUTURE_CARD_CAP + 1 }, (_, index) =>
+      item({ key: `post:future:${index}` }),
+    );
+    const primaryItems = Array.from({ length: CARD_CAP }, (_, index) =>
+      item({ key: `post:primary:${index}` }),
+    );
+    const futureCards = futureItems.map((source, index) =>
+      card({
+        id: `future:${index}`,
+        date: `2026-09-${String(9 + index).padStart(2, '0')}`,
+        sourceKeys: [source.key],
+      }),
+    );
+    const primaryCards = primaryItems.map((source, index) =>
+      card({ id: `primary:${index}`, date: '2026-08-14', sourceKeys: [source.key] }),
+    );
+
+    const brief = rank(input([...futureItems, ...primaryItems]), {
+      model: [...futureCards, ...primaryCards],
+      rules: [],
+      hidden: [],
+    });
+
+    expect(brief.cards.filter((entry) => entry.placement === 'future')).toHaveLength(
+      FUTURE_CARD_CAP,
+    );
+    expect(brief.cards.filter((entry) => entry.placement === 'upcoming')).toHaveLength(CARD_CAP);
+    expect(brief.folded.map((entry) => entry.id)).toEqual([`future:${FUTURE_CARD_CAP}`]);
+    expect(brief.folded[0]?.reasons).toContain(`over FUTURE_CARD_CAP(${FUTURE_CARD_CAP}) → folded`);
   });
 });
 
@@ -368,9 +453,50 @@ describe('rank: without a model', () => {
     expect(rules[0]).toBeDefined();
     expect(brief.cards.map((entry) => entry.id)).toContain(rules[0]!.id);
   });
+
+  test('an actionableNow disagreement does not duplicate the same supplemented card', () => {
+    const model = card({
+      id: 'model',
+      summary: 'Svar senest fredag.',
+      date: '2026-08-14',
+      needsAction: true,
+      actionableNow: false,
+      sourceKeys: [POST.key],
+    });
+    const rule = card({ ...model, id: 'rule', actionableNow: true, origin: 'rule' });
+    const brief = rank(input([POST]), {
+      model: [model],
+      rules: [rule],
+      hidden: [],
+      supplementRules: true,
+    });
+
+    expect(brief.cards.map((entry) => entry.id)).toEqual(['model']);
+    expect(brief.cards[0]?.placement).toBe('upcoming');
+  });
 });
 
 describe('cardsFromRules', () => {
+  test('rules-only attendance stays chronological and completed payment creates no card', () => {
+    const attendance = item({
+      key: 'post:attendance-cutoff',
+      title: 'Mødetid fredag',
+      text: 'Mød op senest kl. 8.00 på fredag den 28. august 2026.',
+    });
+    const paid = item({
+      key: 'post:already-paid',
+      title: 'Turen er betalt',
+      text: 'Turen er betalt af skolen, så I skal ikke gøre noget.',
+    });
+    const rules = cardsFromRules(input([attendance, paid]), TODAY);
+    const brief = rank(input([attendance, paid]), { model: null, rules, hidden: [] });
+
+    expect(rules).toHaveLength(1);
+    expect(rules[0]).toMatchObject({ actionableNow: false, sourceKeys: [attendance.key] });
+    expect(brief.cards[0]?.placement).toBe('future');
+    expect(brief.rest.map((source) => source.key)).toEqual([paid.key]);
+  });
+
   test('a gear reminder in a weekly plan lands on the plan’s day and asks for action', () => {
     const plan = item({
       key: 'plan:easyiq:2026-W33:0',
@@ -446,7 +572,8 @@ describe('cardsFromRules', () => {
       '2026-08-20',
       '2026-08-25',
     ]);
-    expect(brief.folded.map((c) => c.date)).toEqual(['2026-08-25']);
+    expect(brief.cards.every((c) => c.placement === 'action')).toBe(true);
+    expect(brief.folded).toEqual([]);
   });
 
   test('two different obligations on the same day remain two cards', () => {

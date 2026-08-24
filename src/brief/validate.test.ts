@@ -66,6 +66,36 @@ describe('validatePage', () => {
     expect(validatePage(html, BRIEF).map((v) => v.rule)).toContain('must-show');
   });
 
+  test('catches a card rendered with the wrong placement', () => {
+    const html = renderPage(BRIEF).replace('data-placement="upcoming"', 'data-placement="future"');
+    expect(validatePage(html, BRIEF).map((v) => v.rule)).toContain('placement');
+  });
+
+  test('catches a future group carrying the wrong parent-facing heading', () => {
+    const future = { ...CARD, id: 'future', date: '2026-09-09', actionableNow: false };
+    const ranked = rankedBrief(INPUT, [future]);
+    const html = renderPage(ranked).replace('>Senere</h3>', '>Næste uge</h3>');
+
+    expect(validatePage(html, ranked).map((violation) => violation.rule)).toContain(
+      'section-label',
+    );
+  });
+
+  test('catches timeline groups rendered in the wrong order', () => {
+    const ranked = rankedBrief(INPUT, [
+      { ...CARD, id: 'action', date: '2026-09-09', actionableNow: true },
+      { ...CARD, id: 'future', date: '2026-09-11', actionableNow: false },
+    ]);
+    const html = renderPage(ranked)
+      .replace('data-timeline-group="action"', 'data-timeline-group="temporary"')
+      .replace('data-timeline-group="future"', 'data-timeline-group="action"')
+      .replace('data-timeline-group="temporary"', 'data-timeline-group="future"');
+
+    expect(validatePage(html, ranked).map((violation) => violation.rule)).toContain(
+      'section-order',
+    );
+  });
+
   test('holds compact personal cards to must-show and noise invariants too', () => {
     const appointment = sourceItem({
       key: 'cal:family:dentist:2026-08-13T13:30:00',

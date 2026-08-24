@@ -7,9 +7,9 @@
  * away, and keeps the sections in the same places every morning.
  *
  * There used to be a second model call here that ordered and reworded the
- * cards. It went when the first call started writing them finished: ordering
- * is by date and needs no model, and rewording what was just written well is
- * a second chance to write it badly.
+ * cards. It went when the first call started writing them finished: placement
+ * and chronology are deterministic, and rewording what was just written well
+ * is a second chance to write it badly.
  */
 
 import { escapeHtml } from '../html.ts';
@@ -254,11 +254,11 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
   const colour = new Map(input.family.children.map((c, i) => [c.firstName, `c${i + 1}`]));
 
   const card = (c: RankedCard) => `
-    <div class="card ${c.needsAction ? 'act' : ''}" data-signal-id="${escapeHtml(c.id)}" data-source-id="${escapeHtml(c.sourceKeys[0] ?? '')}" data-done-keys="${escapeHtml(doneKeys(c).join(' '))}">
+    <div class="card ${c.needsAction ? 'act' : ''}" data-signal-id="${escapeHtml(c.id)}" data-source-id="${escapeHtml(c.sourceKeys[0] ?? '')}" data-done-keys="${escapeHtml(doneKeys(c).join(' '))}" data-placement="${c.placement}">
       <div class="row">
         ${c.date ? `<span class="chip ${c.date === today ? 'now' : 'soon'}">${escapeHtml(chipLabel(c.date, today))}</span>` : ''}
         ${c.recurrenceWeekday !== null ? `<span class="chip recurring">Gentages hver ${escapeHtml(DA_WEEKDAYS[c.recurrenceWeekday] ?? '')}</span>` : ''}
-        ${c.needsAction ? '<span class="chip act">Skal gøres</span>' : ''}
+        ${c.needsAction && c.placement !== 'action' ? '<span class="chip act">Kræver handling</span>' : ''}
         ${c.sourceKeys.some((key) => opts.isNew?.(key)) ? '<span class="chip new">Ny</span>' : ''}
         ${c.children.map((name) => `<span class="who"><span class="dot ${colour.get(name) ?? 'c1'}"></span>${escapeHtml(name)}</span>`).join('')}
       </div>
@@ -278,7 +278,7 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
     const source = event.source;
     const meta = [source.location, source.author].filter(Boolean).join(' · ');
     return `
-    <div class="card calendar-card" data-signal-id="${escapeHtml(event.id)}" data-source-id="${escapeHtml(event.sourceKey)}" data-done-keys="${escapeHtml(doneKeys({ sourceKeys: [event.sourceKey], date: event.date }).join(' '))}">
+    <div class="card calendar-card" data-signal-id="${escapeHtml(event.id)}" data-source-id="${escapeHtml(event.sourceKey)}" data-done-keys="${escapeHtml(doneKeys({ sourceKeys: [event.sourceKey], date: event.date }).join(' '))}" data-placement="${event.placement}">
       <details class="calendar-details">
         <summary><span class="calendar-face">
           ${event.date ? `<span class="chip ${event.date === today ? 'now' : 'soon'}">${escapeHtml(chipLabel(event.date, today))}</span>` : ''}
@@ -297,9 +297,10 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
     </div>`;
   };
 
-  // Today and tomorrow always earn their own heading. The remaining dates in
-  // this ISO week do too; next week is one compact group whose card chips keep
-  // each exact date visible. Undated and past cards retain their existing tails.
+  // Discrete tasks that can be completed now lead the page. Today and tomorrow
+  // then earn their own heading; the remaining dates in this ISO week do too.
+  // Next week and later each have one compact group whose card chips retain the
+  // exact date. Undated and past cards keep their existing tails.
   const { nextWeekFrom } = overviewWindow(today);
   const groups: Array<{ key: string; label: string; entries: RankedTimelineEntry[] }> = [];
   const addToGroup = (key: string, label: string, entry: RankedTimelineEntry) => {
@@ -308,6 +309,14 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
     else groups.push({ key, label, entries: [entry] });
   };
   for (const entry of brief.timeline) {
+    if (entry.placement === 'action') {
+      addToGroup('action', 'Skal gøres', entry);
+      continue;
+    }
+    if (entry.placement === 'future') {
+      addToGroup('future', 'Senere', entry);
+      continue;
+    }
     if (entry.placement === 'undated') {
       addToGroup('undated', 'Uden fast dato', entry);
       continue;
@@ -326,7 +335,7 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
   }
   const timeline = groups
     .map(
-      (group) => `<div class="timeline-group" data-timeline-group>
+      (group) => `<div class="timeline-group" data-timeline-group="${escapeHtml(group.key)}">
         <h3 class="timeline-heading">${escapeHtml(group.label)}</h3>
         ${group.entries
           .map((entry) => (entry.entryType === 'card' ? card(entry) : personal(entry)))
@@ -334,7 +343,12 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
       </div>`,
     )
     .join('');
-  const actions = brief.cards.filter((c) => c.needsAction).length;
+  // The fallback topline covers this overview, not later date-bound chores.
+  // A future task that can be completed now has placement=action and remains
+  // included; ordinary future and past obligations do not inflate urgency.
+  const actions = brief.cards.filter(
+    (c) => c.needsAction && c.placement !== 'future' && c.placement !== 'past',
+  ).length;
 
   // A source-health warning must never look like a quiet week. Put this panel
   // right under the topline so the reader sees a failed fetch or persistent
@@ -382,7 +396,7 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
 
   ${hasHealthWarning ? `<section><h2>Datastatus</h2>${datastatus}</section>` : ''}
 
-  <section data-section="cards" aria-label="Kommende">
+  <section data-section="cards" aria-label="Aula-overblik">
     <div class="timeline">${timeline}</div>
     <div class="panel" data-empty${brief.timeline.length ? ' hidden' : ''}>Ingen punkter i dag. Det, der blev læst, står nederst under Øvrigt fra Aula.</div>
     <button class="done-toggle" type="button" aria-expanded="false" data-done-toggle hidden></button>
