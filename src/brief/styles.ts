@@ -67,6 +67,9 @@ h1{margin:0;font-size:34px;letter-spacing:-.02em;font-weight:650}
 .c1{background:var(--c1)} .c2{background:var(--c2)} .c3{background:var(--c3)}
 .topline{font-size:20px;line-height:1.5;letter-spacing:-.01em;margin:0 0 34px;padding:20px 22px;
   background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+.overview-warning .panel{background:var(--warn-bg);border-color:var(--warn)}
+.overview-warning .st{font-weight:550}
+.overview-warning .st span{color:var(--ink)}
 section{margin-bottom:34px}
 h2{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);
   font-weight:650;margin:0 0 12px;display:flex;align-items:center;gap:10px}

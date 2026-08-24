@@ -12,6 +12,7 @@ import type { AulaClient } from '../client.ts';
 import { isoWeekString } from '../integrations/types.ts';
 import { collect, HISTORY_DAYS } from './collect.ts';
 import { deployArtifact, type DeployResult } from './deploy.ts';
+import { appendBriefLog, errorForBriefLog } from './log.ts';
 import { extractCards } from './llm.ts';
 import { publish, type PublishResult } from './publish.ts';
 import { cardsFromRules, rank } from './rank.ts';
@@ -102,6 +103,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   let extractionRan = opts.useModel === false;
   let supplementRules = false;
   let extractionStatus: string | null = null;
+  let overviewWarning: string | null = null;
 
   if (opts.useModel !== false) {
     try {
@@ -117,13 +119,46 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
         extractionStatus =
           `Modellens svar var ufuldstændigt (${extracted.problems.length} fejl), ` +
           'så siden bruger de validerede kort og reglerne som reserve for resten.';
+        const logged = appendBriefLog({
+          at: now.toISOString(),
+          event: 'brief.model.incomplete',
+          day: input.today,
+          isoWeek,
+          model: process.env.AULA_BRIEF_MODEL ?? null,
+          effort: process.env.AULA_BRIEF_EFFORT ?? null,
+          useCache: opts.useCache !== false,
+          details: { problems: extracted.problems },
+        });
+        notes.push(
+          logged.ok
+            ? `Udviklerlog: ${logged.path}`
+            : `Udviklerloggen kunne ikke skrives til ${logged.path}: ${logged.error}`,
+        );
       }
       for (const problem of extracted.problems) {
         notes.push(`Udtræk afvist: ${problem}`);
       }
     } catch (err) {
-      extractionStatus = `Modellen kunne ikke køre (${errorMessage(err)}) — kun reglerne blev brugt.`;
-      notes.push(extractionStatus);
+      overviewWarning =
+        'Modellen kunne ikke prioritere indholdet. Oversigten er derfor kun bygget med ' +
+        'simple regler og kan mangle vigtige punkter eller have en mindre nyttig rækkefølge. ' +
+        'Prøv at generere den igen senere.';
+      notes.push(`Modellen kunne ikke køre (${errorMessage(err)}) — kun reglerne blev brugt.`);
+      const logged = appendBriefLog({
+        at: now.toISOString(),
+        event: 'brief.model.failed',
+        day: input.today,
+        isoWeek,
+        model: process.env.AULA_BRIEF_MODEL ?? null,
+        effort: process.env.AULA_BRIEF_EFFORT ?? null,
+        useCache: opts.useCache !== false,
+        details: errorForBriefLog(err),
+      });
+      notes.push(
+        logged.ok
+          ? `Udviklerlog: ${logged.path}`
+          : `Udviklerloggen kunne ikke skrives til ${logged.path}: ${logged.error}`,
+      );
     }
   }
 
@@ -150,6 +185,8 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
     topline,
     summaries,
     isNew,
+    generatedAt: now,
+    ...(overviewWarning ? { overviewWarning } : {}),
     ...(origin === 'fallback' && opts.useModel !== false ? { note: 'kun reglerne' } : {}),
   };
   let body = renderPage(brief, pageOptions);

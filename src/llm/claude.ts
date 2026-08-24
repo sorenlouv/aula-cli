@@ -26,6 +26,42 @@ export type ClaudeExit = {
   timedOut: boolean;
 };
 
+type ClaudeExitDiagnostic = ClaudeExit & {
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
+};
+
+export type ClaudeFailureDetails = {
+  timeoutMs: number;
+  model: string | null;
+  effort: string | null;
+  schemaRequested: boolean;
+  attempts: ClaudeExitDiagnostic[];
+};
+
+/** A transport failure whose captured process diagnostics can be logged later. */
+export class ClaudeRunError extends Error {
+  constructor(
+    message: string,
+    readonly details: ClaudeFailureDetails,
+  ) {
+    super(message);
+    this.name = 'ClaudeRunError';
+  }
+}
+
+const DIAGNOSTIC_LIMIT = 32_768;
+
+function diagnosticExit(exit: ClaudeExit): ClaudeExitDiagnostic {
+  return {
+    ...exit,
+    stdout: exit.stdout.slice(0, DIAGNOSTIC_LIMIT),
+    stderr: exit.stderr.slice(0, DIAGNOSTIC_LIMIT),
+    stdoutTruncated: exit.stdout.length > DIAGNOSTIC_LIMIT,
+    stderrTruncated: exit.stderr.length > DIAGNOSTIC_LIMIT,
+  };
+}
+
 /**
  * Spawns `claude` and bounds both the process and inherited output pipes.
  *
@@ -132,6 +168,15 @@ export async function runClaude(
   opts: { timeoutMs?: number; graceMs?: number; schema?: unknown } = {},
 ): Promise<{ text: string; structured: unknown }> {
   const timeoutMs = opts.timeoutMs ?? 240_000;
+  const attempts: ClaudeExit[] = [];
+  const failure = (message: string) =>
+    new ClaudeRunError(message, {
+      timeoutMs,
+      model: process.env.AULA_BRIEF_MODEL ?? null,
+      effort: process.env.AULA_BRIEF_EFFORT ?? null,
+      schemaRequested: opts.schema !== undefined,
+      attempts: attempts.map(diagnosticExit),
+    });
   for (let attempt = 1; attempt <= 2; attempt++) {
     const run = await spawnClaude(
       [
@@ -147,18 +192,17 @@ export async function runClaude(
       ],
       { stdin, timeoutMs, ...(opts.graceMs !== undefined ? { graceMs: opts.graceMs } : {}) },
     );
+    attempts.push(run);
     if (run.timedOut) continue;
     const reply = parseClaudeJson(run.stdout);
     if (run.code !== 0 || reply?.isError) {
       const detail = reply?.text.trim() || run.stderr.trim() || run.stdout.trim() || '(no stderr)';
-      throw new Error(`claude -p exited ${run.code}: ${detail}`);
+      throw failure(`claude -p exited ${run.code}: ${detail}`);
     }
     if (opts.schema !== undefined && reply?.structured === undefined) {
-      throw new Error(
-        'claude -p returned no schema-validated structured_output. Update Claude CLI.',
-      );
+      throw failure('claude -p returned no schema-validated structured_output. Update Claude CLI.');
     }
     return { text: (reply?.text ?? run.stdout).trim(), structured: reply?.structured };
   }
-  throw new Error(`claude -p timed out after ${Math.round(timeoutMs / 1000)}s (2 attempts)`);
+  throw failure(`claude -p timed out after ${Math.round(timeoutMs / 1000)}s (2 attempts)`);
 }
