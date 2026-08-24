@@ -152,8 +152,10 @@ export type BriefInput = {
  * The model writes these finished: a title, a summary that stands without the
  * source, the day to sort it by, whether it asks something of the family, and
  * the sources it rests on. A card may gather several sources that say the same
- * thing — the July post with the date and the August message with the news
- * are one card — and the page lists every one of them under *Læs mere*.
+ * concrete thing — the July post with the date and the August message with the
+ * news are one card — and the page lists every one of them under *Læs mere*.
+ * Independently completable actions stay separate even when they share a day,
+ * child or source.
  *
  * The rules layer makes the same shape without a model: title from the source,
  * the matched sentence as the summary. It is the fallback; only a partial

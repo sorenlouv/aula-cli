@@ -168,6 +168,19 @@ describe('recurring Aula cards', () => {
   });
 });
 
+describe('independent Aula actions', () => {
+  test('the production contract keeps independently completable reminders separate', () => {
+    const cardProperties = extractionSchema(INPUT).properties.cards.items.properties;
+    const instructions = extractionInstructions(INPUT);
+
+    expect(cardProperties.sourceKeys.description).toContain('samme konkrete handling eller besked');
+    expect(cardProperties.sourceKeys.description).toContain('bruges i flere kort');
+    expect(instructions).toContain('kan klare hver for sig, er to kort');
+    expect(instructions).toContain('aflevere biblioteksbøger');
+    expect(instructions).toContain('prioriteres over almindelig orientering');
+  });
+});
+
 describe('model cost controls', () => {
   test('uses a small low-effort model for deterministic tool transport', () => {
     const previous = {

@@ -55,4 +55,30 @@ describe('brief extraction eval assertions', () => {
       ),
     ).toBe(false);
   });
+
+  test('one merged card cannot satisfy two distinct obligations', () => {
+    const evalCase = briefExtractionCases.find(
+      (candidate) => candidate.id === 'same-day-distinct-obligations',
+    )!;
+    const merged: ExtractResult = {
+      ...EMPTY_RESULT,
+      cards: [
+        {
+          id: 'model:0',
+          title: 'Husk badetøj og madpakke til Alma',
+          summary: 'Husk badetøj og madpakke på mandag.',
+          children: ['Alma'],
+          date: '2026-08-31',
+          recurring: false,
+          needsAction: true,
+          reason: 'To ting skal med.',
+          sourceKeys: ['post:two-obligations'],
+          origin: 'model',
+        },
+      ],
+    };
+
+    const failures = assertBriefExtraction(evalCase, merged);
+    expect(failures.some((failure) => failure.assertion.startsWith('a distinct card'))).toBe(true);
+  });
 });

@@ -12,13 +12,52 @@ function sameStrings(actual: string[], expected: string[]): boolean {
   );
 }
 
-function matchingCard(result: ExtractResult, expected: ExpectedCard) {
-  return result.cards.find(
-    (card) =>
-      expected.sourceKeys.every((sourceKey) => card.sourceKeys.includes(sourceKey)) &&
-      (expected.textContains === undefined ||
-        includesInsensitive(`${card.title}\n${card.summary}`, expected.textContains)),
+function matchesCardIdentity(
+  card: ExtractResult['cards'][number],
+  expected: ExpectedCard,
+): boolean {
+  const text = `${card.title}\n${card.summary}`;
+  return (
+    expected.sourceKeys.every((sourceKey) => card.sourceKeys.includes(sourceKey)) &&
+    (!expected.sourceKeysExactly || sameStrings(card.sourceKeys, expected.sourceKeys)) &&
+    !(expected.excludedSourceKeys ?? []).some((sourceKey) => card.sourceKeys.includes(sourceKey)) &&
+    (expected.titleContains === undefined ||
+      includesInsensitive(card.title, expected.titleContains)) &&
+    (expected.textContains === undefined || includesInsensitive(text, expected.textContains)) &&
+    !(expected.textNotContains ?? []).some((needle) => includesInsensitive(text, needle))
   );
+}
+
+/**
+ * Find a maximum one-to-one assignment between expectations and returned
+ * cards. Without this, one broad merged card can satisfy two expectations and
+ * make an eval named "distinct obligations" pass while the page still hides
+ * one action inside the other.
+ */
+function distinctCardMatches(result: ExtractResult, expectations: ExpectedCard[]): number[] {
+  const candidates = expectations.map((expected) =>
+    result.cards.flatMap((card, index) => (matchesCardIdentity(card, expected) ? [index] : [])),
+  );
+  const expectedByCard = new Array<number>(result.cards.length).fill(-1);
+
+  const assign = (expectedIndex: number, seenCards: Set<number>): boolean => {
+    for (const cardIndex of candidates[expectedIndex] ?? []) {
+      if (seenCards.has(cardIndex)) continue;
+      seenCards.add(cardIndex);
+      const previousExpected = expectedByCard[cardIndex] ?? -1;
+      if (previousExpected !== -1 && !assign(previousExpected, seenCards)) continue;
+      expectedByCard[cardIndex] = expectedIndex;
+      return true;
+    }
+    return false;
+  };
+
+  for (let index = 0; index < expectations.length; index++) assign(index, new Set());
+  const cardByExpected = new Array<number>(expectations.length).fill(-1);
+  for (const [cardIndex, expectedIndex] of expectedByCard.entries()) {
+    if (expectedIndex !== -1) cardByExpected[expectedIndex] = cardIndex;
+  }
+  return cardByExpected;
 }
 
 /**
@@ -52,12 +91,18 @@ export function assertBriefExtraction(
     }
   }
 
-  for (const expected of evalCase.expected.requiredCards ?? []) {
-    const card = matchingCard(result, expected);
+  const requiredCards = evalCase.expected.requiredCards ?? [];
+  const matches = distinctCardMatches(result, requiredCards);
+  for (const [expectedIndex, expected] of requiredCards.entries()) {
+    const cardIndex = matches[expectedIndex] ?? -1;
+    const card = result.cards[cardIndex];
     if (!card) {
       failures.push({
-        assertion: `a card cites ${expected.sourceKeys.join(', ')}`,
-        actual: result.cards.map((candidate) => candidate.sourceKeys),
+        assertion: `a distinct card matches ${expected.sourceKeys.join(', ')}`,
+        actual: result.cards.map((candidate) => ({
+          title: candidate.title,
+          sourceKeys: candidate.sourceKeys,
+        })),
       });
       continue;
     }
@@ -83,6 +128,12 @@ export function assertBriefExtraction(
       failures.push({
         assertion: `${expected.sourceKeys.join(', ')} concerns ${expected.children.join(', ')}`,
         actual: card.children,
+      });
+    }
+    if (expected.maxRank !== undefined && cardIndex + 1 > expected.maxRank) {
+      failures.push({
+        assertion: `${expected.sourceKeys.join(', ')} ranks at or above ${expected.maxRank}`,
+        actual: cardIndex + 1,
       });
     }
   }

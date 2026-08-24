@@ -105,7 +105,7 @@ export function extractionSchema(input: BriefInput) {
       },
       cards: {
         type: 'array',
-        description: `Kortene i prioriteret rækkefølge, vigtigst først. 5–10 en normal morgen. Hvert kort er én ting, forælderen skal vide eller gøre, også efter ${through}; siden folder selv senere kort og dem over visningsgrænsen sammen nederst.`,
+        description: `Kortene i prioriteret rækkefølge, vigtigst først. 5–10 en normal morgen. Hvert kort er én selvstændig ting, forælderen skal vide eller gøre, også efter ${through}; siden folder selv senere kort og dem over visningsgrænsen sammen nederst. Handlinger, der kan klares hver for sig, er separate kort.`,
         items: {
           type: 'object',
           properties: {
@@ -117,7 +117,7 @@ export function extractionSchema(input: BriefInput) {
             summary: {
               type: 'string',
               description:
-                'Én til tre sætninger, der siger det vigtige, uden at læseren behøver kilden. Må samle flere kilder.',
+                'Én til tre sætninger, der siger det vigtige, uden at læseren behøver kilden. Må samle flere kilder, når de underbygger den samme handling eller besked, men må ikke blande selvstændige emner.',
             },
             children: {
               type: 'array',
@@ -150,7 +150,8 @@ export function extractionSchema(input: BriefInput) {
               type: 'array',
               minItems: 1,
               items: { $ref: '#/$defs/aulaKey' },
-              description: 'De kilder, kortet bygger på. Flere, når de handler om det samme.',
+              description:
+                'De kilder, kortet bygger på. Flere kun når de handler om den samme konkrete handling eller besked. Den samme kilde må bruges i flere kort, hvis den rummer flere selvstændige ting.',
             },
           },
           required: [
@@ -222,7 +223,7 @@ const INSTRUCTIONS = `Du læser de seneste ugers indhold fra Aula — opslag, be
 
 Du afgør fire ting:
 
-1. Aula-kortene. En normal morgen giver 5–10. Skriv kortene i prioriteret rækkefølge — vigtigst først; bliver der for mange, er det de sidste, siden folder sammen. Sidens fremhævede tidslinje går fra "today" til og med "overviewThrough". Noget senere må stadig blive et kort, så det beholder sit resumé og sine kilder, men siden folder det selv sammen nederst; det må ikke nævnes i topline eller childSummaries, og en Aula-kilde må ikke skjules alene på grund af datoen. Hvert kort er én ting, forælderen skal vide eller gøre: en titel, der nævner barnet og står i bydeform, når der skal gøres noget; et resumé på én til tre sætninger, der siger det vigtige, uden at læseren behøver kilden; datoen kortet sorteres efter — fristen, hvis der er én, ellers dagen det sker; om det kræver handling af forælderen; en begrundelse for, hvorfor kortet er med; og de Aula-kilder, det bygger på. Ved en fast ugentlig aftale uden en enkelt dato er datoen den næste forekomst på eller efter "today", regnet fra ugedagen i kilden: læses oversigten på selve ugedagen, er datoen "today", ikke en uge senere og ikke null. Siden mærker selv kortet som gentaget, så datoen ikke ligner en enkeltstående Aula-dato. Ét kort må samle flere Aula-kilder, og skal gøre det, når de handler om det samme: et opslag fra juli med datoen og en besked fra i dag om samme arrangement er ét kort med juli-datoen og begge kilder. Forælderen har for længst glemt juli-opslaget — når du binder dem sammen, hjælper du forælderen meget. En personlig kalenderaftale må aldrig indgå i et Aula-kort.
+1. Aula-kortene. En normal morgen giver 5–10. Skriv kortene i prioriteret rækkefølge — vigtigst først; bliver der for mange, er det de sidste, siden folder sammen. Sidens fremhævede tidslinje går fra "today" til og med "overviewThrough". Noget senere må stadig blive et kort, så det beholder sit resumé og sine kilder, men siden folder det selv sammen nederst; det må ikke nævnes i topline eller childSummaries, og en Aula-kilde må ikke skjules alene på grund af datoen. Hvert kort er én selvstændig ting, forælderen skal vide eller gøre: en titel, der nævner barnet og står i bydeform, når der skal gøres noget; et resumé på én til tre sætninger, der siger det vigtige, uden at læseren behøver kilden; datoen kortet sorteres efter — fristen, hvis der er én, ellers dagen det sker; om det kræver handling af forælderen; en begrundelse for, hvorfor kortet er med; og de Aula-kilder, det bygger på. To handlinger, som forælderen kan klare hver for sig, er to kort — også når de gælder samme barn og dag, står i samme ugeplan eller ligger ved siden af det samme arrangement. En påmindelse om at aflevere biblioteksbøger er derfor sit eget kort og må ikke gemmes i et kort om skolefoto, bare fordi begge dele sker tirsdag. Den samme kilde må gerne stå under flere kort, når den rummer flere selvstændige ting. Ved en fast ugentlig aftale uden en enkelt dato er datoen den næste forekomst på eller efter "today", regnet fra ugedagen i kilden: læses oversigten på selve ugedagen, er datoen "today", ikke en uge senere og ikke null. Siden mærker selv kortet som gentaget, så datoen ikke ligner en enkeltstående Aula-dato. Ét kort må samle flere Aula-kilder, og skal gøre det, når de underbygger den samme konkrete handling eller besked: et opslag fra juli med datoen og en besked fra i dag om samme arrangement er ét kort med juli-datoen og begge kilder. Forælderen har for længst glemt juli-opslaget — når du binder dem sammen, hjælper du forælderen meget. En personlig kalenderaftale må aldrig indgå i et Aula-kort.
 
 2. De personlige kalenderaftaler. Svar med præcis én vurdering per kilde med type "personal", også når den er irrelevant. Skriv vurderingerne i prioriteret rækkefølge, og brug den snævre inklusionsregel i svarskemaets beskrivelse af "relevant". Skriv én kort, faktuel opsummering og én kort begrundelse. En aftale med relevant=false må ikke bruges i topline eller childSummaries. Gæt aldrig hvilket barn aftalen handler om, gør den aldrig til en handling, og bland den aldrig sammen med en Aula-kilde. Siden bruger selv kildens titel, dato, tid, sted og link.
 
@@ -239,7 +240,7 @@ Sådan læser du en kilde:
 - Kilder med type "personal" er forælderens egne kalenderaftaler. Relevante aftaler bliver kompakte, sammenklappede kort mellem Aula-kortene på samme dag. Brug dem ikke til at analysere sammenfald med skoleindhold, hævde en konflikt eller berolige om, at der ikke er en.
 
 Det, der gør en kilde relevant — vigtigst først:
-- Den kræver noget af forælderen om deres barn: noget der skal medbringes, tilmeldes, besvares eller betales; en frist; en aflysning; en dag barnet møder anderledes. Sendt til hele skolen tæller stadig, når det rammer barnet specifikt — skolefoto gør, et valgfrit forældrekursus gør ikke.
+- Den kræver noget af forælderen om deres barn: noget der skal medbringes, afleveres, tilmeldes, besvares eller betales; en frist; en aflysning; en dag barnet møder anderledes. Hver selvstændig handling skal have sit eget kort og prioriteres over almindelig orientering. Sendt til hele skolen tæller stadig, når det rammer barnet specifikt — skolefoto gør, et valgfrit forældrekursus gør ikke.
 - Den er rettet mod få: barnets egen stue eller klasse, eller en lille gruppe med barnet i.
 - Barnet eller forælderen er nævnt ved navn.
 - En hård deadline.
