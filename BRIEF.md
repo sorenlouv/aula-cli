@@ -45,10 +45,15 @@ appointment alone.
 
 Date support keeps full calendar days, including the year. Relative phrases
 such as *i morgen* resolve from the source's written date — from the individual
-message timestamp inside a thread — not the day the brief runs. A card date
-must land between the beginning of the fetched history and one year after the
-brief. Every date-shaped claim is checked against at least one of that card's
-own cited sources; an unrelated source elsewhere in the brief cannot license it.
+message timestamp inside a thread — not the day the brief runs. A weekly
+recurrence is different: its next display occurrence is computed on or after
+the brief's day from a recurring weekday in one of its sources; the model marks
+the card as recurring, and validation checks that source support. The card
+carries a *Gentages hver …* badge, so the occurrence date is visibly a
+projection, not a claim that Aula named that exact day. A card date must land
+between the beginning of the fetched history and one year after the brief.
+Every date-shaped claim is checked against at least one of that card's own cited
+sources; an unrelated source elsewhere in the brief cannot license it.
 
 The renderer builds from `styles.ts` tokens, so the page cannot come out
 grey-on-white, and **the sections keep their places**: this is read in twenty
@@ -93,7 +98,8 @@ Sections render only when they have content, and never change order.
    having to be first. Two tails under dividers: *Uden fast dato* for cards with
    no day, *Tidligere* for cards whose day has passed but that still say
    something (a decision, a new standing arrangement). Each card: date chip
-   (*I dag*, *I morgen*, else the day), the children, title, summary, and
+   (*I dag*, *I morgen*, else the day), a *Gentages hver …* badge when the day
+   is the next occurrence of a weekly routine, the children, title, summary, and
    *Læs mere* — which opens with *Vist fordi:* the model's reason, then every
    source the card rests on, each with its title, when it is from, its author,
    a link, and the original. Relevant personal appointments sit between these
@@ -269,6 +275,7 @@ parsed `structured_output`. What the schema can state, the prompt does not say:
 | `personalEvents[].relevant` | strict positive-evidence rule: child/school/day-care/logistics context, otherwise `false` |
 | `cards[].children` | an `enum` of the children |
 | `cards[].date` | `format: "date"` — a day, never a timestamp |
+| `cards[].recurring` | `true` only for a fixed weekly routine whose displayed date is its next occurrence |
 | `hidden` | an `enum` of Aula sources; personal appointments use `relevant=false` |
 | field semantics | `description`s on the field they govern, written once each |
 
@@ -312,10 +319,12 @@ full Aula cards and folds the rest into *Øvrigt fra Aula*. Relevant personal
 appointments are compact and do not consume that cap. Code then merges both
 shapes for display: upcoming by date, then undated, then past (most recent
 first). Known calendar starts on the same day sort by time; all-day/date-only
-entries precede them, and ties retain stable model order. `--explain` prints the
-one-based model rank beside each entry. Without a model, rule-made Aula cards
-use the same cap and every personal appointment fails open as a source-only
-compact card.
+entries precede them, and ties retain stable model order. A weekly routine with
+no future one-off date is projected onto its next weekday on or after the brief
+date before sorting; an explicitly future date still wins. `--explain` prints
+the one-based model rank beside each entry. Without a model, rule-made Aula
+cards use the same cap and every personal appointment fails open as a
+source-only compact card.
 
 ### Preferences: one list, and the built-in cues it tunes
 

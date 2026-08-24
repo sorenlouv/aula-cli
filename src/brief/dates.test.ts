@@ -4,6 +4,8 @@ import {
   buildDateSupport,
   dueAtSupported,
   findDateClaims,
+  findRecurringWeekdays,
+  nextRecurringDate,
   unsupportedDateClaims,
 } from './dates.ts';
 import type { BriefInput, SourceItem } from './types.ts';
@@ -82,6 +84,26 @@ describe('findDateClaims', () => {
       day: 29,
       raw: '29/2',
     });
+  });
+});
+
+describe('recurring weekdays', () => {
+  test('recognises weekly Danish and English forms, but not a one-off weekday', () => {
+    expect(
+      findRecurringWeekdays(
+        'Løb fast om mandagen, tur hver torsdag og tirsdage er turdage. On Wednesdays, swim every Friday.',
+      ).sort(),
+    ).toEqual([1, 2, 3, 4, 5]);
+    expect(
+      findRecurringWeekdays(
+        'På mandag løber vi. Mandagen efter ferien er særlig. Vi taler om mandag.',
+      ),
+    ).toEqual([]);
+  });
+
+  test('projects to the weekday on or after the brief day', () => {
+    expect(nextRecurringDate(1, '2026-08-24')).toBe('2026-08-24');
+    expect(nextRecurringDate(4, '2026-08-24')).toBe('2026-08-27');
   });
 });
 

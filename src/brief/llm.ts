@@ -15,7 +15,12 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildDateSupport, dueAtSupported, unsupportedDateClaims } from './dates.ts';
+import {
+  buildDateSupport,
+  dueAtSupported,
+  findRecurringWeekdays,
+  unsupportedDateClaims,
+} from './dates.ts';
 import { BRIEF_DIR } from './state.ts';
 import type { BriefInput, Card, PersonalEventVerdict } from './types.ts';
 import { isRecord, parseIsoDateParts } from '../validation.ts';
@@ -153,6 +158,25 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
       );
       continue;
     }
+    const recurring = raw.recurring === true;
+    if (recurring) {
+      const cardDays = new Set(findRecurringWeekdays(`${title}\n${summary}`));
+      const sourceDays = new Set(
+        sourceKeys.flatMap((key) => {
+          const source = items.get(key)!;
+          return findRecurringWeekdays(`${source.title}\n${source.text}`);
+        }),
+      );
+      const cardSourceDays = [...cardDays].filter((day) => sourceDays.has(day));
+      const datedWeekday = date ? parseIsoDateParts(date)?.weekday : undefined;
+      const candidates = (cardSourceDays.length > 0 ? cardSourceDays : [...sourceDays]).filter(
+        (day) => datedWeekday === undefined || day === datedWeekday,
+      );
+      if (candidates.length !== 1) {
+        problems.push(`${label}: recurring har ikke én fast ugedag i kortets kilder`);
+        continue;
+      }
+    }
     const children = Array.isArray(raw.children)
       ? raw.children
           .filter((name): name is string => typeof name === 'string')
@@ -165,6 +189,7 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
       summary,
       children,
       date,
+      recurring,
       needsAction: raw.needsAction === true,
       reason,
       sourceKeys,

@@ -80,6 +80,37 @@ describe('rank: placement', () => {
     expect(b.cards[0]?.placement).toBe('upcoming');
   });
 
+  test('an undated weekly routine is placed on today when today is its weekday', () => {
+    const running = item({
+      key: 'post:running',
+      title: 'Fast løbedag',
+      text: 'Vi løber fast om mandagen. Husk løbetøj og løbesko.',
+    });
+    const next = item({ key: 'post:next', title: 'Turdag' });
+    const monday = briefInput({ today: '2026-08-24', items: [running, next] });
+    const brief = rank(monday, {
+      model: [
+        card({
+          id: 'running',
+          title: 'Send Alma i løbetøj om mandagen',
+          summary: 'Det er en fast løbedag om mandagen.',
+          date: null,
+          sourceKeys: [running.key],
+        }),
+        card({ id: 'next', title: 'Turdag', date: '2026-08-25', sourceKeys: [next.key] }),
+      ],
+      rules: [],
+      hidden: [],
+    });
+
+    expect(brief.cards.map((entry) => entry.id)).toEqual(['running', 'next']);
+    expect(brief.cards[0]).toMatchObject({
+      date: '2026-08-24',
+      placement: 'upcoming',
+      recurrenceWeekday: 1,
+    });
+  });
+
   test("on the same day, the model's order survives", () => {
     const info = card({ id: 'i', date: '2026-08-14', sourceKeys: ['post:1'] });
     const act = card({ id: 'x', date: '2026-08-14', needsAction: true, sourceKeys: ['thread:2'] });

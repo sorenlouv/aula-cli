@@ -5,6 +5,7 @@ export type ExpectedCard = {
   sourceKeys: string[];
   needsAction?: boolean;
   date?: string | null;
+  recurring?: boolean;
   children?: string[];
   /** Disambiguates several obligations carried by the same source. */
   textContains?: string;

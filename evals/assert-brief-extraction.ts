@@ -73,6 +73,12 @@ export function assertBriefExtraction(
         actual: card.date,
       });
     }
+    if (expected.recurring !== undefined && card.recurring !== expected.recurring) {
+      failures.push({
+        assertion: `${expected.sourceKeys.join(', ')} has recurring=${expected.recurring}`,
+        actual: card.recurring,
+      });
+    }
     if (expected.children && !sameStrings(card.children, expected.children)) {
       failures.push({
         assertion: `${expected.sourceKeys.join(', ')} concerns ${expected.children.join(', ')}`,

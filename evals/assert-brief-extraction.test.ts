@@ -36,6 +36,7 @@ describe('brief extraction eval assertions', () => {
           summary: 'Svar om Alma må deltage.',
           children: ['Alma'],
           date: '2026-08-25',
+          recurring: false,
           needsAction: true,
           reason: 'Der er en svarfrist.',
           sourceKeys: ['thread:trip-consent'],

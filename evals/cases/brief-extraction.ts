@@ -20,11 +20,16 @@ const children = [
 
 function input(
   items: SourceItem[],
-  opts: { windowDays?: number; preferences?: string[] } = {},
+  opts: {
+    windowDays?: number;
+    preferences?: string[];
+    today?: string;
+    isoWeek?: string;
+  } = {},
 ): BriefInput {
   return {
-    today: '2026-08-23',
-    isoWeek: '2026-W34',
+    today: opts.today ?? '2026-08-23',
+    isoWeek: opts.isoWeek ?? '2026-W34',
     windowDays: opts.windowDays ?? 60,
     family: { children, isSteppedUp: true },
     items,
@@ -116,6 +121,15 @@ const adultCourse = aulaSource({
   groups: ['Alle forældre i kommunen'],
   childNames: [],
   audience: 'municipal',
+});
+const runningRoutine = aulaSource({
+  key: 'post:weekly-running',
+  title: 'Fast løbedag',
+  text: 'Sommerfuglene har fast løbedag hver mandag. Husk at sende Otto i tøj og sko, der er rare at løbe i.',
+  at: '2026-08-10T09:00:00+02:00',
+  groups: ['Sommerfuglene'],
+  childNames: ['Otto Eksempelsen'],
+  audience: 'class',
 });
 
 const weekReply = aulaSource({
@@ -402,6 +416,25 @@ export const briefExtractionCases: BriefExtractionEvalCase[] = [
       relevantPersonalEvents: [almaDentist.key],
       toplineNotContains: ['konflikt', 'kolliderer', 'sammenfald'],
       childSummariesNotContain: ['konflikt', 'kolliderer', 'sammenfald'],
+    },
+  },
+  {
+    id: 'recurring-aula-routine',
+    description:
+      'A weekly Aula routine without a one-off date is dated to today when the brief runs on that weekday.',
+    provenance: 'user-labelled',
+    input: input([runningRoutine], { today: '2026-08-24', isoWeek: '2026-W35' }),
+    expected: {
+      requiredCards: [
+        {
+          sourceKeys: [runningRoutine.key],
+          needsAction: true,
+          date: '2026-08-24',
+          recurring: true,
+          children: ['Otto'],
+        },
+      ],
+      hiddenExcludes: [runningRoutine.key],
     },
   },
 ];

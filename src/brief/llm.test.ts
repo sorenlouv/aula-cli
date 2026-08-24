@@ -131,6 +131,22 @@ describe('personal appointment relevance policy', () => {
   });
 });
 
+describe('recurring Aula cards', () => {
+  test('the production contract dates a weekly routine on its next occurrence', () => {
+    const dateDescription =
+      extractionSchema(INPUT).properties.cards.items.properties.date.description;
+    const recurringDescription =
+      extractionSchema(INPUT).properties.cards.items.properties.recurring.description;
+    const instructions = extractionInstructions(INPUT);
+
+    expect(dateDescription).toContain('næste forekomst på eller efter today');
+    expect(dateDescription).toContain('Null kun når hverken dato eller fast ugedag findes');
+    expect(recurringDescription).toContain('True kun når kortet er en fast ugentlig aftale');
+    expect(instructions).toContain('læses oversigten på selve ugedagen');
+    expect(instructions).toContain('ikke en uge senere og ikke null');
+  });
+});
+
 describe('model cost controls', () => {
   test('uses a small low-effort model for deterministic tool transport', () => {
     const previous = {
@@ -186,6 +202,7 @@ describe('validateExtraction', () => {
     summary: 'Myretuen har fast løbedag om mandagen; tøj og sko skal være til at løbe i.',
     children: ['Viggo'],
     date: '2026-08-17',
+    recurring: true,
     needsAction: true,
     reason: 'Noget Viggo skal have med; rettet mod hans egen stue.',
     sourceKeys: ['post:1'],
@@ -215,6 +232,7 @@ describe('validateExtraction', () => {
       summary: good.summary,
       children: ['Viggo'],
       date: '2026-08-17',
+      recurring: true,
       needsAction: true,
       reason: good.reason,
       sourceKeys: ['post:1'],
@@ -247,6 +265,7 @@ describe('validateExtraction', () => {
       ...good,
       title: 'Overnatning for Myretuen 11/9',
       date: '2026-09-11',
+      recurring: false,
       sourceKeys: ['post:1', 'post:2'],
     };
     const result = validateExtraction(input, answer({ cards: [merged] }));
@@ -281,6 +300,19 @@ describe('validateExtraction', () => {
     // 2026-08-17 is a Monday; "mandag" is exactly what the card is about.
     const echoed = { ...good, title: 'Løbetøj med mandag' };
     expect(validateExtraction(input, answer({ cards: [echoed] })).problems).toEqual([]);
+  });
+
+  test('a recurring card must cite one weekly weekday', () => {
+    const fabricated = {
+      ...good,
+      title: 'Overnatning for Viggo',
+      summary: 'Myretuen overnatter fredag den 11. september.',
+      date: '2026-09-11',
+      sourceKeys: ['post:2'],
+    };
+    const result = validateExtraction(input, answer({ cards: [fabricated] }));
+    expect(result.cards).toEqual([]);
+    expect(result.problems.some((problem) => problem.includes('recurring'))).toBe(true);
   });
 
   test('a timestamp is not a date', () => {
@@ -551,6 +583,7 @@ describe('the claude subprocess', () => {
       summary: `Indhold ${index}`,
       children: [],
       date: null,
+      recurring: false,
       needsAction: false,
       reason: 'Relevant.',
       sourceKeys: [`post:${index}`],

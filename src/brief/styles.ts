@@ -84,6 +84,7 @@ h2::after{content:"";flex:1;height:1px;background:var(--line)}
 .chip{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;padding:3px 9px;border-radius:6px}
 .chip.now{background:var(--now-bg);color:var(--now)}
 .chip.soon{background:var(--soon-bg);color:var(--soon)}
+.chip.recurring{background:var(--quote);color:var(--ink-2);border:1px solid var(--line)}
 .chip.new{background:transparent;color:var(--ink-3);border:1px dashed var(--line)}
 .who{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-2);font-weight:550}
 .title{font-size:17.5px;font-weight:600;letter-spacing:-.01em;margin:0 0 6px}

@@ -172,9 +172,12 @@ export type Card = {
   children: string[];
   /**
    * `YYYY-MM-DD` — the deadline when there is one, else the day it happens.
-   * The page sorts on it; a day that has passed lands under *Tidligere*.
+   * For a weekly routine it is the next occurrence. The page sorts on it; a
+   * day that has passed lands under *Tidligere*.
    */
   date: string | null;
+  /** True when the date is an occurrence projected from a weekly source schedule. */
+  recurring: boolean;
   /** Something the family must do, not merely know. Drawn with emphasis. */
   needsAction: boolean;
   /** Why the card is on the page. Shown under *Læs mere*, never on the card. */
@@ -207,6 +210,8 @@ export type Placement = 'upcoming' | 'undated' | 'past';
 export type RankedCard = Card & {
   entryType: 'card';
   placement: Placement;
+  /** Weekly weekday inferred from recurring prose in both the card and a cited source. */
+  recurrenceWeekday: number | null;
   sources: SourceItem[];
   /** Exact start only when a cited calendar source supplies one. */
   sortAt: string | null;

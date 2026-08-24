@@ -239,6 +239,31 @@ describe('a card', () => {
 });
 
 describe('the list', () => {
+  test('marks a projected weekly occurrence and keeps it in chronological order', () => {
+    const running = sourceItem({
+      key: 'post:running',
+      title: 'Løbedag',
+      text: 'Vi løber fast om mandagen. Husk løbetøj og løbesko.',
+    });
+    const input = briefInput({ today: '2026-08-24', items: [running] });
+    const brief = rankedBrief(input, [
+      card({
+        id: 'running',
+        title: 'Send Viggo i løbetøj og løbesko om mandagen',
+        summary: 'Løbedagen gentages om mandagen.',
+        needsAction: true,
+        sourceKeys: [running.key],
+      }),
+    ]);
+    const html = renderPage(brief);
+
+    expect(html).toContain('<span class="chip now">I dag</span>');
+    expect(html).toContain('<span class="chip recurring">Gentages hver mandag</span>');
+    expect(html).not.toContain('Uden fast dato');
+    expect(html).toContain('data-done-keys="post:running|2026-08-24"');
+    expect(validatePage(html, brief)).toEqual([]);
+  });
+
   test('is by date with undated and past tails under dividers', () => {
     const undated = card({ id: 'u', title: 'Skolemælk', sourceKeys: ['post:3'] });
     const past = card({ id: 'p', title: 'Løbedag', date: '2026-08-10', sourceKeys: ['post:4'] });

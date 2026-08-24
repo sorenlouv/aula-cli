@@ -233,6 +233,7 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
     <div class="card ${c.needsAction ? 'act' : ''}" data-signal-id="${escapeHtml(c.id)}" data-source-id="${escapeHtml(c.sourceKeys[0] ?? '')}" data-done-keys="${escapeHtml(doneKeys(c).join(' '))}">
       <div class="row">
         ${c.date ? `<span class="chip ${c.date === today ? 'now' : 'soon'}">${escapeHtml(chipLabel(c.date, today))}</span>` : ''}
+        ${c.recurrenceWeekday !== null ? `<span class="chip recurring">Gentages hver ${escapeHtml(DA_WEEKDAYS[c.recurrenceWeekday] ?? '')}</span>` : ''}
         ${c.needsAction ? '<span class="chip act">Skal gøres</span>' : ''}
         ${c.sourceKeys.some((key) => opts.isNew?.(key)) ? '<span class="chip new">Ny</span>' : ''}
         ${c.children.map((name) => `<span class="who"><span class="dot ${colour.get(name) ?? 'c1'}"></span>${escapeHtml(name)}</span>`).join('')}

@@ -127,7 +127,12 @@ export function extractionSchema(input: BriefInput) {
               type: ['string', 'null'],
               format: 'date',
               description:
-                'Dagen kortet sorteres efter: fristen, hvis der er én, ellers dagen det sker. Null uden dato. Skal have belæg i en af kortets kilder.',
+                'Dagen kortet sorteres efter: fristen, hvis der er én, ellers dagen det sker. For en fast ugentlig aftale uden en enkelt dato: næste forekomst på eller efter today, regnet fra kildens ugedag. Null kun når hverken dato eller fast ugedag findes. Skal have belæg i en af kortets kilder.',
+            },
+            recurring: {
+              type: 'boolean',
+              description:
+                'True kun når kortet er en fast ugentlig aftale. Datoen er da næste forekomst fra kildens ugedag, og siden viser tydeligt, at den gentages.',
             },
             needsAction: {
               type: 'boolean',
@@ -146,7 +151,16 @@ export function extractionSchema(input: BriefInput) {
               description: 'De kilder, kortet bygger på. Flere, når de handler om det samme.',
             },
           },
-          required: ['title', 'summary', 'children', 'date', 'needsAction', 'reason', 'sourceKeys'],
+          required: [
+            'title',
+            'summary',
+            'children',
+            'date',
+            'recurring',
+            'needsAction',
+            'reason',
+            'sourceKeys',
+          ],
           additionalProperties: false,
         },
       },
@@ -207,7 +221,7 @@ const INSTRUCTIONS = `Du læser de seneste ugers indhold fra Aula — opslag, be
 
 Du afgør fire ting:
 
-1. Aula-kortene. En normal morgen giver 5–10. Skriv kortene i prioriteret rækkefølge — vigtigst først; bliver der for mange, er det de sidste, siden folder sammen. Hvert kort er én ting, forælderen skal vide eller gøre: en titel, der nævner barnet og står i bydeform, når der skal gøres noget; et resumé på én til tre sætninger, der siger det vigtige, uden at læseren behøver kilden; datoen kortet sorteres efter — fristen, hvis der er én, ellers dagen det sker; om det kræver handling af forælderen; en begrundelse for, hvorfor kortet er med; og de Aula-kilder, det bygger på. Ét kort må samle flere Aula-kilder, og skal gøre det, når de handler om det samme: et opslag fra juli med datoen og en besked fra i dag om samme arrangement er ét kort med juli-datoen og begge kilder. Forælderen har for længst glemt juli-opslaget — når du binder dem sammen, hjælper du forælderen meget. En personlig kalenderaftale må aldrig indgå i et Aula-kort.
+1. Aula-kortene. En normal morgen giver 5–10. Skriv kortene i prioriteret rækkefølge — vigtigst først; bliver der for mange, er det de sidste, siden folder sammen. Hvert kort er én ting, forælderen skal vide eller gøre: en titel, der nævner barnet og står i bydeform, når der skal gøres noget; et resumé på én til tre sætninger, der siger det vigtige, uden at læseren behøver kilden; datoen kortet sorteres efter — fristen, hvis der er én, ellers dagen det sker; om det kræver handling af forælderen; en begrundelse for, hvorfor kortet er med; og de Aula-kilder, det bygger på. Ved en fast ugentlig aftale uden en enkelt dato er datoen den næste forekomst på eller efter "today", regnet fra ugedagen i kilden: læses oversigten på selve ugedagen, er datoen "today", ikke en uge senere og ikke null. Siden mærker selv kortet som gentaget, så datoen ikke ligner en enkeltstående Aula-dato. Ét kort må samle flere Aula-kilder, og skal gøre det, når de handler om det samme: et opslag fra juli med datoen og en besked fra i dag om samme arrangement er ét kort med juli-datoen og begge kilder. Forælderen har for længst glemt juli-opslaget — når du binder dem sammen, hjælper du forælderen meget. En personlig kalenderaftale må aldrig indgå i et Aula-kort.
 
 2. De personlige kalenderaftaler. Svar med præcis én vurdering per kilde med type "personal", også når den er irrelevant. Skriv vurderingerne i prioriteret rækkefølge, og brug den snævre inklusionsregel i svarskemaets beskrivelse af "relevant". Skriv én kort, faktuel opsummering og én kort begrundelse. En aftale med relevant=false må ikke bruges i topline eller childSummaries. Gæt aldrig hvilket barn aftalen handler om, gør den aldrig til en handling, og bland den aldrig sammen med en Aula-kilde. Siden bruger selv kildens titel, dato, tid, sted og link.
 

@@ -89,6 +89,16 @@ export type DateClaim =
   | { kind: 'week'; week: number; raw: string };
 
 const WEEKDAY_RE = /\b(man|tirs|ons|tors|fre|lør|søn)dag(?:s|ene|en|e)?\b/gi;
+const DANISH_WEEKDAY_ALT = 'mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag';
+const ENGLISH_WEEKDAY_TO_DAY: Record<string, number> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
 const NUMERIC_DATE_RE = /\b(\d{1,2})[./](\d{1,2})(?:[./-](\d{2,4}))?\b/g;
 // Full names first so "september" is not eaten by "sep".
 const MONTH_ALT =
@@ -163,6 +173,50 @@ export function findDateClaims(text: string): DateClaim[] {
     claims.push({ kind: 'week', week: Number(m[1]), raw: m[0] });
   }
   return claims;
+}
+
+/**
+ * Weekdays asserted as a weekly routine rather than one particular day.
+ *
+ * The distinction is load-bearing for the timeline: "på mandag" is a dated
+ * one-off, while "om mandagen", "hver torsdag" and "on Thursdays" describe a
+ * series whose next occurrence is computed from the brief's day. Bare Danish
+ * weekday plurals are recurring too ("tirsdage er turdage").
+ */
+export function findRecurringWeekdays(text: string): number[] {
+  const days = new Set<number>();
+  const addDanish = (name: string | undefined) => {
+    if (!name) return;
+    const claim = findDateClaims(name)[0];
+    if (claim?.kind === 'weekday') days.add(claim.day);
+  };
+  const danishPatterns = [
+    new RegExp(`\\b(?:hver(?:\\s+eneste)?|alle)\\s+(${DANISH_WEEKDAY_ALT})(?:ene|en|e)?\\b`, 'gi'),
+    new RegExp(`\\bom\\s+(${DANISH_WEEKDAY_ALT})(?:ene|en|e)\\b`, 'gi'),
+    new RegExp(`\\b(${DANISH_WEEKDAY_ALT})(?:ene|e)\\b`, 'gi'),
+    new RegExp(`\\b(${DANISH_WEEKDAY_ALT})(?:en)?\\s+(?:fremover|hver\\s+uge)\\b`, 'gi'),
+  ];
+  for (const pattern of danishPatterns) {
+    for (const match of text.matchAll(pattern)) addDanish(match[1]);
+  }
+
+  const english =
+    /\b(?:every|each)\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?\b|\bon\s+(sundays|mondays|tuesdays|wednesdays|thursdays|fridays|saturdays)\b/gi;
+  for (const match of text.matchAll(english)) {
+    const name = (match[1] ?? match[2] ?? '').toLowerCase().replace(/s$/, '');
+    const day = ENGLISH_WEEKDAY_TO_DAY[name];
+    if (day !== undefined) days.add(day);
+  }
+  return [...days];
+}
+
+/** The next matching weekday on or after an ISO calendar day. */
+export function nextRecurringDate(weekday: number, fromDay: string): string | null {
+  const parsed = isoDate(fromDay);
+  if (!parsed || !Number.isInteger(weekday) || weekday < 0 || weekday > 6) return null;
+  const date = asLocalDate(parsed);
+  date.setDate(date.getDate() + ((weekday - date.getDay() + 7) % 7));
+  return localIsoDate(date);
 }
 
 type SourceDates = {
