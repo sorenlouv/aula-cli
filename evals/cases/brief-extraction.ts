@@ -155,6 +155,40 @@ const twoObligations = aulaSource({
   title: 'Turdag mandag',
   text: 'Husk badetøj på mandag den 31. august 2026. Husk også madpakke på mandag den 31. august 2026.',
 });
+const photoRegistration = aulaSource({
+  key: 'post:photo-registration',
+  title: 'Skolefoto - uge 35',
+  text: 'Fotografen er på Eksempelskolen 24.-28. august 2026. Tilmeld Alma til skolefoto med koden Eksempel26.',
+  at: '2026-08-13T09:00:00+02:00',
+  groups: ['Alle på Eksempelskolen'],
+  childNames: [],
+  audience: 'institution',
+  important: true,
+});
+const photoDayMessage = aulaSource({
+  key: 'thread:photo-day',
+  kind: 'thread',
+  title: 'Fotografering på tirsdag',
+  text: 'På tirsdag den 25. august 2026 er det fotodag i 2.E. Alma skal have fint tøj på og håret redt.',
+  at: '2026-08-20T09:00:00+02:00',
+  important: true,
+});
+const photoDayPlan = aulaSource({
+  key: 'plan:weekly-photo-day',
+  kind: 'plan',
+  title: '2.E',
+  text: 'Vi skal fotograferes i dag. Husk pænt tøj og redt hår.',
+  at: '2026-08-25T08:00:00+02:00',
+  important: true,
+});
+const libraryReturnPlan = aulaSource({
+  key: 'plan:weekly-library-return',
+  kind: 'plan',
+  title: 'Dansk / 2.E',
+  text: 'Vi får læsevejleder til hjælp i første lektion. Husk gamle biblioteksbøger til aflevering. Vi arbejder videre i danskbog 2.',
+  at: '2026-08-25T08:00:00+02:00',
+  important: true,
+});
 const broadPhotoAction = aulaSource({
   key: 'post:broad-photo-action',
   title: 'Skolefoto for hele skolen',
@@ -319,6 +353,46 @@ export const briefExtractionCases: BriefExtractionEvalCase[] = [
           date: '2026-08-31',
           textContains: 'madpakke',
         },
+      ],
+    },
+  },
+  {
+    id: 'school-photo-library-reminder',
+    description:
+      'A library-return reminder in a neighbouring weekly-plan item becomes its own visible action instead of being nested under school photo.',
+    provenance: 'user-labelled',
+    input: input([photoRegistration, photoDayMessage, photoDayPlan, libraryReturnPlan], {
+      today: '2026-08-24',
+      isoWeek: '2026-W35',
+    }),
+    expected: {
+      requiredCards: [
+        {
+          sourceKeys: [photoDayMessage.key],
+          excludedSourceKeys: [libraryReturnPlan.key],
+          needsAction: true,
+          date: '2026-08-25',
+          children: ['Alma'],
+          textContains: 'foto',
+          textNotContains: ['bibliotek'],
+          maxRank: 12,
+        },
+        {
+          sourceKeys: [libraryReturnPlan.key],
+          sourceKeysExactly: true,
+          needsAction: true,
+          date: '2026-08-25',
+          children: ['Alma'],
+          titleContains: 'bibliotek',
+          textNotContains: ['foto'],
+          maxRank: 12,
+        },
+      ],
+      hiddenExcludes: [
+        photoRegistration.key,
+        photoDayMessage.key,
+        photoDayPlan.key,
+        libraryReturnPlan.key,
       ],
     },
   },

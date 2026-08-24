@@ -27,11 +27,14 @@ events into the same chronological list as compact cards.
 There used to be two calls: an extractor returning "signals" with a verbatim
 quote each, a scorer tiering them, and a second call ordering and rewording.
 It went because the first call can write the cards finished and gather several
-sources into one — the July post with the date and the August message with the
-news are one card — and because ordering by date needs no model. The quote was
-a trust device from before the original was one tap away; now every source a
-card rests on is listed under *Læs mere*, and what is checked instead is the
-one thing a reader cannot see at a glance: whether the dates are real.
+sources into one when they support the same concrete thing — the July post with
+the date and the August message with the news are one card. Independently
+completable actions stay separate even when they share a day, child, source or
+school event; a reminder to return library books does not belong under a school
+photo card. Ordering by date needs no model. The quote was a trust device from
+before the original was one tap away; now every source a card rests on is listed
+under *Læs mere*, and what is checked instead is the one thing a reader cannot
+see at a glance: whether the dates are real.
 
 **Grounding is the guard.** Every date in a card — its `date`, and any day named
 in its title, summary or reason — must be supported by at least one of the
