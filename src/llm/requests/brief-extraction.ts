@@ -1,6 +1,7 @@
 /** The daily brief prompt, payload projection and JSON schema. */
 
 import type { BriefInput, SourceItem } from '../../brief/types.ts';
+import { overviewWindow } from '../../brief/dates.ts';
 import type { StructuredLlmRequest } from '../request.ts';
 
 // A 60-day live sample on 2026-08-23 contained 30 posts; the longest was 2,897
@@ -37,8 +38,10 @@ function promptText(item: SourceItem): string {
 
 /** The payload the model sees. Trimmed, but never summarised before it gets there. */
 export function extractionPayload(input: BriefInput) {
+  const { through } = overviewWindow(input.today);
   return {
     today: input.today,
+    overviewThrough: through,
     isoWeek: input.isoWeek,
     children: input.family.children.map((c) => ({
       firstName: c.firstName,
@@ -80,6 +83,7 @@ export function extractionPayload(input: BriefInput) {
  * `validateExtraction`'s.
  */
 export function extractionSchema(input: BriefInput) {
+  const { through } = overviewWindow(input.today);
   const aulaKeys = input.items.filter((item) => item.kind !== 'personal').map((item) => item.key);
   const personalKeys = input.items
     .filter((item) => item.kind === 'personal')
@@ -97,13 +101,11 @@ export function extractionSchema(input: BriefInput) {
     properties: {
       topline: {
         type: 'string',
-        description:
-          'Én sætning med det vigtigste først — det, forælderen skal gøre eller vide i dag.',
+        description: `Én sætning med det vigtigste først — det, forælderen skal gøre eller vide fra i dag til og med ${through}. Nævn ikke noget senere.`,
       },
       cards: {
         type: 'array',
-        description:
-          'Kortene i prioriteret rækkefølge, vigtigst først; de sidste foldes sammen, hvis der er flere end siden viser. 5–10 en normal morgen. Hvert kort er én ting, forælderen skal vide eller gøre.',
+        description: `Kortene i prioriteret rækkefølge, vigtigst først; de sidste foldes sammen, hvis der er flere end siden viser. 5–10 en normal morgen. Hvert kort er én ting, forælderen skal vide eller gøre senest ${through}; senere ting skal ikke være kort.`,
         items: {
           type: 'object',
           properties: {
@@ -200,8 +202,7 @@ export function extractionSchema(input: BriefInput) {
       },
       childSummaries: {
         type: 'object',
-        description:
-          'Én kalenderagtig linje per barn om den kommende tid: "Fotodag tirsdag (fint tøj), forældremøde onsdag 17–19."',
+        description: `Én kalenderagtig linje per barn fra i dag til og med ${through}: "Fotodag tirsdag (fint tøj), forældremøde onsdag 17–19." Nævn ikke noget senere.`,
         properties: Object.fromEntries(firstNames.map((name) => [name, { type: 'string' }])),
         additionalProperties: false,
       },
@@ -209,7 +210,7 @@ export function extractionSchema(input: BriefInput) {
         type: 'array',
         items: { $ref: '#/$defs/aulaKey' },
         description:
-          'Aula-kilder, der slet ikke skal vises — irrelevante efter relevans-tegnene, eller noget forælderens præferencer siger aldrig skal med. Personlige kalenderaftaler vurderes kun i personalEvents. En kilde med important=true bør ikke skjules uden en konkret grund i indholdet. Alt andet uden kort vises foldet sammen nederst.',
+          'Aula-kilder, der slet ikke skal vises — irrelevante efter relevans-tegnene, eller noget forælderens præferencer siger aldrig skal med. En dato efter overviewThrough er ikke i sig selv en grund til at skjule en kilde; den skal blot ikke være et kort. Personlige kalenderaftaler vurderes kun i personalEvents. En kilde med important=true bør ikke skjules uden en konkret grund i indholdet. Alt andet uden kort vises foldet sammen nederst.',
       },
     },
     required: ['topline', 'cards', 'personalEvents', 'childSummaries', 'hidden'],
@@ -221,7 +222,7 @@ const INSTRUCTIONS = `Du læser de seneste ugers indhold fra Aula — opslag, be
 
 Du afgør fire ting:
 
-1. Aula-kortene. En normal morgen giver 5–10. Skriv kortene i prioriteret rækkefølge — vigtigst først; bliver der for mange, er det de sidste, siden folder sammen. Hvert kort er én ting, forælderen skal vide eller gøre: en titel, der nævner barnet og står i bydeform, når der skal gøres noget; et resumé på én til tre sætninger, der siger det vigtige, uden at læseren behøver kilden; datoen kortet sorteres efter — fristen, hvis der er én, ellers dagen det sker; om det kræver handling af forælderen; en begrundelse for, hvorfor kortet er med; og de Aula-kilder, det bygger på. Ved en fast ugentlig aftale uden en enkelt dato er datoen den næste forekomst på eller efter "today", regnet fra ugedagen i kilden: læses oversigten på selve ugedagen, er datoen "today", ikke en uge senere og ikke null. Siden mærker selv kortet som gentaget, så datoen ikke ligner en enkeltstående Aula-dato. Ét kort må samle flere Aula-kilder, og skal gøre det, når de handler om det samme: et opslag fra juli med datoen og en besked fra i dag om samme arrangement er ét kort med juli-datoen og begge kilder. Forælderen har for længst glemt juli-opslaget — når du binder dem sammen, hjælper du forælderen meget. En personlig kalenderaftale må aldrig indgå i et Aula-kort.
+1. Aula-kortene. En normal morgen giver 5–10. Skriv kortene i prioriteret rækkefølge — vigtigst først; bliver der for mange, er det de sidste, siden folder sammen. Oversigten går fra "today" til og med "overviewThrough"; noget senere må ikke blive et kort eller nævnes i topline eller childSummaries, men en Aula-kilde må heller ikke skjules alene af den grund. Hvert kort er én ting, forælderen skal vide eller gøre: en titel, der nævner barnet og står i bydeform, når der skal gøres noget; et resumé på én til tre sætninger, der siger det vigtige, uden at læseren behøver kilden; datoen kortet sorteres efter — fristen, hvis der er én, ellers dagen det sker; om det kræver handling af forælderen; en begrundelse for, hvorfor kortet er med; og de Aula-kilder, det bygger på. Ved en fast ugentlig aftale uden en enkelt dato er datoen den næste forekomst på eller efter "today", regnet fra ugedagen i kilden: læses oversigten på selve ugedagen, er datoen "today", ikke en uge senere og ikke null. Siden mærker selv kortet som gentaget, så datoen ikke ligner en enkeltstående Aula-dato. Ét kort må samle flere Aula-kilder, og skal gøre det, når de handler om det samme: et opslag fra juli med datoen og en besked fra i dag om samme arrangement er ét kort med juli-datoen og begge kilder. Forælderen har for længst glemt juli-opslaget — når du binder dem sammen, hjælper du forælderen meget. En personlig kalenderaftale må aldrig indgå i et Aula-kort.
 
 2. De personlige kalenderaftaler. Svar med præcis én vurdering per kilde med type "personal", også når den er irrelevant. Skriv vurderingerne i prioriteret rækkefølge, og brug den snævre inklusionsregel i svarskemaets beskrivelse af "relevant". Skriv én kort, faktuel opsummering og én kort begrundelse. En aftale med relevant=false må ikke bruges i topline eller childSummaries. Gæt aldrig hvilket barn aftalen handler om, gør den aldrig til en handling, og bland den aldrig sammen med en Aula-kilde. Siden bruger selv kildens titel, dato, tid, sted og link.
 

@@ -15,7 +15,7 @@
  */
 
 import { localIsoDate } from '../integrations/types.ts';
-import { findRecurringWeekdays, nextRecurringDate } from './dates.ts';
+import { findRecurringWeekdays, nextRecurringDate, overviewWindow } from './dates.ts';
 import { extractHits } from './rules.ts';
 import type {
   BriefInput,
@@ -248,10 +248,23 @@ export function rank(
   }
 
   // ------------------------------------------------------------------ cap
-  // Model order is the ranking: code keeps the first N and folds the rest.
-  const kept = new Set(ranked.slice(0, CARD_CAP));
-  const folded = ranked.slice(CARD_CAP);
-  for (const card of folded) card.reasons.push(`over CARD_CAP(${CARD_CAP}) → folded`);
+  // Model order is the ranking, but a later card must not spend one of the N
+  // slots the current overview can actually show. Keep today's remainder of
+  // the week plus next week, and fold later cards alongside ordinary overflow
+  // so their source and model-written summary remain available below.
+  const { through: overviewThrough } = overviewWindow(input.today);
+  const inOverview = ranked.filter(
+    (card) => card.placement !== 'upcoming' || !card.date || card.date <= overviewThrough,
+  );
+  const kept = new Set(inOverview.slice(0, CARD_CAP));
+  const folded = ranked.filter((card) => !kept.has(card));
+  for (const card of folded) {
+    if (card.placement === 'upcoming' && card.date && card.date > overviewThrough) {
+      card.reasons.push(`after overview(${overviewThrough}) → folded`);
+    } else {
+      card.reasons.push(`over CARD_CAP(${CARD_CAP}) → folded`);
+    }
+  }
 
   // ------------------------------------------------------ personal appointments
   // A missing or invalid verdict must never look like a free afternoon. Show it
@@ -265,6 +278,10 @@ export function rank(
       continue;
     }
     const date = source.at?.slice(0, 10) || null;
+    // Production collection uses this same boundary. Keep the guard here so a
+    // stale cache or hand-built input still cannot put a later appointment on
+    // the page.
+    if (date && date > overviewThrough) continue;
     const event: RankedPersonalEvent = {
       entryType: 'personal',
       id: `personal:${source.key}`,

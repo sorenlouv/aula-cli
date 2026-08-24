@@ -143,10 +143,10 @@ section.reveal .card.is-done{display:block;opacity:.55}
 section.reveal .card.is-done .title,
 section.reveal .card.is-done .calendar-title{text-decoration:line-through}
 
-/* Kommende is in date order; the undated tail — mostly Kræver handling's
-   overflow — is set off so it is visible why those carry no date chip. */
-.divider{margin:16px 0 10px;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
-  color:var(--ink-3);font-weight:650}
+/* The timeline is led by dates rather than one generic heading. Each wrapper
+   also lets the done-state script hide an empty heading with its cards. */
+.timeline-group{margin-bottom:22px}
+.timeline-group:last-of-type{margin-bottom:0}
 
 /* The empty-state line under two visible cards reads as a contradiction,
    however true the count is. While they are on show, the toggle says it. */
@@ -175,7 +175,7 @@ summary::after{content:"⌄";color:var(--ink-3);font-size:17px;line-height:1}
    section's open state deciding the inner one's arrow. */
 details[open]>summary::after{content:"⌃"}
 
-/* A personal appointment shares Kommende's chronology without borrowing the
+/* A personal appointment shares the timeline's chronology without borrowing the
    visual weight of an Aula card. The face is one compact flex row; the model's
    summary and reason live in the individual fold. */
 .calendar-card{padding:0 46px 0 0;border-left-color:var(--line);box-shadow:none;margin-bottom:6px}
@@ -222,9 +222,8 @@ footer{margin-top:26px;text-align:center;color:var(--ink-3);font-size:12px}
   details{opacity:1}
   summary::after{display:none}
   .card,.cc,.di{break-inside:avoid}
-  /* A tick is something to press, so it is chrome, not content. The count it
-     produced stays — the forwarded PDF should still say two were dealt with —
-     but the cards themselves keep out of it however the section was left. */
+  /* A tick is something to press, so it is chrome, not content. Completed
+     cards keep out of the forwarded PDF however the section was left. */
   .tick{display:none}
   /* Every other <details> is expanded for print, because a collapsed section
      would print as a heading with nothing under it. Not this one: it holds

@@ -143,9 +143,6 @@ export const DONE_SCRIPT = `
     var done = cards.filter(function (card) { return card.classList.contains('is-done'); }).length;
     var live = cards.length - done;
 
-    var count = section.querySelector('[data-count]');
-    if (count) count.textContent = String(live);
-
     // Nothing left to do is a result, not an empty section — the renderer
     // renders the sentence for it and this is where it earns its place.
     var empty = section.querySelector('[data-empty]');
@@ -159,6 +156,17 @@ export const DONE_SCRIPT = `
       toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
       toggle.textContent = done + ' klaret · ' + (open ? 'skjul' : 'vis');
     }
+
+    // A date heading with no visible cards is as misleading as an empty
+    // section. Keep the whole group hidden until completed cards are revealed.
+    var reveal = section.classList.contains('reveal');
+    [].slice.call(section.querySelectorAll('[data-timeline-group]')).forEach(function (group) {
+      var groupCards = [].slice.call(group.querySelectorAll('[data-done-keys]'));
+      var groupLive = groupCards.some(function (card) {
+        return !card.classList.contains('is-done');
+      });
+      group.hidden = groupCards.length > 0 && !groupLive && !reveal;
+    });
   }
 
   [].slice.call(document.querySelectorAll('[data-section]')).forEach(function (section) {

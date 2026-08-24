@@ -6,6 +6,7 @@ import {
   findDateClaims,
   findRecurringWeekdays,
   nextRecurringDate,
+  overviewWindow,
   unsupportedDateClaims,
 } from './dates.ts';
 import type { BriefInput, SourceItem } from './types.ts';
@@ -18,6 +19,37 @@ const item = (
 
 // 2026-08-13 is a Thursday; 2026-08-10 (the default item timestamp) a Monday.
 const input = (items: SourceItem[]): BriefInput => briefInput({ items });
+
+describe('overviewWindow', () => {
+  test('a Monday includes fourteen dates through the end of next week', () => {
+    expect(overviewWindow('2026-08-24')).toEqual({
+      from: '2026-08-24',
+      to: '2026-09-07',
+      through: '2026-09-06',
+      nextWeekFrom: '2026-08-31',
+      days: 14,
+    });
+  });
+
+  test('a Sunday includes today and the eight dates through next Sunday', () => {
+    expect(overviewWindow('2026-08-30')).toEqual({
+      from: '2026-08-30',
+      to: '2026-09-07',
+      through: '2026-09-06',
+      nextWeekFrom: '2026-08-31',
+      days: 8,
+    });
+  });
+
+  test('crosses a year boundary using local calendar days', () => {
+    expect(overviewWindow('2026-12-28')).toMatchObject({
+      to: '2027-01-11',
+      through: '2027-01-10',
+      nextWeekFrom: '2027-01-04',
+      days: 14,
+    });
+  });
+});
 
 describe('findDateClaims', () => {
   test('finds weekdays through Danish inflections', () => {

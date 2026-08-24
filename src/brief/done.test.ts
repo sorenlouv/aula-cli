@@ -69,7 +69,9 @@ describe('the rendered page', () => {
 
   test('the section the script drives is marked up for it', () => {
     expect(html).toContain('data-section="cards"');
-    expect(html).toContain('<span class="count" data-count>');
+    expect(html).toContain('aria-label="Kommende"');
+    expect(html).toContain('data-timeline-group');
+    expect(html).not.toContain('data-count');
     expect(html).toContain('data-done-toggle');
   });
 
@@ -118,17 +120,24 @@ describe('the page behaviour', () => {
       getAttribute: () => 'post:13311009|2026-08-17 thread:88|2026-08-17',
       querySelector: () => tick,
     };
-    const count = { textContent: '' };
     const empty = { hidden: true };
+    const group = {
+      hidden: false,
+      querySelectorAll: (selector: string) => (selector === '[data-done-keys]' ? [card] : []),
+    };
     const section = {
       classList: {
         contains: () => false,
         remove: () => undefined,
         toggle: () => undefined,
       },
-      querySelectorAll: () => [card],
-      querySelector: (selector: string) =>
-        selector === '[data-count]' ? count : selector === '[data-empty]' ? empty : null,
+      querySelectorAll: (selector: string) =>
+        selector === '[data-done-keys]'
+          ? [card]
+          : selector === '[data-timeline-group]'
+            ? [group]
+            : [],
+      querySelector: (selector: string) => (selector === '[data-empty]' ? empty : null),
     };
     const document = { querySelectorAll: () => [section] };
     const localStorage = {
@@ -142,6 +151,7 @@ describe('the page behaviour', () => {
 
     expect(JSON.parse(stored)).toEqual({ 'post:13311009|2026-08-17': originalStamp });
     expect(classes.has('is-done')).toBe(true);
+    expect(group.hidden).toBe(true);
     expect(listeners.has('click')).toBe(true);
   });
 });
