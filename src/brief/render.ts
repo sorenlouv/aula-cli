@@ -13,7 +13,7 @@
  */
 
 import { escapeHtml } from '../html.ts';
-import { DA_MONTHS, DA_WEEKDAYS, intervalLabel } from './dates.ts';
+import { DA_MONTHS, DA_WEEKDAYS, intervalLabel, overviewWindow } from './dates.ts';
 import { doneKeys } from './done.ts';
 import type {
   ConversationMessage,
@@ -46,6 +46,17 @@ function chipLabel(isoDay: string, today: string): string {
   if (offset === 0) return 'I dag';
   if (offset === 1) return 'I morgen';
   return capitalise(danishDate(isoDay));
+}
+
+/** A dated timeline heading: "I dag (d. 24. august)" or "Onsdag (d. 26. august)". */
+function dayHeading(isoDay: string, today: string): string {
+  const date = new Date(`${isoDay}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return isoDay;
+  const stamp = `d. ${date.getDate()}. ${DA_MONTHS[date.getMonth()]}`;
+  const offset = daysFrom(today, isoDay);
+  if (offset === 0) return `I dag (${stamp})`;
+  if (offset === 1) return `I morgen (${stamp})`;
+  return `${capitalise(DA_WEEKDAYS[date.getDay()] ?? '')} (${stamp})`;
 }
 
 /**
@@ -286,24 +297,41 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
     </div>`;
   };
 
-  // One list, by date. A divider separates the tails; it never heads a list
-  // that is all one kind.
-  const groups = [
-    { label: null, entries: brief.timeline.filter((entry) => entry.placement === 'upcoming') },
-    {
-      label: 'Uden fast dato',
-      entries: brief.timeline.filter((entry) => entry.placement === 'undated'),
-    },
-    { label: 'Tidligere', entries: brief.timeline.filter((entry) => entry.placement === 'past') },
-  ].filter((group) => group.entries.length > 0);
+  // Today and tomorrow always earn their own heading. The remaining dates in
+  // this ISO week do too; next week is one compact group whose card chips keep
+  // each exact date visible. Undated and past cards retain their existing tails.
+  const { nextWeekFrom } = overviewWindow(today);
+  const groups: Array<{ key: string; label: string; entries: RankedTimelineEntry[] }> = [];
+  const addToGroup = (key: string, label: string, entry: RankedTimelineEntry) => {
+    const previous = groups.at(-1);
+    if (previous?.key === key) previous.entries.push(entry);
+    else groups.push({ key, label, entries: [entry] });
+  };
+  for (const entry of brief.timeline) {
+    if (entry.placement === 'undated') {
+      addToGroup('undated', 'Uden fast dato', entry);
+      continue;
+    }
+    if (entry.placement === 'past') {
+      addToGroup('past', 'Tidligere', entry);
+      continue;
+    }
+    if (!entry.date) continue;
+    const offset = daysFrom(today, entry.date);
+    if (offset <= 1 || entry.date < nextWeekFrom) {
+      addToGroup(`day:${entry.date}`, dayHeading(entry.date, today), entry);
+    } else {
+      addToGroup('next-week', 'Næste uge', entry);
+    }
+  }
   const timeline = groups
-    .map((group, index) =>
-      [
-        index > 0 && group.label ? `<div class="divider">${group.label}</div>` : '',
-        ...group.entries.map((entry: RankedTimelineEntry) =>
-          entry.entryType === 'card' ? card(entry) : personal(entry),
-        ),
-      ].join(''),
+    .map(
+      (group) => `<div class="timeline-group" data-timeline-group>
+        <h3 class="timeline-heading">${escapeHtml(group.label)}</h3>
+        ${group.entries
+          .map((entry) => (entry.entryType === 'card' ? card(entry) : personal(entry)))
+          .join('')}
+      </div>`,
     )
     .join('');
   const actions = brief.cards.filter((c) => c.needsAction).length;
@@ -354,8 +382,8 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
 
   ${hasHealthWarning ? `<section><h2>Datastatus</h2>${datastatus}</section>` : ''}
 
-  <section data-section="cards"><h2>Kommende <span class="count" data-count>${brief.timeline.length}</span></h2>
-    ${timeline}
+  <section data-section="cards" aria-label="Kommende">
+    <div class="timeline">${timeline}</div>
     <div class="panel" data-empty${brief.timeline.length ? ' hidden' : ''}>Ingen punkter i dag. Det, der blev læst, står nederst under Øvrigt fra Aula.</div>
     <button class="done-toggle" type="button" aria-expanded="false" data-done-toggle hidden></button>
   </section>

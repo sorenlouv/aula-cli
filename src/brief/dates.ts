@@ -38,6 +38,43 @@ export const DA_MONTHS = [
   'december',
 ];
 
+export type OverviewWindow = {
+  /** First included local calendar day. */
+  from: string;
+  /** First excluded local calendar day. */
+  to: string;
+  /** Last included local calendar day: Sunday at the end of next ISO week. */
+  through: string;
+  /** First day of next ISO week. */
+  nextWeekFrom: string;
+  /** Number of included dates; Monday is 14, Sunday is 8. */
+  days: number;
+};
+
+/** Today plus the remainder of this ISO week and all of next week. */
+export function overviewWindow(today: string): OverviewWindow {
+  const parsed = parseIsoDateParts(today);
+  if (!parsed) throw new Error(`Invalid overview date: ${today}`);
+
+  const from = new Date(parsed.year, parsed.month - 1, parsed.day);
+  const isoWeekday = (from.getDay() + 6) % 7; // Monday = 0, Sunday = 6.
+  const days = 14 - isoWeekday;
+  const nextWeek = new Date(from);
+  nextWeek.setDate(nextWeek.getDate() + (7 - isoWeekday));
+  const to = new Date(from);
+  to.setDate(to.getDate() + days);
+  const through = new Date(to);
+  through.setDate(through.getDate() - 1);
+
+  return {
+    from: localIsoDate(from),
+    to: localIsoDate(to),
+    through: localIsoDate(through),
+    nextWeekFrom: localIsoDate(nextWeek),
+    days,
+  };
+}
+
 /** "25/8" — the short form Danish calendars and messages both use. */
 export function shortDayMonth(isoDay: string): string {
   const [, month = '', day = ''] = isoDay.split('-');

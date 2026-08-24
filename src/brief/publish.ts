@@ -33,13 +33,24 @@ const PRINT_HOOK = `
   // are hidden in print instead (see the @media print rule in styles.ts) and
   // the original stays one link away in Aula.
   const SECTIONS = 'details:not(.more)';
+  const TIMELINE_GROUPS = '[data-timeline-group]';
   addEventListener('beforeprint', () => {
     for (const d of document.querySelectorAll(SECTIONS)) {
       d.dataset.wasOpen = String(d.open); d.open = true;
     }
+    for (const group of document.querySelectorAll(TIMELINE_GROUPS)) {
+      group.dataset.wasHidden = String(group.hidden);
+      const cards = [...group.querySelectorAll('[data-done-keys]')];
+      if (cards.length > 0 && cards.every((card) => card.classList.contains('is-done'))) {
+        group.hidden = true;
+      }
+    }
   });
   addEventListener('afterprint', () => {
     for (const d of document.querySelectorAll(SECTIONS)) d.open = d.dataset.wasOpen === 'true';
+    for (const group of document.querySelectorAll(TIMELINE_GROUPS)) {
+      group.hidden = group.dataset.wasHidden === 'true';
+    }
   });
 `;
 

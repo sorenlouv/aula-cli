@@ -45,6 +45,13 @@ const INPUT: BriefInput = briefInput({
 });
 
 describe('extractionPayload', () => {
+  test('gives the model the final Sunday the overview may mention', () => {
+    const payload = extractionPayload(INPUT);
+
+    expect(payload.today).toBe('2026-08-13');
+    expect(payload.overviewThrough).toBe('2026-08-23');
+  });
+
   test("carries Aula's important flag to the model", () => {
     const [source] = extractionPayload({
       ...INPUT,
@@ -78,6 +85,19 @@ describe('extractionPayload', () => {
     expect(source?.text).toContain('[midten er forkortet]');
     expect(source?.text).toStartWith('x'.repeat(100));
     expect(source?.text).toEndWith('Husk at aflevere sedlen senest fredag.');
+  });
+});
+
+describe('overview horizon contract', () => {
+  test('lets later items keep a card while excluding them from highlighted prose', () => {
+    const schema = extractionSchema(INPUT).properties;
+    const instructions = extractionInstructions(INPUT);
+
+    expect(schema.cards.description).toContain('også efter 2026-08-23');
+    expect(schema.childSummaries.description).toContain('til og med 2026-08-23');
+    expect(schema.hidden.description).toContain('ikke i sig selv en grund til at skjule');
+    expect(instructions).toContain('Noget senere må stadig blive et kort');
+    expect(instructions).not.toContain('noget senere må ikke blive et kort');
   });
 });
 

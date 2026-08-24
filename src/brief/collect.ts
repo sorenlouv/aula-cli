@@ -5,19 +5,14 @@
  */
 
 import type { AulaClient } from './../client.ts';
-import {
-  calendarWindow,
-  loadPersonalEvents,
-  PERSONAL_CALENDAR_DAYS,
-  type PersonalEvent,
-} from '../calendar/index.ts';
+import { calendarWindow, loadPersonalEvents, type PersonalEvent } from '../calendar/index.ts';
 import { readConfig } from '../config.ts';
 import { addLocalDays, localIsoDate, type WeekPlan } from '../integrations/types.ts';
 import { buildDigest, collectAlbums, type ChildGroups, loadGroups } from './../digest.ts';
 import { resolveFamily } from './../family.ts';
 import { loadPreferences } from './../preferences.ts';
 import { errorMessage } from './../validation.ts';
-import { intervalLabel } from './dates.ts';
+import { intervalLabel, overviewWindow } from './dates.ts';
 import type { Audience, BriefInput, HealthNote, PresenceRow, SourceItem } from './types.ts';
 
 const AULA_PORTAL = 'https://www.aula.dk/portal/#';
@@ -458,9 +453,11 @@ async function collectPersonal(now: Date): Promise<{ items: SourceItem[]; health
   if (calendars.length === 0) return { items: [], health: [] };
 
   // Aula history may be widened with `new --days`; private calendar data may
-  // not. Every occurrence in this bounded window becomes one model-ranked
-  // source, keeping prompt size and connector pagination predictable.
-  const { from, to } = calendarWindow(now, PERSONAL_CALENDAR_DAYS);
+  // not. The overview ends with next ISO week, so the calendar read uses that
+  // same local-day boundary instead of fetching appointments the page cannot
+  // show. Monday is the maximum: fourteen dates through the following Sunday.
+  const { days } = overviewWindow(localIsoDate(now));
+  const { from, to } = calendarWindow(now, days);
   const loaded = await loadPersonalEvents(calendars, { from, to });
 
   const health: HealthNote[] = loaded.warnings.map((message) => ({

@@ -167,6 +167,36 @@ describe('rank: the cap', () => {
     expect(brief.folded).toHaveLength(1);
     expect(brief.rest).toHaveLength(0);
   });
+
+  test('a card after next week is folded without consuming an in-window slot', () => {
+    const items = Array.from({ length: CARD_CAP + 1 }, (_, i) => item({ key: `post:${i}` }));
+    const later = card({
+      id: 'later',
+      title: 'Forældremøde senere',
+      date: '2026-08-24',
+      sourceKeys: [items[0]!.key],
+    });
+    const within = items.slice(1).map((source, i) =>
+      card({
+        id: `within:${i}`,
+        title: `Kort ${i}`,
+        date: '2026-08-14',
+        sourceKeys: [source.key],
+      }),
+    );
+
+    const brief = rank(input(items), {
+      model: [later, ...within],
+      rules: [],
+      hidden: [],
+    });
+
+    expect(brief.cards).toHaveLength(CARD_CAP);
+    expect(brief.cards.some((entry) => entry.id === 'later')).toBe(false);
+    expect(brief.folded.map((entry) => entry.id)).toEqual(['later']);
+    expect(brief.folded[0]?.reasons).toContain('after overview(2026-08-23) → folded');
+    expect(brief.rest).toEqual([]);
+  });
 });
 
 describe('rank: personal appointments in the shared timeline', () => {
@@ -229,6 +259,33 @@ describe('rank: personal appointments in the shared timeline', () => {
     expect(brief.personalEvents).toHaveLength(1);
     expect(brief.timeline).toHaveLength(CARD_CAP + 1);
     expect(brief.folded).toHaveLength(1);
+  });
+
+  test('an appointment after next week is excluded explicitly, never silently', () => {
+    const later = item({
+      ...DENTIST,
+      key: 'cal:family:later',
+      at: '2026-08-24T13:30:00',
+    });
+    const brief = rank(input([later]), {
+      model: [],
+      personalEvents: [
+        {
+          sourceKey: later.key,
+          relevant: true,
+          summary: 'En senere aftale.',
+          reason: 'Aftalen vedrører et barn.',
+        },
+      ],
+      rules: [],
+      hidden: [],
+    });
+
+    expect(brief.timeline).toEqual([]);
+    expect(brief.personalEvents).toEqual([]);
+    expect(brief.degraded).toEqual([
+      'Kalenderaftalen "Tandlæge" den 2026-08-24 ligger efter oversigtens slutdato 2026-08-23 og blev ikke vist.',
+    ]);
   });
 });
 
@@ -385,7 +442,11 @@ describe('cardsFromRules', () => {
       rules: cardsFromRules(input([post]), TODAY),
       hidden: [],
     });
-    expect(brief.cards.map((c) => c.date).sort()).toEqual(['2026-08-20', '2026-08-25']);
+    expect([...brief.cards, ...brief.folded].map((c) => c.date).sort()).toEqual([
+      '2026-08-20',
+      '2026-08-25',
+    ]);
+    expect(brief.folded.map((c) => c.date)).toEqual(['2026-08-25']);
   });
 
   test('two different obligations on the same day remain two cards', () => {

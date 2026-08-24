@@ -91,23 +91,31 @@ only the *Læs mere* source dumps collapsed.
 Sections render only when they have content, and never change order.
 
 1. **Topline** — date and one Danish sentence, the most important thing first.
-2. **Kommende** — the cards, **one list, by date**. Five to ten full Aula cards
-   on a normal morning. A card that asks something of the family (`needsAction`) is drawn
-   with the warm left edge and a *Skal gøres* badge, so the work stands out in a
-   list that is otherwise chronological; the reader's eye finds it without it
-   having to be first. Two tails under dividers: *Uden fast dato* for cards with
-   no day, *Tidligere* for cards whose day has passed but that still say
-   something (a decision, a new standing arrangement). Each card: date chip
-   (*I dag*, *I morgen*, else the day), a *Gentages hver …* badge when the day
-   is the next occurrence of a weekly routine, the children, title, summary, and
-   *Læs mere* — which opens with *Vist fordi:* the model's reason, then every
-   source the card rests on, each with its title, when it is from, its author,
-   a link, and the original. Relevant personal appointments sit between these
-   cards on their calendar day. Each is a compact, individually collapsed card:
-   the closed face keeps the source's date, time and title; opening it reveals
-   the model's summary and relevance reason, location, calendar and link. They
-   never get action styling and never consume the twelve-card Aula cap. Neither
-   the model nor the page computes a clash or claims the absence of one.
+2. **The dated timeline** — no generic *Kommende* heading. *I dag (d. 24.
+   august)* and *I morgen (d. 25. august)* always head their own non-empty
+   groups. Each remaining date in the current ISO week gets its own weekday
+   heading; the following ISO week is one *Næste uge* group, with exact dates
+   retained on the cards. Nothing later than the Sunday ending next week is a
+   timeline card: Monday therefore shows at most fourteen dates, Sunday eight.
+   A later Aula card is folded into *Øvrigt fra Aula*, never dropped and never
+   allowed to consume one of the twelve visible-card slots. Five to ten full
+   Aula cards is normal. A card that asks something of the family
+   (`needsAction`) is drawn with the warm left edge and a *Skal gøres* badge, so
+   the work stands out in a list that is otherwise chronological; the reader's
+   eye finds it without it having to be first. Two tails remain: *Uden fast
+   dato* for cards with no day, *Tidligere* for cards whose day has passed but
+   that still say something (a decision, a new standing arrangement). Each
+   card: date chip (*I dag*, *I morgen*, else the day), a *Gentages hver …*
+   badge when the day is the next occurrence of a weekly routine, the children,
+   title, summary, and *Læs mere* — which opens with *Vist fordi:* the model's
+   reason, then every source the card rests on, each with its title, when it is
+   from, its author, a link, and the original. Relevant personal appointments
+   sit between these cards on their calendar day. Each is a compact,
+   individually collapsed card: the closed face keeps the source's date, time
+   and title; opening it reveals the model's summary and relevance reason,
+   location, calendar and link. They never get action styling and never consume
+   the twelve-card Aula cap. Neither the model nor the page computes a clash or
+   claims the absence of one.
 3. **Per barn** — one card per child: check-in state, planned pickup, and the
    model's one calendar-like line for the child.
 4. **Galleri** — album tiles.
@@ -204,7 +212,7 @@ aula new [--days 60] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 
   collect   →  BriefInput    reuse buildDigest + galleries; every source in the 60-day window
   extract   →  cards/verdicts one model call, answered in a schema, dates grounded
-  rank      →  RankedBrief   first 12 Aula cards plus compact events; display by date
+  rank      →  RankedBrief   in-window first 12 plus compact events; group by date
   render    →  HTML          the page, built locally; invariants checked
   publish   →  files         HTML (+ PDF/PNG), open, update state
 ```
@@ -324,17 +332,19 @@ thousands of tokens of one sentence into the schema.
 
 ### The model ranks; placement is deterministic
 
-The model's list order is the ranking. `rank.ts` keeps the first `CARD_CAP` (12)
-full Aula cards and folds the rest into *Øvrigt fra Aula*. Relevant personal
-appointments are compact and do not consume that cap. Code then merges both
-shapes for display: upcoming by date, then undated, then past (most recent
-first). Known calendar starts on the same day sort by time; all-day/date-only
-entries precede them, and ties retain stable model order. A weekly routine with
-no future one-off date is projected onto its next weekday on or after the brief
-date before sorting; an explicitly future date still wins. `--explain` prints
-the one-based model rank beside each entry. Without a model, rule-made Aula
-cards use the same cap and every personal appointment fails open as a
-source-only compact card.
+The model's list order is the ranking. `rank.ts` first folds any card after the
+Sunday ending next ISO week, then keeps the first `CARD_CAP` (12) eligible full
+Aula cards and folds the rest into *Øvrigt fra Aula*. A later card therefore
+cannot crowd an in-window card out. Relevant personal appointments are compact
+and do not consume that cap. Code then merges both shapes for display: upcoming
+by date, then undated, then past (most recent first), and the renderer groups
+the dated entries as described above. Known calendar starts on the same day
+sort by time; all-day/date-only entries precede them, and ties retain stable
+model order. A weekly routine with no future one-off date is projected onto its
+next weekday on or after the brief date before the horizon check and sorting;
+an explicitly future date still wins. `--explain` prints the one-based model
+rank beside each entry. Without a model, rule-made Aula cards use the same cap
+and every personal appointment fails open as a source-only compact card.
 
 ### Preferences: one list, and the built-in cues it tunes
 
@@ -363,8 +373,9 @@ dette opslag er altid vigtigt"*. The argv side is the user's.
 
 Opt-in: `aula calendars set …` names the calendars to read (through the Claude
 Google Calendar connector, so it needs `claude`), and nothing is read until it
-does. Each occurrence in the next `PERSONAL_CALENDAR_DAYS` (14) becomes a
-`personal` source with audience `family`. The model must return exactly one
+does. Each occurrence from today through the Sunday ending next ISO week — at
+most `PERSONAL_CALENDAR_DAYS` (14) dates — becomes a `personal` source with
+audience `family`. The model must return exactly one
 `personalEvents` verdict for each occurrence: relevance, a short factual
 summary, and a reason. An irrelevant appointment lands in the muted hidden
 count; a relevant one becomes the compact card described under *The page*.

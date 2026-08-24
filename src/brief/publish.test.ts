@@ -46,6 +46,15 @@ describe('the printed copy', () => {
     expect(print).toContain('.more{display:none}');
   });
 
+  test('hides a fully completed timeline group for print and restores it afterwards', async () => {
+    const { html, artifact } = await write();
+    for (const page of [html, artifact]) {
+      expect(page).toContain("'[data-timeline-group]'");
+      expect(page).toContain("classList.contains('is-done')");
+      expect(page).toContain('group.dataset.wasHidden');
+    }
+  });
+
   // A more-block lives inside the context section, so a descendant selector let the
   // outer section's open state decide the inner block's arrow: shut, pointing
   // up. Measured in a browser, not reasoned about.

@@ -244,15 +244,16 @@ export type RankedTimelineEntry = RankedCard | RankedPersonalEvent;
 
 export type RankedBrief = {
   input: BriefInput;
-  /** Full Aula cards, in page order: upcoming by date, then undated, then past. */
+  /** In-window full Aula cards, in page order: upcoming by date, then undated, then past. */
   cards: RankedCard[];
   /** Relevant personal appointments in chronological page order. */
   personalEvents: RankedPersonalEvent[];
   /** Full Aula cards and compact personal cards in their shared page order. */
   timeline: RankedTimelineEntry[];
   /**
-   * Cards after the first `CARD_CAP` in model priority order. Listed in the
-   * fold with their title and summary — demoted, never dropped.
+   * Cards outside the overview window or after its first `CARD_CAP` entries,
+   * in model priority order. Listed in the fold with their title and summary —
+   * demoted, never dropped.
    */
   folded: RankedCard[];
   /** Sources no card covers and the model did not hide: the fold. */

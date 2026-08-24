@@ -6,8 +6,8 @@ import { BRIEF_CSS } from './styles.ts';
 import type { BriefInput, Card, SourceItem } from './types.ts';
 import { validatePage } from './validate.ts';
 
-// 2026-08-13 is a Thursday.
-const TODAY = '2026-08-13';
+// 2026-08-17 is a Monday.
+const TODAY = '2026-08-17';
 
 const PHOTO: SourceItem = sourceItem({
   key: 'post:1',
@@ -161,8 +161,10 @@ describe('a card', () => {
 
   test('today and tomorrow are named as such on the chip', () => {
     const today = card({ ...SIGNUP, id: 'a', date: TODAY });
-    const tomorrow = card({ ...MEETING, id: 'b', date: '2026-08-14' });
+    const tomorrow = card({ ...MEETING, id: 'b', date: '2026-08-18' });
     const { html } = page([today, tomorrow]);
+    expect(html).toContain('<h3 class="timeline-heading">I dag (d. 17. august)</h3>');
+    expect(html).toContain('<h3 class="timeline-heading">I morgen (d. 18. august)</h3>');
     expect(html).toContain('<span class="chip now">I dag</span>');
     expect(html).toContain('<span class="chip soon">I morgen</span>');
   });
@@ -264,7 +266,7 @@ describe('the list', () => {
     expect(validatePage(html, brief)).toEqual([]);
   });
 
-  test('is by date with undated and past tails under dividers', () => {
+  test('is grouped by date with undated and past tails', () => {
     const undated = card({ id: 'u', title: 'Skolemælk', sourceKeys: ['post:3'] });
     const past = card({ id: 'p', title: 'Løbedag', date: '2026-08-10', sourceKeys: ['post:4'] });
     const { html } = page([MEETING, SIGNUP, undated, past]);
@@ -276,15 +278,43 @@ describe('the list', () => {
     expect(at('Tidligere')).toBeLessThan(at('data-signal-id="p"'));
   });
 
-  test('no divider heads a list that is all one kind', () => {
-    expect(page([SIGNUP, MEETING]).html).not.toContain('class="divider"');
-    expect(page([card({ id: 'u', sourceKeys: ['post:3'] })]).html).not.toContain('class="divider"');
+  test('next week is one group and there is no visible Kommende heading', () => {
+    const html = page([SIGNUP, MEETING]).html;
+    expect(html.match(/<h3 class="timeline-heading">Næste uge<\/h3>/g)).toHaveLength(1);
+    expect(html).not.toContain('<h2>Kommende');
+    expect(html).toContain('<section data-section="cards" aria-label="Kommende">');
+    expect(html).toContain('<div class="timeline"><div class="timeline-group"');
+    expect(BRIEF_CSS).toContain('.timeline-group:last-child{margin-bottom:0}');
+    expect(BRIEF_CSS).not.toContain('.timeline-group:last-of-type');
   });
 
-  test('the count and the empty state follow the cards', () => {
-    expect(page([SIGNUP, MEETING]).html).toContain(
-      'Kommende <span class="count" data-count>2</span>',
-    );
+  test('remaining days this week use weekday headings', () => {
+    const wednesday = card({ ...MEETING, id: 'wednesday', date: '2026-08-19' });
+    const html = page([wednesday]).html;
+
+    expect(html).toContain('<h3 class="timeline-heading">Onsdag (d. 19. august)</h3>');
+    expect(html).not.toContain('<h3 class="timeline-heading">Næste uge</h3>');
+  });
+
+  test('tomorrow keeps its own heading when it is the first day of next week', () => {
+    const mondaySource = sourceItem({ key: 'post:monday' });
+    const tuesdaySource = sourceItem({ key: 'post:tuesday' });
+    const input = briefInput({
+      today: '2026-08-30',
+      items: [mondaySource, tuesdaySource],
+    });
+    const brief = rankedBrief(input, [
+      card({ id: 'monday', date: '2026-08-31', sourceKeys: [mondaySource.key] }),
+      card({ id: 'tuesday', date: '2026-09-01', sourceKeys: [tuesdaySource.key] }),
+    ]);
+    const html = renderPage(brief);
+
+    expect(html).toContain('<h3 class="timeline-heading">I morgen (d. 31. august)</h3>');
+    expect(html).toContain('<h3 class="timeline-heading">Næste uge</h3>');
+  });
+
+  test('the empty state follows the cards without a generic count', () => {
+    expect(page([SIGNUP, MEETING]).html).not.toContain('data-count');
     const { html } = page([]);
     expect(html).toContain('data-empty>Ingen punkter i dag');
   });
@@ -336,11 +366,12 @@ describe('what is not a card', () => {
 });
 
 describe('the family’s calendar', () => {
-  test('a relevant appointment is a compact collapsed card inside Kommende', () => {
+  test('a relevant appointment is a compact collapsed card inside the timeline', () => {
     const { brief, html } = calendarPage([SIGNUP]);
     expect(html).not.toContain('<h2>Egen kalender');
     expect(html).not.toContain('data-section="calendar"');
-    expect(html).toContain('Kommende <span class="count" data-count>2</span>');
+    expect(html).not.toContain('<h2>Kommende');
+    expect(brief.timeline).toHaveLength(2);
     expect(html).toContain('<details class="calendar-details">');
     expect(html).not.toContain('<details class="calendar-details" open');
     const open = `<div class="card calendar-card" data-signal-id="personal:${DENTIST.key}"`;
@@ -369,7 +400,7 @@ describe('the family’s calendar', () => {
     const meeting = card({
       id: 'meeting',
       title: 'Forældremøde',
-      date: TODAY,
+      date: '2026-08-13',
       sourceKeys: [aulaEvent.key],
     });
     const { html } = calendarPage([meeting], {}, [DENTIST_VERDICT], [aulaEvent]);
@@ -379,12 +410,39 @@ describe('the family’s calendar', () => {
     );
   });
 
-  test('an irrelevant appointment is absent from Kommende and counted as hidden', () => {
+  test('an irrelevant appointment is absent from the timeline and counted as hidden', () => {
     const { brief, html } = calendarPage([SIGNUP], {}, [
       { ...DENTIST_VERDICT, relevant: false, reason: 'Ikke relevant for skoleugen.' },
     ]);
     expect(html).not.toContain('calendar-title">Tandlæge');
     expect(html).toContain('<summary>1 skjult</summary>');
+    expect(validatePage(html, brief)).toEqual([]);
+  });
+
+  test('a defensive out-of-window appointment leaves a visible degraded note', () => {
+    const later = {
+      ...DENTIST,
+      key: 'cal:family:later',
+      at: '2026-09-07T13:30:00',
+      endsAt: '2026-09-07T14:15:00',
+    };
+    const input = briefInput({ today: '2026-08-24', items: [later] });
+    const brief = rankedBrief(input, [], {
+      personalEvents: [
+        {
+          sourceKey: later.key,
+          relevant: true,
+          summary: 'En senere tandlægetid.',
+          reason: 'Aftalen vedrører et barn.',
+        },
+      ],
+    });
+    const html = renderPage(brief);
+
+    expect(html).not.toContain(`data-signal-id="personal:${later.key}"`);
+    expect(html).toContain(
+      'Kalenderaftalen &quot;Tandlæge&quot; den 2026-09-07 ligger efter oversigtens slutdato 2026-09-06 og blev ikke vist.',
+    );
     expect(validatePage(html, brief)).toEqual([]);
   });
 });
