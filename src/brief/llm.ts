@@ -13,22 +13,16 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildDateSupport, dueAtSupported, unsupportedDateClaims } from './dates.ts';
 import { BRIEF_DIR } from './state.ts';
 import type { BriefInput, Card, PersonalEventVerdict } from './types.ts';
 import { isRecord, parseIsoDateParts } from '../validation.ts';
-import { parseJsonLoosely, runClaude } from '../llm/claude.ts';
+import { runClaude } from '../llm/claude.ts';
 import { briefExtractionRequest } from '../llm/requests/brief-extraction.ts';
 
-export {
-  modelEffortArgs,
-  parseClaudeJson,
-  parseJsonLoosely,
-  runClaude,
-  spawnClaude,
-} from '../llm/claude.ts';
+export { modelEffortArgs, parseClaudeJson, runClaude, spawnClaude } from '../llm/claude.ts';
 export type { ClaudeExit, ClaudeReply } from '../llm/claude.ts';
 export {
   briefExtractionRequest,
@@ -39,13 +33,14 @@ export {
 } from '../llm/requests/brief-extraction.ts';
 
 const CACHE_DIR = join(BRIEF_DIR, 'cache');
+const CACHE_FILE_LIMIT = 32;
 /**
  * Bumped whenever the answer's shape changes. It is part of the cache key, so
  * an entry written under the old contract is simply not found rather than
  * read back with a field missing — the first run after an upgrade must not
  * spend its day on yesterday's answer shape.
  */
-const CONTRACT_VERSION = 5;
+const CONTRACT_VERSION = 6;
 /** Whitespace-insensitive containment. Aula's HTML flattening leaves odd runs of spaces. */
 export type ExtractResult = {
   topline: string | null;
@@ -318,19 +313,10 @@ export async function extractCards(
   const call = { timeoutMs: opts.timeoutMs ?? 240_000, schema };
   const answer = await runClaude(instructions, body, call);
 
-  // `structured` is the CLI's own parse of a schema-checked tool call, so on
-  // the ordinary path there is nothing to parse and nothing to fail at. The
-  // fallback stays for the case where the envelope arrives without it — an
-  // older CLI, or a shape the flag did not take — and it is the only reason
-  // `parseJsonLoosely` still has a caller here.
-  let parsed: unknown;
-  try {
-    parsed = answer.structured ?? parseJsonLoosely(answer.text);
-  } catch {
-    // The model answered, but not with JSON. The rules layer still carries the
-    // brief; reporting it as a problem beats passing it off as an empty result.
-    return { ...EMPTY, problems: ['modellens svar kunne ikke læses som JSON'] };
-  }
+  // `runClaude` requires the schema-checked tool parameters. Unstructured text
+  // is never accepted as a second contract: a missing structured result is a
+  // transport failure and the caller honestly falls back to rules.
+  let parsed = answer.structured;
   let result = validateExtraction(input, parsed);
 
   // The shape and the source keys are the schema's, so a second pass only ever
@@ -343,7 +329,7 @@ Dit forrige svar havde disse fejl. Ret dem, og svar igen med det hele:
 ${result.problems.map((p) => `- ${p}`).join('\n')}`;
     try {
       const second = await runClaude(retry, body, call);
-      const secondParsed = second.structured ?? parseJsonLoosely(second.text);
+      const secondParsed = second.structured;
       const reparsed = validateExtraction(input, secondParsed);
       // A corrective answer may fix the named date and forget valid cards or
       // calendar verdicts. Fewer problems is better only when it preserves both
@@ -369,9 +355,23 @@ ${result.problems.map((p) => `- ${p}`).join('\n')}`;
     try {
       mkdirSync(CACHE_DIR, { recursive: true });
       writeFileSync(cachePath, JSON.stringify(parsed, null, 2));
+      pruneExtractionCache(cachePath);
     } catch {
       // A brief that cannot cache is still a brief.
     }
   }
   return result;
+}
+
+function pruneExtractionCache(keepPath: string): void {
+  const files = readdirSync(CACHE_DIR)
+    .filter((name) => /^extract-[a-f0-9]+\.json$/.test(name))
+    .map((name) => {
+      const path = join(CACHE_DIR, name);
+      return { path, mtimeMs: statSync(path).mtimeMs };
+    })
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  for (const file of files.slice(CACHE_FILE_LIMIT)) {
+    if (file.path !== keepPath) unlinkSync(file.path);
+  }
 }

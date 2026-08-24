@@ -35,6 +35,31 @@ describe('findDateClaims', () => {
     expect(claims).toContainEqual({ kind: 'week', week: 35, raw: 'uge 35' });
   });
 
+  test('retains explicit years in numeric and written claims', () => {
+    const claims = findDateClaims('Frist 25. august 2027, møde 26/8-2026 og kontrol 27.8.2028.');
+    expect(claims).toContainEqual({
+      kind: 'date',
+      month: 8,
+      day: 25,
+      year: 2027,
+      raw: '25. august 2027',
+    });
+    expect(claims).toContainEqual({
+      kind: 'date',
+      month: 8,
+      day: 26,
+      year: 2026,
+      raw: '26/8-2026',
+    });
+    expect(claims).toContainEqual({
+      kind: 'date',
+      month: 8,
+      day: 27,
+      year: 2028,
+      raw: '27.8.2028',
+    });
+  });
+
   test('reads abbreviated months and range starts', () => {
     const claims = findDateClaims(
       'Mødet er fredag d. 18 sep kl 13-14. Fotografering 24.-28. august.',
@@ -92,6 +117,16 @@ describe('unsupportedDateClaims', () => {
     expect(unsupportedDateClaims('Aflever senest søndag den 24/9.', s)).toEqual(['søndag', '24/9']);
   });
 
+  test('an explicit year must match the supported year', () => {
+    const support = buildDateSupport(
+      input([item('post:1', 'Frist 25. august 2026 og kontrol 26.8.2026.')]),
+    );
+    expect(unsupportedDateClaims('Frist 25. august 2026.', support)).toEqual([]);
+    expect(unsupportedDateClaims('Frist 25. august 2027.', support)).toEqual(['25. august 2027']);
+    expect(unsupportedDateClaims('Kontrol 26.8.2026.', support)).toEqual([]);
+    expect(unsupportedDateClaims('Kontrol 26.8.2027.', support)).toEqual(['26.8.2027']);
+  });
+
   test('a claim may echo its own validated date', () => {
     // 2026-08-21 is a Friday; no source mentions fredag or 21/8.
     expect(unsupportedDateClaims('Frist fredag 21/8.', s)).toEqual(['fredag', '21/8']);
@@ -123,6 +158,12 @@ describe('dueAtSupported', () => {
   test('an explicit date in the claim’s own source grounds it', () => {
     const s = buildDateSupport(input([item('post:1', 'Forældremøde 26/8 kl. 17.')]));
     expect(dueAtSupported('2026-08-26', 'post:1', s)).toBe(true);
+  });
+
+  test('an ISO week in the source grounds its Monday', () => {
+    const s = buildDateSupport(input([item('post:1', 'Husk at svare i uge 41.')]));
+    expect(dueAtSupported('2026-10-05', 'post:1', s)).toBe(true);
+    expect(dueAtSupported('2026-10-12', 'post:1', s)).toBe(false);
   });
 
   test('range starts and named dates without spaces ground dueAt', () => {

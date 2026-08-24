@@ -22,14 +22,19 @@ plans, actions parents must take — in an interface where it is hard to find.
 brief is the product; everything else supports it.
 
 Ranking is the hard part, not fetching. Aula's own `important` and `unread`
-flags are not reliable, so a model reads each item and ranks its relevance on
-two signals:
+flags are not reliable, so a model reads each item and judges it from a small
+set of explicit cues:
 
+- **Obligation.** Something must be brought, answered, paid, signed up for, or
+  done before a deadline.
 - **Audience.** Addressed to everyone is usually noise; addressed to one class,
   one child or one parent is signal.
-- **Subject.** Some broad messages still matter to the individual child —
-  sign-up and payment for the yearly school photo, say. Missing one has
-  consequences for that child.
+- **Specificity.** A child or parent is named, or the source concerns the
+  child's own class or group.
+- **Broad but consequential.** Some school-wide messages still matter to the
+  individual child — sign-up and payment for school photos, for example.
+- **Family preference.** The family's explicit always/never choices win where
+  they speak, without weakening source or date grounding.
 
 **The failure that kills this is silent under-reporting.** A parent who trusts
 the brief and misses a deadline is worse off than one who never had it. A

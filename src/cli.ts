@@ -64,6 +64,7 @@ import {
   normaliseThread,
   readManyPlans,
   readPlans,
+  readFullThread,
   withFullMessages,
 } from './digest.ts';
 import { BRIEF_TITLE, runBrief } from './brief/index.ts';
@@ -85,7 +86,7 @@ import {
 } from './preferences.ts';
 import { runSchedule } from './schedule.ts';
 import { SUPPORTED_WIDGET_IDS, type WeekPlan } from './integrations/index.ts';
-import { isoDate, localIsoDate } from './integrations/types.ts';
+import { addLocalDays, isoDate, localIsoDate } from './integrations/types.ts';
 import type { CommonFile, Contact, ThreadDetail } from './types.ts';
 import { errorMessage, parseInteger, parseIsoDateParts } from './validation.ts';
 import { type Capability, WidgetError } from './widgets.ts';
@@ -311,7 +312,10 @@ async function main(): Promise<number> {
 
     case 'thread': {
       if (threadId === undefined) throw new Error('thread id was not validated');
-      const detail = await client.getThread(threadId, page ?? 0);
+      const detail =
+        page === undefined
+          ? await readFullThread(client, threadId)
+          : await client.getThread(threadId, page);
       const result = {
         id: detail.id,
         subject: detail.subject ?? '(no subject)',
@@ -319,6 +323,11 @@ async function main(): Promise<number> {
         startedAt: detail.threadStartedDateTime,
         totalMessageCount: detail.totalMessageCount,
         moreMessagesExist: detail.moreMessagesExist,
+        messagesIncomplete: page === undefined ? Boolean(detail.moreMessagesExist) : null,
+        messageReadWarning:
+          page === undefined && 'warning' in detail && typeof detail.warning === 'string'
+            ? detail.warning
+            : null,
         participants: (detail.recipients ?? []).map((r) => r.fullName).filter(Boolean),
         messages: (detail.messages ?? []).map(normaliseMessage),
       };
@@ -382,7 +391,7 @@ async function main(): Promise<number> {
       const family = await resolveFamily(client);
       const children = selectChildren(family, values.child);
       const from = fromDate ?? isoDate(startOfDay(new Date()));
-      const to = toDate ?? isoDate(new Date(Date.now() + days * 86_400_000));
+      const to = toDate ?? isoDate(addLocalDays(new Date(), days));
       const templates = await client.getPresenceTemplates({
         childInstitutionProfileIds: children.map((c) => c.id),
         fromDate: from,
@@ -440,22 +449,44 @@ async function main(): Promise<number> {
 
     case 'attachments': {
       if (threadId === undefined) throw new Error('thread id was not validated');
-      const detail = await client.getThread(threadId, page ?? 0);
+      const detail =
+        page === undefined
+          ? await readFullThread(client, threadId)
+          : await client.getThread(threadId, page);
       const found = threadAttachments(detail);
-      return emit(found, asText, (rows) =>
-        rows.length === 0
-          ? '(no attachments in this thread)'
-          : rows
-              .map((a) => `[${a.index}] ${a.name} (${a.kind}) — from ${a.from ?? 'unknown'}`)
-              .join('\n'),
-      );
+      const result = {
+        attachments: found,
+        messagesIncomplete: page === undefined ? Boolean(detail.moreMessagesExist) : null,
+        messageReadWarning:
+          page === undefined && 'warning' in detail && typeof detail.warning === 'string'
+            ? detail.warning
+            : null,
+      };
+      return emit(result, asText, (value) => {
+        const rows = value.attachments;
+        const body =
+          rows.length === 0
+            ? '(no attachments in this thread)'
+            : rows
+                .map((a) => `[${a.index}] ${a.name} (${a.kind}) — from ${a.from ?? 'unknown'}`)
+                .join('\n');
+        return value.messagesIncomplete
+          ? `WARNING: not every message page was available (${value.messageReadWarning ?? 'unknown reason'}).\n${body}`
+          : body;
+      });
     }
 
     case 'attachment': {
       if (threadId === undefined || attachmentIndex === undefined) {
         throw new Error('attachment positionals were not validated');
       }
-      const detail = await client.getThread(threadId);
+      const detail = await readFullThread(client, threadId);
+      if (detail.incomplete) {
+        throw new Error(
+          `Could not read every message in thread ${threadId}: ${detail.warning ?? 'unknown reason'}. ` +
+            'Re-read the thread before choosing an attachment index.',
+        );
+      }
       const found = threadAttachments(detail);
       const wanted = found[attachmentIndex];
       if (!wanted) {
@@ -1082,10 +1113,23 @@ async function collectContacts(
   role: string,
 ): Promise<Contact[]> {
   const collected: Contact[] = [];
-  for (let page = 1; page <= 50; page++) {
+  const seen = new Set<string>();
+  for (let page = 1; ; page++) {
     const batch = await client.getContactList({ groupId, filter: role, page });
     if (batch.length === 0) break;
-    collected.push(...batch);
+    let newRows = 0;
+    for (const contact of batch) {
+      const key = JSON.stringify([
+        contact.profileId ?? null,
+        contact.institutionProfileId ?? null,
+        contact.fullName ?? null,
+      ]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      collected.push(contact);
+      newRows++;
+    }
+    if (newRows === 0) throw new Error(`Aula repeated contact page ${page}.`);
   }
   return collected;
 }
@@ -1226,6 +1270,9 @@ function renderWhoami(family: Family): string {
 
 type NormalThread = ReturnType<typeof normaliseThread> & {
   messages?: ReturnType<typeof normaliseMessage>[];
+  messagesUnavailable?: boolean;
+  messagesIncomplete?: boolean;
+  messageReadWarning?: string | null;
 };
 
 function renderThreads(threads: NormalThread[]): string {
@@ -1239,10 +1286,15 @@ function renderThreads(threads: NormalThread[]): string {
         `${flags ? `  <${flags}>` : ''}` +
         `${t.regarding.length ? `  (re: ${t.regarding.join(', ')})` : ''}`;
       if (!t.messages) return `${head}\n    ${t.latestMessagePreview}`;
+      const warning = t.messagesUnavailable
+        ? '    WARNING: message bodies could not be read.\n'
+        : t.messagesIncomplete
+          ? `    WARNING: not every message page was available (${t.messageReadWarning ?? 'unknown reason'}).\n`
+          : '';
       const body = t.messages
         .map((m) => `    ${formatWhen(m.at)} ${m.from ?? 'unknown'}:\n${indent(m.text, 6)}`)
         .join('\n');
-      return `${head}\n${body}`;
+      return `${head}\n${warning}${body}`;
     })
     .join('\n\n');
 }
@@ -1252,8 +1304,13 @@ function renderThreadDetail(thread: {
   subject: string;
   sensitive: boolean;
   messages: ReturnType<typeof normaliseMessage>[];
+  messagesIncomplete?: boolean | null;
+  messageReadWarning?: string | null;
 }): string {
   const head = `[${thread.id}] ${thread.subject}${thread.sensitive ? '  <SENSITIVE>' : ''}`;
+  const warning = thread.messagesIncomplete
+    ? `\nWARNING: not every message page was available (${thread.messageReadWarning ?? 'unknown reason'}).`
+    : '';
   const body = thread.messages
     .map((m) => {
       const attachments = m.attachments.length
@@ -1262,7 +1319,7 @@ function renderThreadDetail(thread: {
       return `  ${formatWhen(m.at)} ${m.from ?? 'unknown'}:\n${indent(m.text, 4)}${attachments}`;
     })
     .join('\n\n');
-  return `${head}\n\n${body}`;
+  return `${head}${warning}\n\n${body}`;
 }
 
 function renderPosts(posts: ReturnType<typeof normalisePost>[]): string {
@@ -1476,15 +1533,35 @@ async function collectCommonFiles(
   limit?: number,
 ): Promise<NormalCommonFile[]> {
   const collected: CommonFile[] = [];
+  const seen = new Set<number>();
   const pageSize = 50;
-  for (let index = 0; index < 500; index += pageSize) {
+  let expectedTotal: number | null = null;
+  for (let index = 0; ; index += pageSize) {
     const page = await client.getCommonFiles({
       institutionCodes: family.institutionCodes,
       index,
       limit: pageSize,
     });
-    collected.push(...page.commonFiles);
-    if (collected.length >= page.totalAmount || page.commonFiles.length === 0) break;
+    expectedTotal ??= page.totalAmount;
+    if (page.totalAmount !== expectedTotal) {
+      throw new Error(
+        `Aula changed the shared-file total while paging (${expectedTotal} to ${page.totalAmount}).`,
+      );
+    }
+    let newRows = 0;
+    for (const file of page.commonFiles) {
+      if (seen.has(file.id)) continue;
+      seen.add(file.id);
+      collected.push(file);
+      newRows++;
+    }
+    if (collected.length >= expectedTotal) break;
+    if (page.commonFiles.length === 0) {
+      throw new Error(
+        `Aula reported ${expectedTotal} shared files but returned ${collected.length}.`,
+      );
+    }
+    if (newRows === 0) throw new Error(`Aula repeated shared-file page ${index}.`);
   }
   const normalised = collected.map(normaliseCommonFile);
   // Newest first: the shelf is dominated by years-old policy documents, and the

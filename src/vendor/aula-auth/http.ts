@@ -9,6 +9,7 @@
  */
 
 import { errorMessage } from '../../validation.ts';
+import { remoteReadSignal } from '../../transport.ts';
 import { AulaCookieJar } from './cookies.ts';
 import { RedirectLoopError } from './errors.ts';
 import type { Logger } from './logger.ts';
@@ -94,6 +95,7 @@ export class AulaHttpClient {
       method: options.method ?? 'GET',
       headers,
       redirect: 'manual',
+      signal: remoteReadSignal(),
     };
     if (options.body !== undefined) {
       init.body = options.body;

@@ -12,7 +12,7 @@ import {
   formatAulaDate,
 } from './client.ts';
 import { htmlToText, preview } from './html.ts';
-import { localIsoDate } from './integrations/types.ts';
+import { addLocalDays, localIsoDate } from './integrations/types.ts';
 import {
   normaliseCommonFile,
   normaliseSchedule,
@@ -54,7 +54,7 @@ const OK_PROFILES = { status: { code: 0 }, data: { profiles: [] } };
 /** Distinguishable from OK_PROFILES, so a replayed request proves it carried data. */
 const ONE_PROFILE = {
   status: { code: 0 },
-  data: { profiles: [{ profileId: 1, institutionProfiles: [] }] },
+  data: { profiles: [{ profileId: 1, institutionProfiles: [], children: [] }] },
 };
 
 test('API versions must be finite integers in the supported range', () => {
@@ -217,6 +217,31 @@ test('a calendar window at the limit is still attempted', async () => {
       assert.ok(called > 1, 'the boundary itself must not be refused');
     },
   );
+});
+
+test('a 50-day local calendar window remains valid across the autumn DST change', async () => {
+  const previous = process.env.TZ;
+  process.env.TZ = 'Europe/Copenhagen';
+  let called = 0;
+  try {
+    await withFetch(
+      async () => {
+        called++;
+        return jsonResponse(called === 1 ? OK_PROFILES : { status: { code: 0 }, data: [] });
+      },
+      async () => {
+        const client = new AulaClient({ cookie: COOKIE });
+        const start = new Date(2026, 8, 20);
+        const end = addLocalDays(start, CALENDAR_MAX_SPAN_DAYS);
+        assert.equal(end.getTime() - start.getTime(), 50 * 86_400_000 + 3_600_000);
+        await client.getCalendarEvents({ childInstitutionProfileIds: [1], start, end });
+      },
+    );
+    assert.ok(called > 1, 'DST must not turn 50 calendar days into an over-limit request');
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
 });
 
 // Fælles Filer, trimmed from a live response. The `file.file` nesting is
@@ -774,6 +799,112 @@ test('a payload of the wrong shape still fails, and says what arrived', async ()
   );
 });
 
+test('successful-looking endpoint payloads reject malformed rows at the boundary', async () => {
+  const cases: Array<{
+    name: string;
+    data: unknown;
+    read: (client: AulaClient) => Promise<unknown>;
+  }> = [
+    {
+      name: 'profiles',
+      data: { profiles: [{ profileId: 1, institutionProfiles: [], children: [{ id: '11' }] }] },
+      read: (client) => client.getProfiles(),
+    },
+    {
+      name: 'thread list',
+      data: { threads: [{ id: '5001', read: false, sensitive: false }], moreMessagesExist: false },
+      read: (client) => client.getThreads(),
+    },
+    {
+      name: 'thread detail',
+      data: {
+        id: 5001,
+        sensitive: false,
+        messages: [{ id: 1, sendDateTime: '2026-08-24T08:00:00Z' }],
+      },
+      read: (client) => client.getThread(5001),
+    },
+    {
+      name: 'posts',
+      data: { posts: [{ id: '7' }], hasMorePosts: false },
+      read: (client) => client.getPosts({ institutionProfileIds: [1] }),
+    },
+    {
+      name: 'calendar',
+      data: [{ id: 7, title: 'No start' }],
+      read: (client) =>
+        client.getCalendarEvents({
+          childInstitutionProfileIds: [11],
+          start: new Date('2026-08-24T00:00:00Z'),
+          end: new Date('2026-08-25T00:00:00Z'),
+        }),
+    },
+    {
+      name: 'presence',
+      data: [{ status: 3 }],
+      read: (client) => client.getDailyPresence([11]),
+    },
+    {
+      name: 'groups',
+      data: [{ profileId: 111, groups: [{ id: '5', name: '2E' }] }],
+      read: (client) => client.getGroupsByContext([11]),
+    },
+    {
+      name: 'contacts',
+      data: [{ birthday: '2016-05-04' }],
+      read: (client) => client.getContactList({ groupId: 5 }),
+    },
+    {
+      name: 'presence templates',
+      data: { presenceWeekTemplates: 'not a list' },
+      read: (client) =>
+        client.getPresenceTemplates({
+          childInstitutionProfileIds: [11],
+          fromDate: '2026-08-24',
+          toDate: '2026-08-31',
+        }),
+    },
+    {
+      name: 'shared files',
+      data: { commonFiles: [{ id: '7' }], totalAmount: 1 },
+      read: (client) => client.getCommonFiles({ institutionCodes: ['100001'] }),
+    },
+  ];
+
+  for (const item of cases) {
+    let call = 0;
+    await withFetch(
+      async () => {
+        call++;
+        return call === 1
+          ? jsonResponse(OK_PROFILES)
+          : jsonResponse({ status: { code: 0 }, data: item.data });
+      },
+      async () => {
+        const client = new AulaClient({ cookie: COOKIE });
+        await assert.rejects(item.read(client), /does not understand/, item.name);
+      },
+    );
+  }
+});
+
+test('remote Aula requests carry an abort signal', async () => {
+  const signals: Array<AbortSignal | null | undefined> = [];
+  let call = 0;
+  await withFetch(
+    async (_input, init) => {
+      call++;
+      signals.push(init?.signal);
+      return call === 1 ? jsonResponse(OK_PROFILES) : jsonResponse(ONE_PROFILE);
+    },
+    async () => {
+      await new AulaClient({ cookie: COOKIE }).getProfiles();
+    },
+  );
+  assert.equal(signals.length, 2);
+  assert.ok(signals.every((signal) => signal instanceof AbortSignal));
+});
+
 test('array query parameters use the PHP-style repeated-key form Aula expects', async () => {
   let captured = '';
   let call = 0;
@@ -1289,7 +1420,10 @@ test('a failed bootstrap is not sticky for the life of the client', async () => 
       return jsonResponse({ status: { code: 500 }, data: null }, 500);
     }
     if (method === 'profiles.getProfilesByLogin') return jsonResponse(OK_PROFILES);
-    return jsonResponse({ status: { code: 0 }, data: { threads: [] } });
+    return jsonResponse({
+      status: { code: 0 },
+      data: { threads: [], moreMessagesExist: false, page: 0 },
+    });
   };
 
   await withFetch(handler, async () => {

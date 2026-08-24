@@ -53,10 +53,23 @@ case "$mode" in
     ;;
   *)
     result_json="\${FAKE_CLAUDE_RESULT_JSON:-\\"OK\\"}"
+    structured_json="\${FAKE_CLAUDE_STRUCTURED_JSON:-}"
     if [ -n "$FAKE_CLAUDE_LOG" ] && [ -f "$FAKE_CLAUDE_LOG.results" ]; then
       result_json=$(sed -n "\${n}p" "$FAKE_CLAUDE_LOG.results")
     fi
-    printf '{"type":"result","subtype":"success","is_error":false,"result":%s,"permission_denials":[]}\\n' "$result_json"
+    if [ -n "$FAKE_CLAUDE_LOG" ] && [ -f "$FAKE_CLAUDE_LOG.structured" ]; then
+      structured_json=$(sed -n "\${n}p" "$FAKE_CLAUDE_LOG.structured")
+    fi
+    case " $* " in
+      *" --json-schema "*)
+        if [ -n "$structured_json" ]; then
+          printf '{"type":"result","subtype":"success","is_error":false,"result":%s,"structured_output":%s,"permission_denials":[]}\\n' "$result_json" "$structured_json"
+        else
+          printf '{"type":"result","subtype":"success","is_error":false,"result":%s,"permission_denials":[]}\\n' "$result_json"
+        fi
+        ;;
+      *) printf '{"type":"result","subtype":"success","is_error":false,"result":%s,"permission_denials":[]}\\n' "$result_json" ;;
+    esac
     ;;
 esac
 `;

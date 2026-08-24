@@ -145,9 +145,24 @@ export function localIsoDate(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
+/** Add local calendar days without shifting the wall-clock hour across DST. */
+export function addLocalDays(date: Date, days: number): Date {
+  if (!Number.isInteger(days)) throw new RangeError('days must be an integer');
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
+/** Whole local calendar days between two dates, unaffected by DST offsets. */
+export function localDayDifference(from: Date, to: Date): number {
+  const fromDay = Date.UTC(from.getFullYear(), from.getMonth(), from.getDate());
+  const toDay = Date.UTC(to.getFullYear(), to.getMonth(), to.getDate());
+  return (toDay - fromDay) / 86_400_000;
+}
+
 /** The ISO week `offset` weeks from `from`. `weekOffset(1)` is next week. */
 export function weekOffset(offset: number, from: Date = new Date()): string {
-  return isoWeekString(new Date(from.getTime() + offset * 7 * 86_400_000));
+  return isoWeekString(addLocalDays(from, offset * 7));
 }
 
 /** Shared browser-ish UA. EasyIQ SkolePortal's edge tier 302s anything else. */

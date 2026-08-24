@@ -69,7 +69,7 @@ ${opts.body}
 const GENERATING = page({
   refreshSeconds: 3,
   body: `<p><span class="pulse">●</span> Generating today's overview…</p>
-<p>This takes a couple of minutes — the model reads two weeks of Aula. The
+<p>This takes a couple of minutes — the model reads 60 days of Aula. The
 page refreshes itself and will show the result as soon as it exists.</p>`,
 });
 

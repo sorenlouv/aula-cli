@@ -18,16 +18,19 @@ const children = [
   },
 ];
 
-function input(items: SourceItem[]): BriefInput {
+function input(
+  items: SourceItem[],
+  opts: { windowDays?: number; preferences?: string[] } = {},
+): BriefInput {
   return {
     today: '2026-08-23',
     isoWeek: '2026-W34',
-    windowDays: 14,
+    windowDays: opts.windowDays ?? 60,
     family: { children, isSteppedUp: true },
     items,
     health: [],
     albums: [],
-    preferences: [],
+    preferences: opts.preferences ?? [],
   };
 }
 
@@ -115,6 +118,95 @@ const adultCourse = aulaSource({
   audience: 'municipal',
 });
 
+const weekReply = aulaSource({
+  key: 'post:week-reply',
+  title: 'Svar om efterårsaktiviteter',
+  text: 'Husk at svare på tilmeldingen i uge 41, så Alma kan komme med.',
+});
+const oldCampAnnouncement = aulaSource({
+  key: 'post:camp-announcement',
+  title: 'Lejrskole i september',
+  text: 'Lejrskolen for 2.E afholdes onsdag den 30. september 2026. Husk sovepose.',
+  at: '2026-07-03T09:00:00+02:00',
+});
+const campReminder = aulaSource({
+  key: 'thread:camp-reminder',
+  kind: 'thread',
+  title: 'Husk lejrskolen',
+  text: 'Dette er en påmindelse om lejrskolen den 30. september 2026. Alma skal have sovepose med.',
+  important: true,
+});
+const twoObligations = aulaSource({
+  key: 'post:two-obligations',
+  title: 'Turdag mandag',
+  text: 'Husk badetøj på mandag den 31. august 2026. Husk også madpakke på mandag den 31. august 2026.',
+});
+const broadPhotoAction = aulaSource({
+  key: 'post:broad-photo-action',
+  title: 'Skolefoto for hele skolen',
+  text: 'Alle elever fotograferes. Tilmeld Alma og betal senest tirsdag den 1. september 2026.',
+  groups: ['Alle på Eksempelskolen'],
+  audience: 'institution',
+  important: true,
+});
+const fatherMessage = aulaSource({
+  key: 'thread:father-message',
+  kind: 'thread',
+  title: 'Besked fra Hjaltes far',
+  text: 'Hjalte vil gerne lege med Alma efter skole en dag.',
+  author: 'John, Hjaltes far',
+});
+const municipalNewsletter = aulaSource({
+  key: 'post:municipal-newsletter',
+  title: 'Kommunalt nyhedsbrev',
+  text: 'Generelle nyheder fra forvaltningen uden betydning for børnenes dag.',
+  groups: ['Alle forældre i kommunen'],
+  childNames: [],
+  audience: 'municipal',
+});
+const ongoingChange = aulaSource({
+  key: 'post:ongoing-change',
+  title: 'Ny fast mødetid',
+  text: 'Fra lørdag den 1. august 2026 er den faste mødetid for 2.E kl. 08.00 hver dag.',
+  at: '2026-07-31T09:00:00+02:00',
+});
+const partialThread = aulaSource({
+  key: 'thread:partial-visible-action',
+  kind: 'thread',
+  title: 'Svar om mødet',
+  text: 'Lærer: Kan I svare senest tirsdag den 25. august 2026, om Alma deltager?',
+  important: true,
+  conversation: {
+    messages: [
+      {
+        from: 'Eksempel Lærer',
+        at: '2026-08-21T09:00:00+02:00',
+        text: 'Kan I svare senest tirsdag den 25. august 2026, om Alma deltager?',
+      },
+    ],
+    total: 3,
+    truncated: true,
+  },
+});
+const longTailAction = aulaSource({
+  key: 'post:long-tail-action',
+  title: 'Lang orientering om klassens tur',
+  text: `${'Baggrund om turen og undervisningen. '.repeat(260)}Husk at aflevere Almas samtykke senest fredag den 28. august 2026.`,
+});
+const schoolDentistTime = aulaSource({
+  key: 'event:school-dentist-time',
+  kind: 'event',
+  title: 'Skolebibliotek med Alma',
+  text: 'Skolebibliotek med Alma onsdag den 26. august 2026 kl. 13.30.',
+  at: '2026-08-26T13:30:00+02:00',
+});
+const almaDentist = personal(
+  'alma-dentist',
+  'Alma tandlæge',
+  '2026-08-26T13:30:00+02:00',
+  'Almas tandlægetid',
+);
+
 export const briefExtractionCases: BriefExtractionEvalCase[] = [
   {
     id: 'personal-calendar-relevance',
@@ -164,6 +256,152 @@ export const briefExtractionCases: BriefExtractionEvalCase[] = [
       ],
       hiddenIncludes: [adultCourse.key],
       hiddenExcludes: [photoPost.key, consentThread.key],
+    },
+  },
+  {
+    id: 'iso-week-deadline',
+    description: 'A Danish week-number obligation becomes a grounded card on that ISO week Monday.',
+    provenance: 'synthetic',
+    input: input([weekReply]),
+    expected: {
+      requiredCards: [
+        { sourceKeys: [weekReply.key], needsAction: true, date: '2026-10-05', children: ['Alma'] },
+      ],
+    },
+  },
+  {
+    id: 'old-announcement-merged-with-reminder',
+    description:
+      'A 60-day-old announcement and current reminder are merged without losing the original date.',
+    provenance: 'synthetic',
+    input: input([oldCampAnnouncement, campReminder], { windowDays: 60 }),
+    expected: {
+      requiredCards: [
+        {
+          sourceKeys: [oldCampAnnouncement.key, campReminder.key],
+          needsAction: true,
+          date: '2026-09-30',
+          children: ['Alma'],
+        },
+      ],
+    },
+  },
+  {
+    id: 'same-day-distinct-obligations',
+    description: 'Two different things to bring on the same day remain separately visible.',
+    provenance: 'synthetic',
+    input: input([twoObligations]),
+    expected: {
+      requiredCards: [
+        {
+          sourceKeys: [twoObligations.key],
+          needsAction: true,
+          date: '2026-08-31',
+          textContains: 'badetøj',
+        },
+        {
+          sourceKeys: [twoObligations.key],
+          needsAction: true,
+          date: '2026-08-31',
+          textContains: 'madpakke',
+        },
+      ],
+    },
+  },
+  {
+    id: 'broad-important-child-action',
+    description:
+      'A school-wide source remains signal when it contains a concrete action for the child.',
+    provenance: 'synthetic',
+    input: input([broadPhotoAction]),
+    expected: {
+      requiredCards: [
+        {
+          sourceKeys: [broadPhotoAction.key],
+          needsAction: true,
+          date: '2026-09-01',
+          children: ['Alma'],
+        },
+      ],
+      hiddenExcludes: [broadPhotoAction.key],
+    },
+  },
+  {
+    id: 'parent-preferences',
+    description: 'Explicit always/never preferences affect relevance without loosening grounding.',
+    provenance: 'user-labelled',
+    input: input([fatherMessage, municipalNewsletter], {
+      preferences: [
+        'Beskeder fra John, Hjaltes far, er altid relevante.',
+        'Kommunale nyhedsbreve er aldrig relevante.',
+      ],
+    }),
+    expected: {
+      requiredCards: [{ sourceKeys: [fatherMessage.key], date: null }],
+      hiddenIncludes: [municipalNewsletter.key],
+      hiddenExcludes: [fatherMessage.key],
+    },
+  },
+  {
+    id: 'past-ongoing-change',
+    description:
+      'A past date remains visible when the source establishes an ongoing changed routine.',
+    provenance: 'synthetic',
+    input: input([ongoingChange]),
+    expected: {
+      requiredCards: [
+        {
+          sourceKeys: [ongoingChange.key],
+          needsAction: false,
+          date: '2026-08-01',
+          children: ['Alma'],
+        },
+      ],
+    },
+  },
+  {
+    id: 'partial-thread-visible-evidence',
+    description:
+      'A partial thread may yield a card from visible evidence without inventing missing content.',
+    provenance: 'synthetic',
+    input: input([partialThread]),
+    expected: {
+      requiredCards: [
+        {
+          sourceKeys: [partialThread.key],
+          needsAction: true,
+          date: '2026-08-25',
+          children: ['Alma'],
+        },
+      ],
+    },
+  },
+  {
+    id: 'long-tail-obligation',
+    description: 'An obligation beyond the old head-only prompt boundary remains extractable.',
+    provenance: 'synthetic',
+    input: input([longTailAction]),
+    expected: {
+      requiredCards: [
+        {
+          sourceKeys: [longTailAction.key],
+          needsAction: true,
+          date: '2026-08-28',
+          children: ['Alma'],
+        },
+      ],
+    },
+  },
+  {
+    id: 'calendar-no-clash-analysis',
+    description:
+      'A relevant child appointment is shown beside Aula without conflict or reassurance claims.',
+    provenance: 'user-labelled',
+    input: input([schoolDentistTime, almaDentist]),
+    expected: {
+      relevantPersonalEvents: [almaDentist.key],
+      toplineNotContains: ['konflikt', 'kolliderer', 'sammenfald'],
+      childSummariesNotContain: ['konflikt', 'kolliderer', 'sammenfald'],
     },
   },
 ];

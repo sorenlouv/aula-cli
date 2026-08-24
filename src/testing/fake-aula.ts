@@ -47,8 +47,13 @@ const PROFILES = {
       profileId: 999,
       displayName: 'Valdemar Eksempelsen',
       institutionProfiles: [
-        { id: 901, institutionCode: '100001', institutionName: 'Eksempelskolen' },
-        { id: 902, institutionCode: 'E10002', institutionName: 'Børnehuset Eksemplet' },
+        { id: 901, profileId: 999, institutionCode: '100001', institutionName: 'Eksempelskolen' },
+        {
+          id: 902,
+          profileId: 999,
+          institutionCode: 'E10002',
+          institutionName: 'Børnehuset Eksemplet',
+        },
       ],
       children: CHILDREN,
     },
@@ -62,14 +67,20 @@ const PROFILES = {
  *   FAKE_AULA_EMPTY_POSTS=1  the "wrong id set looks like an empty feed" trap
  *   FAKE_AULA_FAIL=<method>  that one method answers 403
  *   FAKE_AULA_FAIL_THREAD=<id>  that one thread's messages answer 403
+ *   FAKE_AULA_FAIL_THREAD_PAGE=<id>:<page>  one later message page answers 503
+ *   FAKE_AULA_THREAD_PAGE_SIZE=<n>  paginate thread bodies for integration tests
+ *   FAKE_AULA_CONTACT_PAGES=<n>  serve one distinct contact on each page
+ *   FAKE_AULA_COMMON_FILES=<n>  serve this many paged shared files
  *   FAKE_AULA_STALE_TOKEN=1  every widget token is rejected once as expired
  *   FAKE_AULA_REJECT_TOKEN=1 Aula will not accept the access token
  *   FAKE_AULA_DOWN=1         Aula is broken for everyone, credentials or not
  */
 const PROFILE_CONTEXT = {
+  id: 901,
   userId: 'vald42a1',
+  portalRole: 'guardian',
   isSteppedUp: process.env.FAKE_AULA_NO_STEPUP !== '1',
-  institutionProfile: { fullName: 'Valdemar Eksempelsen' },
+  institutionProfile: { id: 901, profileId: 999, fullName: 'Valdemar Eksempelsen' },
   institutions: [
     {
       institutionCode: '100001',
@@ -308,6 +319,7 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
       });
     case 'messaging.getMessagesForThread': {
       const threadId = Number(url.searchParams.get('threadId'));
+      const page = Number(url.searchParams.get('page') ?? 0);
       // One unreadable thread among readable ones. `FAKE_AULA_FAIL` can only
       // take out the whole method, and the interesting case is the other one:
       // a single thread the guardian has lost access to, which the digest
@@ -318,15 +330,27 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
           headers: { 'content-type': 'application/json' },
         });
       }
+      if (`${threadId}:${page}` === process.env.FAKE_AULA_FAIL_THREAD_PAGE) {
+        return new Response(JSON.stringify({ status: { code: 503 }, data: null }), {
+          status: 503,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
       const messages = MESSAGES[threadId] ?? [];
+      const requestedSize = Number(process.env.FAKE_AULA_THREAD_PAGE_SIZE ?? messages.length);
+      const pageSize =
+        Number.isInteger(requestedSize) && requestedSize > 0 ? requestedSize : messages.length;
+      const visible = messages.slice(page * pageSize, (page + 1) * pageSize);
       return envelope({
         id: threadId,
         subject: THREADS.find((t) => t.id === threadId)?.subject ?? '?',
+        sensitive: false,
         totalMessageCount: messages.length,
-        moreMessagesExist: false,
+        moreMessagesExist: (page + 1) * pageSize < messages.length,
+        page,
         recipients: [],
-        messages: messages.map((m, i) => ({
-          id: `m-${threadId}-${i}`,
+        messages: visible.map((m, i) => ({
+          id: `m-${threadId}-${page * pageSize + i}`,
           sendDateTime: iso(m.ago),
           sender: { fullName: m.from, mailBoxOwner: { portalRole: m.role } },
           text: { html: m.html },
@@ -388,6 +412,7 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
       const ids = new Set(numbers(url.searchParams, 'childIds'));
       return envelope(
         CHILDREN.filter((c) => ids.has(c.id)).map((c) => ({
+          id: c.id,
           status: 3,
           institutionProfile: { name: c.name, institutionName: c.institutionName },
         })),
@@ -405,6 +430,15 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
       );
     }
     case 'profiles.getContactlist':
+      if (Number(process.env.FAKE_AULA_CONTACT_PAGES ?? 0) > 0) {
+        const page = Number(url.searchParams.get('page') ?? 1);
+        const pages = Number(process.env.FAKE_AULA_CONTACT_PAGES);
+        return envelope(
+          page <= pages
+            ? [{ profileId: page, fullName: `Klassekammerat ${page}`, birthday: '2016-05-04' }]
+            : [],
+        );
+      }
       return envelope(
         Number(url.searchParams.get('page') ?? 1) === 1
           ? [{ profileId: 1, fullName: 'Klassekammerat', birthday: '2016-05-04' }]
@@ -412,8 +446,20 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
       );
     case 'notifications.getNotificationsForActiveProfile':
       return envelope([]);
-    case 'commonFiles.getCommonFiles':
-      return envelope({ commonFiles: [], totalAmount: 0 });
+    case 'commonFiles.getCommonFiles': {
+      const total = Number(process.env.FAKE_AULA_COMMON_FILES ?? 0);
+      const index = Number(url.searchParams.get('index') ?? 0);
+      const limit = Number(url.searchParams.get('limit') ?? 50);
+      const commonFiles = Array.from(
+        { length: Math.max(0, Math.min(limit, total - index)) },
+        (_, offset) => ({
+          id: index + offset + 1,
+          title: `Fælles fil ${index + offset + 1}`,
+          created: iso(-1),
+        }),
+      );
+      return envelope({ commonFiles, totalAmount: total });
+    }
     case 'aulaToken.getAulaToken':
       // Serialised so a caller can tell a re-issued token from the one it had.
       return envelope(`fake-widget-jwt-${++issuedTokens}`);

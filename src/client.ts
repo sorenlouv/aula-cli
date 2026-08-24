@@ -5,6 +5,7 @@ import { type Remedy, formatRemedy } from './errors.ts';
 import type {
   Album,
   CalendarEvent,
+  CommonFile,
   CommonFileList,
   Contact,
   GroupContext,
@@ -17,6 +18,8 @@ import type {
   ThreadDetail,
   ThreadList,
 } from './types.ts';
+import { localDayDifference } from './integrations/types.ts';
+import { remoteReadSignal } from './transport.ts';
 import { isRecord, parseInteger } from './validation.ts';
 
 const FALLBACK_API_VERSION = 24;
@@ -491,6 +494,7 @@ export class AulaClient {
       headers,
       body: httpMethod === 'POST' ? JSON.stringify(opts.body) : undefined,
       redirect: 'manual',
+      signal: remoteReadSignal(),
     });
     this.#storeCookies(res);
 
@@ -770,37 +774,53 @@ export class AulaClient {
   async getProfiles(): Promise<Profile[]> {
     const method = 'profiles.getProfilesByLogin';
     const data = expectObject<{ profiles?: unknown }>(method, await this.#request(method), {});
-    return expectArray<Profile>(method, data.profiles);
+    return expectArrayOf<Profile>(
+      method,
+      data.profiles,
+      'profiles with numeric ids and child lists',
+      isProfile,
+    );
   }
 
   async getProfileContext(portalRole = 'guardian'): Promise<ProfileContext> {
     const method = 'profiles.getProfileContext';
-    return expectObject<ProfileContext>(
+    const context = expectObject<ProfileContext>(
       method,
       await this.#request(method, {
         query: { portalrole: portalRole },
       }),
     );
+    if (!isProfileContext(context))
+      throw payloadError(method, 'a complete profile context', context);
+    return context;
   }
 
   async getThreads(page = 0): Promise<ThreadList> {
     const method = 'messaging.getThreads';
-    return expectObject<ThreadList>(
+    const list = expectObject<ThreadList>(
       method,
       await this.#request(method, {
         query: { sortOn: 'date', orderDirection: 'desc', page },
       }),
     );
+    if (!Array.isArray(list.threads) || typeof list.moreMessagesExist !== 'boolean') {
+      throw payloadError(method, 'a paged thread list', list);
+    }
+    expectArrayOf(method, list.threads, 'thread summaries with ids and flags', isThreadSummary);
+    return list;
   }
 
   async getThread(threadId: number, page = 0): Promise<ThreadDetail> {
     const method = 'messaging.getMessagesForThread';
-    return expectObject<ThreadDetail>(
+    const detail = expectObject<ThreadDetail>(
       method,
       await this.#request(method, {
         query: { threadId, page },
       }),
     );
+    if (!isThreadDetail(detail))
+      throw payloadError(method, 'a thread page with valid messages', detail);
+    return detail;
   }
 
   /**
@@ -817,7 +837,7 @@ export class AulaClient {
     isBookmarked?: boolean;
   }): Promise<PostList> {
     const method = 'posts.getAllPosts';
-    return expectObject<PostList>(
+    const list = expectObject<PostList>(
       method,
       await this.#request(method, {
         query: {
@@ -832,6 +852,11 @@ export class AulaClient {
         },
       }),
     );
+    if (!Array.isArray(list.posts) || typeof list.hasMorePosts !== 'boolean') {
+      throw payloadError(method, 'a paged post list', list);
+    }
+    expectArrayOf(method, list.posts, 'posts with numeric ids', isPost);
+    return list;
   }
 
   /**
@@ -866,7 +891,7 @@ export class AulaClient {
         filterInstProfileIds: opts.childInstitutionProfileIds,
       },
     });
-    return expectArray<Album>(method, data);
+    return expectArrayOf(method, data, 'album records', isAlbum);
   }
 
   /**
@@ -884,7 +909,14 @@ export class AulaClient {
     // 403 carrying no hint of what it objected to. Measured against the live
     // API: 50 days passes, 51 does not. Catching it here means the message can
     // name the window instead of leaving the reader to guess at the ids.
-    const spanDays = (opts.end.getTime() - opts.start.getTime()) / 86_400_000;
+    const spanDays = localDayDifference(opts.start, opts.end);
+    if (spanDays < 0) {
+      throw new AulaApiError(
+        'calendar.getEventsByProfileIdsAndResourceIds',
+        -1,
+        'Calendar end must not be before its start.',
+      );
+    }
     if (spanDays > CALENDAR_MAX_SPAN_DAYS) {
       throw new AulaApiError(
         'calendar.getEventsByProfileIdsAndResourceIds',
@@ -902,7 +934,7 @@ export class AulaClient {
         end: formatAulaDate(opts.end),
       },
     });
-    return expectArray<CalendarEvent>(method, data);
+    return expectArrayOf(method, data, 'calendar events with ids and starts', isCalendarEvent);
   }
 
   async getDailyPresence(childInstitutionProfileIds: number[]): Promise<PresenceEntry[]> {
@@ -911,7 +943,7 @@ export class AulaClient {
     const data = await this.#request(method, {
       query: { childIds: childInstitutionProfileIds },
     });
-    return expectArray<PresenceEntry>(method, data);
+    return expectArrayOf(method, data, 'presence rows with ids', isPresenceEntry);
   }
 
   /**
@@ -938,7 +970,15 @@ export class AulaClient {
         toDate: opts.toDate,
       },
     });
-    return expectObject<PresenceTemplates>(method, data, {});
+    const templates = expectObject<PresenceTemplates>(method, data, {});
+    if (
+      templates.presenceWeekTemplates !== undefined &&
+      (!Array.isArray(templates.presenceWeekTemplates) ||
+        !templates.presenceWeekTemplates.every(isPresenceWeekTemplate))
+    ) {
+      throw payloadError(method, 'presence week templates', templates.presenceWeekTemplates);
+    }
+    return templates;
   }
 
   /**
@@ -951,7 +991,7 @@ export class AulaClient {
     const data = await this.#request(method, {
       query: { childInstitutionProfileIds },
     });
-    return expectArray<GroupContext>(method, data);
+    return expectArrayOf(method, data, 'group contexts with profile ids', isGroupContext);
   }
 
   /**
@@ -977,7 +1017,7 @@ export class AulaClient {
         page: opts.page ?? 1,
       },
     });
-    return expectArray<Contact>(method, data);
+    return expectArrayOf(method, data, 'contact records with an identity', isContact);
   }
 
   /**
@@ -998,7 +1038,12 @@ export class AulaClient {
 
   async getNotifications(): Promise<Notification[]> {
     const method = 'notifications.getNotificationsForActiveProfile';
-    return expectArray<Notification>(method, await this.#request(method));
+    return expectArrayOf(
+      method,
+      await this.#request(method),
+      'notifications with notificationId',
+      (value): value is Notification => isRecord(value) && typeof value.notificationId === 'string',
+    );
   }
 
   /**
@@ -1028,7 +1073,15 @@ export class AulaClient {
         orderDirection: opts.orderDirection ?? 'desc',
       },
     });
-    return expectObject<CommonFileList>(method, data, { commonFiles: [], totalAmount: 0 });
+    const list = expectObject<CommonFileList>(method, data, {
+      commonFiles: [],
+      totalAmount: 0,
+    });
+    if (!Array.isArray(list.commonFiles) || !isNumber(list.totalAmount)) {
+      throw payloadError(method, 'a shared-file list with a total', list);
+    }
+    expectArrayOf(method, list.commonFiles, 'shared files with numeric ids', isCommonFile);
+    return list;
   }
 
   /**
@@ -1093,6 +1146,146 @@ function expectArray<T>(method: string, value: unknown): T[] {
   if (value === null || value === undefined) return [];
   if (!Array.isArray(value)) throw payloadError(method, 'a list', value);
   return value as T[];
+}
+
+function expectArrayOf<T>(
+  method: string,
+  value: unknown,
+  expected: string,
+  guard: (entry: unknown) => entry is T,
+): T[] {
+  const entries = expectArray<unknown>(method, value);
+  for (const [index, entry] of entries.entries()) {
+    if (!guard(entry)) throw payloadError(method, `${expected} (bad row ${index})`, entry);
+  }
+  return entries as T[];
+}
+
+const isNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+const isString = (value: unknown): value is string => typeof value === 'string';
+
+function isProfile(value: unknown): value is Profile {
+  return (
+    isRecord(value) &&
+    isNumber(value.profileId) &&
+    Array.isArray(value.institutionProfiles) &&
+    value.institutionProfiles.every(
+      (profile) =>
+        isRecord(profile) &&
+        isNumber(profile.id) &&
+        isNumber(profile.profileId) &&
+        isString(profile.institutionCode),
+    ) &&
+    Array.isArray(value.children) &&
+    value.children.every(
+      (child) =>
+        isRecord(child) &&
+        isNumber(child.id) &&
+        isNumber(child.profileId) &&
+        isString(child.name) &&
+        isString(child.institutionCode),
+    )
+  );
+}
+
+function isProfileContext(value: unknown): value is ProfileContext {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    isString(value.userId) &&
+    isString(value.portalRole) &&
+    typeof value.isSteppedUp === 'boolean' &&
+    isRecord(value.institutionProfile) &&
+    isNumber(value.institutionProfile.id) &&
+    isNumber(value.institutionProfile.profileId) &&
+    Array.isArray(value.institutions) &&
+    value.institutions.every(
+      (institution) =>
+        isRecord(institution) &&
+        isString(institution.institutionCode) &&
+        isNumber(institution.institutionProfileId),
+    )
+  );
+}
+
+function isThreadSummary(value: unknown): value is ThreadList['threads'][number] {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    typeof value.read === 'boolean' &&
+    typeof value.sensitive === 'boolean'
+  );
+}
+
+function isThreadDetail(value: unknown): value is ThreadDetail {
+  return (
+    isRecord(value) &&
+    isNumber(value.id) &&
+    typeof value.sensitive === 'boolean' &&
+    Array.isArray(value.messages) &&
+    value.messages.every(
+      (message) => isRecord(message) && isString(message.id) && isString(message.sendDateTime),
+    ) &&
+    (value.moreMessagesExist === undefined || typeof value.moreMessagesExist === 'boolean') &&
+    (value.totalMessageCount === undefined || isNumber(value.totalMessageCount))
+  );
+}
+
+function isPost(value: unknown): value is PostList['posts'][number] {
+  return isRecord(value) && isNumber(value.id);
+}
+
+function isAlbum(value: unknown): value is Album {
+  return (
+    isRecord(value) &&
+    (value.id === undefined || value.id === null || isNumber(value.id)) &&
+    (value.creationDate === undefined || isString(value.creationDate))
+  );
+}
+
+function isCalendarEvent(value: unknown): value is CalendarEvent {
+  return isRecord(value) && isNumber(value.id) && isString(value.startDateTime);
+}
+
+function isPresenceEntry(value: unknown): value is PresenceEntry {
+  return isRecord(value) && isNumber(value.id);
+}
+
+function isPresenceWeekTemplate(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    (value.institutionProfile === undefined ||
+      value.institutionProfile === null ||
+      (isRecord(value.institutionProfile) && isNumber(value.institutionProfile.id))) &&
+    (value.dayTemplates === undefined ||
+      (Array.isArray(value.dayTemplates) && value.dayTemplates.every(isRecord)))
+  );
+}
+
+function isCommonFile(value: unknown): value is CommonFile {
+  return isRecord(value) && isNumber(value.id);
+}
+
+function isContact(value: unknown): value is Contact {
+  return (
+    isRecord(value) &&
+    (isNumber(value.profileId) ||
+      isNumber(value.institutionProfileId) ||
+      (isString(value.fullName) && value.fullName.length > 0))
+  );
+}
+
+function isGroupContext(value: unknown): value is GroupContext {
+  return (
+    isRecord(value) &&
+    isNumber(value.profileId) &&
+    (value.groups === undefined ||
+      (Array.isArray(value.groups) &&
+        value.groups.every(
+          (group) => isRecord(group) && isNumber(group.id) && isString(group.name),
+        )))
+  );
 }
 
 function payloadError(method: string, expected: string, value: unknown): AulaApiError {

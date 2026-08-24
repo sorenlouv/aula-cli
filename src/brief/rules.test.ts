@@ -54,6 +54,10 @@ describe('extractDates', () => {
     expect(extractDates('Møde ang. Alma d. 18/9', TODAY)).toEqual(['2026-09-18']);
   });
 
+  test('numeric dates retain an explicit dotted year', () => {
+    expect(extractDates('Møde 18.9.2027', TODAY)).toEqual(['2027-09-18']);
+  });
+
   test('dotted day.month, but not a clock time', () => {
     expect(extractDates('Vores første møde efter sommerferien den 17.9', TODAY)).toEqual([
       '2026-09-17',
@@ -66,6 +70,14 @@ describe('extractDates', () => {
     expect(extractDates('I dag har vi idræt', TODAY)).toEqual(['2026-08-13']);
     expect(extractDates('I morgen tager vi hul på løbedagen', TODAY)).toEqual(['2026-08-14']);
     expect(extractDates('Vi gør det fast om mandagen', TODAY)).toEqual(['2026-08-17']);
+  });
+
+  test('an ISO week resolves to its Monday', () => {
+    expect(extractDates('Husk at svare i uge 41', TODAY)).toEqual(['2026-10-05']);
+  });
+
+  test('week 53 rolls forward when the current ISO year only has 52 weeks', () => {
+    expect(extractDates('Husk at svare i uge 53', new Date(2025, 7, 1))).toEqual(['2026-12-28']);
   });
 
   test('both dates in a sentence that pairs an event with its deadline', () => {

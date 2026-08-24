@@ -155,6 +155,8 @@ export function rank(
     personalEvents?: PersonalEventVerdict[] | null;
     rules: Card[];
     hidden: string[];
+    /** Add deterministic obligations that survived when a model answer was partial. */
+    supplementRules?: boolean;
   },
 ): RankedBrief {
   const itemByKey = new Map(input.items.map((item) => [item.key, item]));
@@ -180,10 +182,18 @@ export function rank(
     return false;
   };
 
-  // The model's cards are the cards. Rules take over only when the model did
-  // not run; they never second-guess a model answer.
+  const modelCards = cards.model?.filter(real) ?? null;
+  const ruleCards = dedupeCards(cards.rules.filter(real));
+  // A complete model answer remains authoritative. A partial answer is not a
+  // trustworthy omission decision, so deterministic obligations supplement
+  // its validated survivors. Exact duplicates collapse; ambiguous duplicates
+  // are preferable to silently losing a deadline on a degraded run.
   const chosen =
-    cards.model === null ? dedupeRuleCards(cards.rules.filter(real)) : cards.model.filter(real);
+    modelCards === null
+      ? ruleCards
+      : cards.supplementRules
+        ? dedupeCards([...modelCards, ...ruleCards])
+        : modelCards;
 
   const ranked: RankedCard[] = chosen.map((card) => ({
     ...card,
@@ -273,14 +283,14 @@ export function rank(
 }
 
 /**
- * One source's rule hits collapse on title + date — a post's two distinct
- * obligations ("tilmeld senest 20/8", "udfyld sedlen 25/8") stay two cards,
- * the same sentence matched twice becomes one.
+ * Exact rule hits collapse on source, date, action and normalized summary. Two
+ * distinct obligations stay separate even when they fall on the same day.
  */
-function dedupeRuleCards(cards: Card[]): Card[] {
+function dedupeCards(cards: Card[]): Card[] {
   const seen = new Map<string, Card>();
   for (const card of cards) {
-    const key = `${card.sourceKeys.join(',')}|${card.title}|${card.date ?? ''}|${card.needsAction}`;
+    const summary = card.summary.replace(/\s+/g, ' ').trim().toLocaleLowerCase('da-DK');
+    const key = `${card.sourceKeys.join(',')}|${card.date ?? ''}|${card.needsAction}|${summary}`;
     if (!seen.has(key)) seen.set(key, card);
   }
   return [...seen.values()];

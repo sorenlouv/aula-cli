@@ -14,6 +14,7 @@
  */
 
 import type { AulaClient } from './client.ts';
+import { remoteReadSignal } from './transport.ts';
 import type { ProfileContext } from './types.ts';
 import { errorMessage } from './validation.ts';
 
@@ -283,6 +284,7 @@ export async function widgetFetch<T>(
     headers,
     body: req.body !== undefined ? JSON.stringify(req.body) : undefined,
     redirect: 'manual',
+    signal: remoteReadSignal(),
   });
   const text = await res.text();
 

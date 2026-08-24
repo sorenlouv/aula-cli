@@ -31,10 +31,9 @@ export type LastRun = {
   day: string;
   at: string;
   /**
-   * Every stage did its job: the model ran where asked, and the hosted copy
-   * was refreshed where one is configured. A run that degraded — rules only,
-   * fallback layout, deploy that did not land — is not complete, and the
-   * scheduler's next retry does it over.
+   * Every retryable stage did its job: source reads completed, the model ran
+   * where asked, page invariants passed, and the hosted copy was refreshed
+   * where configured. Otherwise the scheduler's next retry does it over.
    */
   complete: boolean;
 };

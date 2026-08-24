@@ -49,9 +49,9 @@ export type BriefRun = {
   deployment: DeployResult;
   notes: string[];
   /**
-   * Nothing degraded: the model ran where asked and the hosted copy was
-   * refreshed where one is configured. The scheduler's retries through the
-   * morning stop at the first complete run — see `--catch-up` in cli.ts.
+   * Nothing retryable degraded: the model ran where asked, every required
+   * source read completed, and the hosted copy was refreshed where configured.
+   * The scheduler stops at the first complete run — see `--catch-up` in cli.ts.
    */
   complete: boolean;
 };
@@ -68,11 +68,13 @@ export function isBriefRunComplete(opts: {
   extractionRan: boolean;
   origin: BriefRun['origin'];
   deploymentFailed: boolean;
+  retryableFetchFailures: boolean;
   violations: readonly Violation[];
 }): boolean {
   return (
     (!opts.modelWasRequested || (opts.extractionRan && opts.origin === 'model')) &&
     !opts.deploymentFailed &&
+    !opts.retryableFetchFailures &&
     opts.violations.length === 0
   );
 }
@@ -98,6 +100,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   let personalEvents: PersonalEventVerdict[] | null = null;
   let hidden: string[] = [];
   let extractionRan = opts.useModel === false;
+  let supplementRules = false;
   let extractionStatus: string | null = null;
 
   if (opts.useModel !== false) {
@@ -109,6 +112,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
       personalEvents = extracted.personalEvents;
       hidden = extracted.hidden;
       extractionRan = extracted.problems.length === 0;
+      supplementRules = extracted.problems.length > 0;
       if (extracted.problems.length > 0) {
         extractionStatus =
           `Modellens svar var ufuldstændigt (${extracted.problems.length} fejl), ` +
@@ -128,6 +132,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
     personalEvents,
     rules: cardsFromRules(input, now),
     hidden,
+    supplementRules,
   });
   if (extractionStatus) brief.degraded.push(extractionStatus);
 
@@ -182,8 +187,8 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
     if (deployment.status === 'ok') recordDeploy(state, deployment.url, now);
   }
 
-  // A run counts as complete only when nothing had to be papered over: the
-  // model's extraction ran, its layout passed validation, and the hosted copy
+  // A run counts as complete only when nothing retryable had to be papered over:
+  // the model's extraction ran, its page passed validation, and the hosted copy
   // — where one is configured — was actually refreshed. With `--no-llm` the
   // rules-only page is what was asked for, so it is complete on its own terms.
   const complete = isBriefRunComplete({
@@ -191,6 +196,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
     extractionRan,
     origin,
     deploymentFailed: deployment.status === 'failed',
+    retryableFetchFailures: input.health.some((note) => note.retryable === true),
     violations,
   });
 

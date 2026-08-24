@@ -25,7 +25,7 @@ import { AulaClient } from './client.ts';
 import { startOfDay } from './cli-helpers.ts';
 import { buildFamily, integrationContext, type Family } from './family.ts';
 import { readWidget, SUPPORTED_WIDGET_IDS } from './integrations/index.ts';
-import { isoDate, isoWeekString } from './integrations/types.ts';
+import { addLocalDays, isoDate, isoWeekString } from './integrations/types.ts';
 import { fmt } from './io.ts';
 import { errorMessage } from './validation.ts';
 import { WIDGETS, WidgetTokens } from './widgets.ts';
@@ -192,7 +192,7 @@ export async function runDoctor(
     const events = await client.getCalendarEvents({
       childInstitutionProfileIds: family.childInstitutionProfileIds,
       start,
-      end: new Date(start.getTime() + opts.days * 86_400_000),
+      end: addLocalDays(start, opts.days),
     });
     return { value: events, detail: `${events.length} event(s) in ${opts.days} days` };
   });
@@ -216,7 +216,7 @@ export async function runDoctor(
     const templates = await client.getPresenceTemplates({
       childInstitutionProfileIds: family.childInstitutionProfileIds,
       fromDate: isoDate(from),
-      toDate: isoDate(new Date(from.getTime() + 7 * 86_400_000)),
+      toDate: isoDate(addLocalDays(from, 7)),
     });
     return {
       value: templates,

@@ -12,7 +12,7 @@
  */
 
 import { Buffer } from 'node:buffer';
-import { appendFile, mkdir } from 'node:fs/promises';
+import { appendFileSync, chmodSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { isRecord } from '../../validation.ts';
 
@@ -49,14 +49,15 @@ export class JsonlFileTracer implements WireTracer {
   private dirReady = false;
   constructor(private readonly path: string) {}
   record(entry: WireEntry): void {
-    void this.write(entry);
-  }
-  private async write(entry: WireEntry): Promise<void> {
     if (!this.dirReady) {
-      await mkdir(dirname(this.path), { recursive: true });
+      mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
+      chmodSync(dirname(this.path), 0o700);
       this.dirReady = true;
     }
-    await appendFile(this.path, `${JSON.stringify(entry)}\n`, 'utf8');
+    appendFileSync(this.path, `${JSON.stringify(entry)}\n`, { encoding: 'utf8', mode: 0o600 });
+    // appendFile's mode only applies on creation. Correct an older permissive
+    // trace too, before another record can put new credentials in it.
+    chmodSync(this.path, 0o600);
   }
 }
 
@@ -194,8 +195,56 @@ export function sanitizeResponseBody(
     } catch {
       // fall through to raw
     }
+  } else if (/<(?:input|textarea|meta)\b/i.test(body)) {
+    cleaned = redactHtmlSecrets(body);
   }
   return { text: truncateString(cleaned, cap), bytes };
+}
+
+function redactAttribute(tag: string, attribute: 'value' | 'content'): string {
+  const quoted = new RegExp(`(\\b${attribute}\\s*=\\s*)(["'])([\\s\\S]*?)\\2`, 'i');
+  if (quoted.test(tag)) return tag.replace(quoted, `$1$2<redacted>$2`);
+  const bare = new RegExp(`(\\b${attribute}\\s*=\\s*)([^\\s>]+)`, 'i');
+  return tag.replace(bare, '$1<redacted>');
+}
+
+function attributeValue(tag: string, attribute: string): string | null {
+  const quoted = new RegExp(`\\b${attribute}\\s*=\\s*["']([^"']*)["']`, 'i').exec(tag)?.[1];
+  if (quoted !== undefined) return quoted;
+  return new RegExp(`\\b${attribute}\\s*=\\s*([^\\s>]+)`, 'i').exec(tag)?.[1] ?? null;
+}
+
+/** Auth pages carry SAML and anti-forgery values in hidden HTML fields. */
+function redactHtmlSecrets(body: string): string {
+  let cleaned = body.replace(/<input\b[^>]*>/gi, (tag) => {
+    const name = attributeValue(tag, 'name') ?? attributeValue(tag, 'id') ?? '';
+    const type = attributeValue(tag, 'type') ?? '';
+    return type.toLowerCase() === 'hidden' || SECRET_BODY_FIELDS_SET.has(name.toLowerCase())
+      ? redactAttribute(tag, 'value')
+      : tag;
+  });
+  cleaned = cleaned.replace(/<meta\b[^>]*>/gi, (tag) => {
+    const name = attributeValue(tag, 'name') ?? attributeValue(tag, 'property') ?? '';
+    return SECRET_BODY_FIELDS_SET.has(name.toLowerCase()) ? redactAttribute(tag, 'content') : tag;
+  });
+  cleaned = cleaned.replace(
+    /<textarea\b([^>]*)>([\s\S]*?)<\/textarea>/gi,
+    (whole, attributes: string) => {
+      const name = attributeValue(attributes, 'name') ?? attributeValue(attributes, 'id') ?? '';
+      return SECRET_BODY_FIELDS_SET.has(name.toLowerCase())
+        ? `<textarea${attributes}><redacted></textarea>`
+        : whole;
+    },
+  );
+  // Embedded JSON/configuration is common on identity-provider pages.
+  for (const field of SECRET_BODY_FIELDS) {
+    const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    cleaned = cleaned.replace(
+      new RegExp(`(["']${escaped}["']\\s*:\\s*["'])([^"']*)(["'])`, 'gi'),
+      '$1<redacted>$3',
+    );
+  }
+  return cleaned.replace(/https?:\/\/[^\s"'<>]+/gi, (url) => sanitizeUrl(url));
 }
 
 function redactJson(value: unknown): unknown {

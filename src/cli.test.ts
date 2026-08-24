@@ -577,6 +577,16 @@ test('doctor --text is readable and marks each check', () => {
   assert.match(result.stdout, /passed, \d+ warned/);
 });
 
+test('contact and shared-file commands have no hidden legacy page ceilings', () => {
+  const contacts = json(
+    sandbox({ FAKE_AULA_CONTACT_PAGES: '55' }).run('contacts', '--group', '5001'),
+  );
+  assert.equal(contacts.length, 55);
+
+  const files = json(sandbox({ FAKE_AULA_COMMON_FILES: '550' }).run('commonfiles'));
+  assert.equal(files.length, 550);
+});
+
 // ------------------------------------------------------------- hosted copy
 
 const ARTIFACT = 'https://claude.ai/code/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
@@ -587,7 +597,10 @@ function sandboxWithClaude(mode: string, result?: string) {
   const fake = installFakeClaude(join(box.dir, 'fakebin'));
   box.env.PATH = fake.path;
   box.env.FAKE_CLAUDE_MODE = mode;
-  if (result !== undefined) box.env.FAKE_CLAUDE_RESULT_JSON = JSON.stringify(result);
+  if (result !== undefined) {
+    box.env.FAKE_CLAUDE_RESULT_JSON = JSON.stringify(result);
+    if (result.trim().startsWith('{')) box.env.FAKE_CLAUDE_STRUCTURED_JSON = result;
+  }
   return box;
 }
 
@@ -694,6 +707,37 @@ test('new --catch-up runs when the last run was incomplete', () => {
   assert.equal(state.lastRun.day, day);
 });
 
+test('a retryable read failure is rendered and leaves catch-up eligible', () => {
+  const box = sandbox({ FAKE_AULA_FAIL: 'presence.getDailyOverview' });
+  const result = box.run('new', '--no-llm', '--no-deploy', '--no-open');
+  assert.equal(result.code, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.complete, false);
+  const page = readFileSync(join(box.dir, 'brief', 'latest.html'), 'utf8');
+  assert.match(page, /Komme\/gå-status kunne ikke hentes/);
+  const state = JSON.parse(readFileSync(join(box.dir, 'brief', 'state.json'), 'utf8'));
+  assert.equal(state.lastRun.complete, false);
+});
+
+test('optional source failures never masquerade as validated empty sections', () => {
+  const cases = [
+    ['groups.getGroupsByContext', /klasse- og gruppetilknytning kunne ikke hentes/],
+    ['gallery.getAlbums', /Gallerioversigten kunne ikke hentes/],
+    ['calendar.getEventsByProfileIdsAndResourceIds', /Aula-kalenderen kunne ikke hentes/],
+  ] as const;
+  for (const [method, warning] of cases) {
+    const box = sandbox({ FAKE_AULA_FAIL: method });
+    const result = box.run('new', '--no-llm', '--no-deploy', '--no-open');
+    assert.equal(result.code, 0, `${method}: ${result.stderr}`);
+    assert.equal(JSON.parse(result.stdout).complete, false, method);
+    const page = readFileSync(join(box.dir, 'brief', 'latest.html'), 'utf8');
+    assert.match(page, warning);
+    if (method === 'calendar.getEventsByProfileIdsAndResourceIds') {
+      assert.doesNotMatch(page, /Aula-kalenderen er tom for perioden/);
+    }
+  }
+});
+
 // -------------------------------------------------- unreadable message threads
 
 // A thread whose body Aula refuses still arrives with its subject, because the
@@ -731,6 +775,45 @@ test('a total messaging outage is one line naming a few, not one warning per thr
   assert.match(page, /Beskederne i 3 tråde kunne ikke hentes/);
   assert.match(page, /heriblandt «Lejrskole for 2E» og «Lukkedag i Myretuen»/);
   assert.equal(page.match(/kunne ikke hentes/g)?.length, 1, 'three failures, one line');
+});
+
+test('thread commands and the brief read every message page', () => {
+  const box = sandbox({ FAKE_AULA_THREAD_PAGE_SIZE: '2' });
+  const thread = json(box.run('thread', '5001'));
+  assert.equal(thread.messages.length, 4);
+  assert.equal(thread.moreMessagesExist, false);
+
+  const brief = box.run('new', '--no-llm', '--no-deploy', '--no-open');
+  assert.equal(brief.code, 0, brief.stderr);
+  const page = readFileSync(join(box.dir, 'brief', 'latest.html'), 'utf8');
+  assert.match(page, /Perfekt, tak/);
+  assert.doesNotMatch(page, /Ikke alle beskeder i tråden «Lejrskole/);
+});
+
+test('a later thread-page failure preserves evidence, warns, and leaves the run incomplete', () => {
+  const box = sandbox({
+    FAKE_AULA_THREAD_PAGE_SIZE: '2',
+    FAKE_AULA_FAIL_THREAD_PAGE: '5001:1',
+  });
+  const thread = json(box.run('thread', '5001'));
+  assert.equal(thread.messagesIncomplete, true);
+  assert.match(thread.messageReadWarning, /side 2/);
+  assert.equal(thread.messages.length, 2);
+
+  const attachments = json(box.run('attachments', '5001'));
+  assert.equal(attachments.messagesIncomplete, true);
+  assert.deepEqual(attachments.attachments, []);
+
+  const download = box.run('attachment', '5001');
+  assert.notEqual(download.code, 0);
+  assert.match(download.stderr, /Could not read every message/);
+
+  const result = box.run('new', '--no-llm', '--no-deploy', '--no-open');
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).complete, false);
+  const page = readFileSync(join(box.dir, 'brief', 'latest.html'), 'utf8');
+  assert.match(page, /Ikke alle beskeder i tråden «Lejrskole for 2E» kunne hentes/);
+  assert.match(page, /Skal de have madpakke med begge dage/);
 });
 
 // -------------------------------------------------------------- preferences
@@ -839,6 +922,34 @@ test("the model's cards and hides reach the page — the whole return leg", () =
   assert.match(page, /Svar Yrsa om mødet/);
   assert.match(page, /<summary>1 skjult<\/summary>/);
   assert.match(page, /Vist fordi:<\/b> Beskeden er rettet til jer/);
+});
+
+test('a partial model response is supplemented by rule-grounded obligations', () => {
+  const answer = JSON.stringify({
+    topline: 'Ufuldstændigt svar.',
+    cards: [
+      {
+        title: 'Opdigtet dato',
+        summary: 'Dette står ikke i kilden den 24. september 2026.',
+        children: ['Alma'],
+        date: '2026-09-24',
+        needsAction: true,
+        reason: 'Test.',
+        sourceKeys: ['thread:5001'],
+      },
+    ],
+    personalEvents: [],
+    childSummaries: {},
+    hidden: [],
+  });
+  const box = sandboxWithClaude('ok', answer);
+  const result = box.run('new', '--no-deploy', '--no-open', '--explain');
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).complete, false);
+  assert.match(result.stderr, /rule-made/);
+  const page = readFileSync(join(box.dir, 'brief', 'latest.html'), 'utf8');
+  assert.match(page, /Husk regntøj/);
+  assert.match(page, /reglerne som reserve/);
 });
 
 test('preferences reset puts the shipped list back and names the casualties', () => {

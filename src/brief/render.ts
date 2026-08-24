@@ -294,14 +294,13 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
     .join('');
   const actions = brief.cards.filter((c) => c.needsAction).length;
 
-  // A failed fetch must never look like a quiet week, so a day where something
-  // could not be *fetched* puts this panel right under the topline: the reader
-  // has to know before they trust the page that a section is thin because Aula
-  // refused it, not because the week is quiet. Only `health` warnings do that.
+  // A source-health warning must never look like a quiet week. Put this panel
+  // right under the topline so the reader sees a failed fetch or persistent
+  // configuration/session problem before trusting a thin list.
   // A `degraded` note is about the overview itself — the model's answer was
   // partial — and nothing is missing from Aula because of it; it renders in the
   // same panel, quietly at the foot.
-  const fetchFailed = input.health.some((h) => h.level === 'warn');
+  const hasHealthWarning = input.health.some((h) => h.level === 'warn');
   const datastatus = `<div class="panel" data-block="datastatus">
     ${input.health.map((h) => `<div class="st ${h.level === 'warn' ? 'bad' : ''}"><i>${h.level === 'warn' ? '⚠' : '○'}</i><span>${escapeHtml(h.message)}</span></div>`).join('')}
     ${brief.degraded.map((d) => `<div class="st bad"><i>⚠</i><span>${escapeHtml(d)}</span></div>`).join('')}
@@ -334,7 +333,7 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
   </header>
   <p class="topline">${escapeHtml(opts.topline ?? fallbackTopline)}</p>
 
-  ${fetchFailed ? `<section><h2>Datastatus</h2>${datastatus}</section>` : ''}
+  ${hasHealthWarning ? `<section><h2>Datastatus</h2>${datastatus}</section>` : ''}
 
   <section data-section="cards"><h2>Kommende <span class="count" data-count>${brief.timeline.length}</span></h2>
     ${timeline}
@@ -390,7 +389,7 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
 
   ${brief.hidden.length ? `<details class="muted"><summary>${brief.hidden.length} skjult</summary>${brief.hidden.map((item) => `<div class="di"><b>${escapeHtml(item.title)}</b><p>${escapeHtml([sourceDateline(item, today), item.author ?? item.groups.join(', ')].filter(Boolean).join(' · '))}</p></div>`).join('')}</details>` : ''}
 
-  ${fetchFailed ? '' : `<details class="muted"><summary>${escapeHtml(datastatusSummary)}</summary>${datastatus}</details>`}
+  ${hasHealthWarning ? '' : `<details class="muted"><summary>${escapeHtml(datastatusSummary)}</summary>${datastatus}</details>`}
 
   <footer>Genereret lokalt af aula-cli · kun modelkald til Claude forlader maskinen</footer>
 </div>`;

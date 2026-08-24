@@ -10,7 +10,7 @@
  * date shown without the sentence it came from cannot be checked at a glance.
  */
 
-import { localIsoDate } from '../integrations/types.ts';
+import { isoWeekString, isoWeekToMonday, localIsoDate } from '../integrations/types.ts';
 import { isValidCalendarDate } from '../validation.ts';
 /**
  * What a matched sentence asks for. `bring`, `action` and `deadline` are the
@@ -155,6 +155,35 @@ function nextWeekday(weekday: number, today: Date): Date {
   return result;
 }
 
+/** Monday of the next reasonable occurrence of an unqualified ISO week. */
+function weekMonday(week: number, reference: Date): Date | null {
+  const current = isoWeekString(reference);
+  let year = Number(current.slice(0, 4));
+  const mondayFor = (candidateYear: number): Date | null => {
+    try {
+      return isoWeekToMonday(`${candidateYear}-W${String(week).padStart(2, '0')}`);
+    } catch {
+      return null;
+    }
+  };
+  let monday = mondayFor(year);
+  // Week 53 exists only in some ISO years. An unqualified future "uge 53"
+  // still has a valid next occurrence when the current year has 52 weeks.
+  if (!monday) {
+    year += 1;
+    monday = mondayFor(year);
+  }
+  if (!monday) return null;
+  // Like day/month inference, a week just behind the source may describe what
+  // just happened; only a clearly old week rolls into the following year.
+  if ((reference.getTime() - monday.getTime()) / 86_400_000 > 21) {
+    year += 1;
+    monday = mondayFor(year);
+    if (!monday) return null;
+  }
+  return new Date(monday.getUTCFullYear(), monday.getUTCMonth(), monday.getUTCDate());
+}
+
 /**
  * Every date expressed in a sentence, as `YYYY-MM-DD`.
  *
@@ -201,9 +230,9 @@ export function extractDates(sentence: string, today: Date): string[] {
     push(new Date(year, month - 1, day));
   }
 
-  // "18/9", "d. 18/9-2026"
-  const slash = /\b(\d{1,2})\/(\d{1,2})(?:[-/](\d{2,4}))?\b/g;
-  for (const match of sentence.matchAll(slash)) {
+  // "18/9", "d. 18/9-2026", "18.9.2026"
+  const numeric = /\b(\d{1,2})[./](\d{1,2})(?:[./-](\d{2,4}))?\b/g;
+  for (const match of sentence.matchAll(numeric)) {
     const day = Number(match[1]);
     const month = Number(match[2]);
     let year: number;
@@ -220,7 +249,7 @@ export function extractDates(sentence: string, today: Date): string[] {
   // "den 17.9 fra 17.00" — day.month with no year, distinguished from a time by
   // requiring the second number to be a plausible month and not zero-padded
   // like a clock ("17.00" is a time, "17.9" is a date).
-  const dotted = /\b(\d{1,2})\.(\d{1,2})\b(?!\s*\d)/g;
+  const dotted = /\b(\d{1,2})\.(\d{1,2})\b(?![./-]\d|\s*\d)/g;
   for (const match of sentence.matchAll(dotted)) {
     const day = Number(match[1]);
     const month = Number(match[2]);
@@ -228,6 +257,14 @@ export function extractDates(sentence: string, today: Date): string[] {
     const year = inferYear(day, month, today);
     if (!isValidCalendarDate(year, month, day)) continue;
     push(new Date(year, month - 1, day));
+  }
+
+  // An unqualified Danish school-week means its Monday. This convention is
+  // deterministic, sortable and matches how weekly plans themselves are
+  // represented. The card summary still retains the literal "uge 41".
+  for (const match of sentence.matchAll(/\buge\s*(\d{1,2})\b/gi)) {
+    const monday = weekMonday(Number(match[1]), today);
+    if (monday) push(monday);
   }
 
   // "i dag", "i morgen", "på mandag"

@@ -13,8 +13,11 @@ function sameStrings(actual: string[], expected: string[]): boolean {
 }
 
 function matchingCard(result: ExtractResult, expected: ExpectedCard) {
-  return result.cards.find((card) =>
-    expected.sourceKeys.every((sourceKey) => card.sourceKeys.includes(sourceKey)),
+  return result.cards.find(
+    (card) =>
+      expected.sourceKeys.every((sourceKey) => card.sourceKeys.includes(sourceKey)) &&
+      (expected.textContains === undefined ||
+        includesInsensitive(`${card.title}\n${card.summary}`, expected.textContains)),
   );
 }
 

@@ -16,6 +16,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { ATTACHMENT_TIMEOUT_MS, remoteReadSignal } from './transport.ts';
 import type { Attachment } from './types.ts';
 
 const ATTACHMENTS_DIR = process.env.AULA_ATTACHMENTS_DIR ?? join(homedir(), '.aula', 'attachments');
@@ -86,7 +87,9 @@ export async function downloadAttachment(opts: {
   out?: string;
 }): Promise<DownloadResult> {
   // Deliberately plain `fetch`: no cookie, no Authorization, no custom headers.
-  const res = await fetch(opts.attachment.url);
+  const res = await fetch(opts.attachment.url, {
+    signal: remoteReadSignal(ATTACHMENT_TIMEOUT_MS),
+  });
   if (!res.ok) {
     throw new Error(
       `Could not download "${opts.attachment.name}" (HTTP ${res.status}). ` +
@@ -102,12 +105,7 @@ export async function downloadAttachment(opts: {
     );
   }
 
-  const bytes = Buffer.from(await res.arrayBuffer());
-  if (bytes.byteLength > MAX_BYTES) {
-    throw new Error(
-      `"${opts.attachment.name}" is ${bytes.byteLength} bytes, over the ${MAX_BYTES}-byte limit.`,
-    );
-  }
+  const bytes = await readBoundedBody(res, opts.attachment.name);
 
   const filename = safeFilename(opts.attachment.name);
   const path = opts.out ?? join(ATTACHMENTS_DIR, `${opts.prefix}-${filename}`);
@@ -122,4 +120,32 @@ export async function downloadAttachment(opts: {
     filename,
     ...(mediaType ? { mediaType } : {}),
   };
+}
+
+export async function readBoundedBody(
+  response: Response,
+  name: string,
+  maxBytes = MAX_BYTES,
+): Promise<Buffer> {
+  if (!Number.isInteger(maxBytes) || maxBytes < 0)
+    throw new RangeError('maxBytes must be a non-negative integer');
+  if (!response.body) return Buffer.alloc(0);
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new Error(`"${name}" exceeded the ${maxBytes}-byte limit while downloading.`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, total);
 }

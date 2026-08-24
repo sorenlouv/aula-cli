@@ -8,10 +8,12 @@
 
 import { isRecord } from '../validation.ts';
 
-/** Model and effort are one dial shared by every model request in the CLI. */
-export function modelEffortArgs(): string[] {
-  const model = process.env.AULA_BRIEF_MODEL;
-  const effort = process.env.AULA_BRIEF_EFFORT;
+/** Extraction quality and deterministic tool transport have separate cost dials. */
+export function modelEffortArgs(purpose: 'brief' | 'transport' = 'brief'): string[] {
+  const model =
+    purpose === 'brief' ? process.env.AULA_BRIEF_MODEL : (process.env.AULA_TOOL_MODEL ?? 'haiku');
+  const effort =
+    purpose === 'brief' ? process.env.AULA_BRIEF_EFFORT : (process.env.AULA_TOOL_EFFORT ?? 'low');
   return [...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])];
 }
 
@@ -151,21 +153,12 @@ export async function runClaude(
       const detail = reply?.text.trim() || run.stderr.trim() || run.stdout.trim() || '(no stderr)';
       throw new Error(`claude -p exited ${run.code}: ${detail}`);
     }
+    if (opts.schema !== undefined && reply?.structured === undefined) {
+      throw new Error(
+        'claude -p returned no schema-validated structured_output. Update Claude CLI.',
+      );
+    }
     return { text: (reply?.text ?? run.stdout).trim(), structured: reply?.structured };
   }
   throw new Error(`claude -p timed out after ${Math.round(timeoutMs / 1000)}s (2 attempts)`);
-}
-
-/** Models may still wrap JSON when an older CLI omits `structured_output`. */
-export function parseJsonLoosely(raw: string): unknown {
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(raw);
-  const candidate = (fenced?.[1] ?? raw).trim();
-  try {
-    return JSON.parse(candidate);
-  } catch {
-    const start = candidate.indexOf('{');
-    const end = candidate.lastIndexOf('}');
-    if (start === -1 || end <= start) throw new Error('No JSON object found in model output.');
-    return JSON.parse(candidate.slice(start, end + 1));
-  }
 }

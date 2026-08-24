@@ -32,9 +32,11 @@ import type {
   Message,
   Post,
   PresenceEntry,
+  ThreadDetail,
   ThreadSummary,
 } from './types.ts';
 import { errorMessage } from './validation.ts';
+import { addLocalDays } from './integrations/types.ts';
 import { type Capability, WidgetTokens } from './widgets.ts';
 
 // -------------------------------------------------------------- weekly plans
@@ -168,46 +170,68 @@ export type DigestOptions = {
 
 type LimitTracker = { hit: boolean };
 
+type RecoveredRead<T> = { value: T; warning: string | null };
+
+async function recoverRead<T>(
+  label: string,
+  read: Promise<T>,
+  fallback: T,
+): Promise<RecoveredRead<T>> {
+  try {
+    return { value: await read, warning: null };
+  } catch (err) {
+    return { value: fallback, warning: `${label} kunne ikke hentes: ${errorMessage(err)}` };
+  }
+}
+
 export async function buildDigest(client: AulaClient, opts: DigestOptions) {
   const family = opts.family ?? (await resolveFamily(client));
   const now = opts.now ?? new Date();
   // Resolved once and up front: `--child` has to reach all six reads below, and
   // the bug this replaced was one of them quietly not getting it.
   const children = selectChildren(family, opts.child);
-  const since = new Date(now.getTime() - opts.days * 86_400_000);
-  // `new` reads a much wider history than the interactive digest originally
-  // did. Forty rows is enough for a fortnight, but it silently clipped a
-  // sixty-day brief. Scale the guard with the requested window; callers that
-  // explicitly pass --limit keep that exact contract.
-  const historyLimit = opts.limit ?? Math.max(40, opts.days * 3);
+  const since = addLocalDays(now, -opts.days);
+  // The date window is the default bound. A row-count limit exists only when
+  // the caller explicitly asks for one; otherwise a busy 60-day period must
+  // not lose sources merely because it crossed an estimated daily average.
+  const historyLimit = opts.limit;
   const threadLimit: LimitTracker = { hit: false };
   const postLimit: LimitTracker = { hit: false };
 
-  const [threadSummaries, posts, events, notifications, presence, plans] = await Promise.all([
-    collectThreads(client, {
-      limit: historyLimit,
-      limitTracker: threadLimit,
-      since,
-      unreadOnly: false,
-      family,
-      ...(opts.child ? { child: opts.child } : {}),
-    }),
+  const threadSummaries = collectThreads(client, {
+    ...(historyLimit !== undefined ? { limit: historyLimit } : {}),
+    limitTracker: threadLimit,
+    since,
+    unreadOnly: false,
+    family,
+    ...(opts.child ? { child: opts.child } : {}),
+  });
+  // Start the per-thread detail reads as soon as the summaries resolve. They
+  // are normally the slowest part of a digest and need not wait for calendar,
+  // presence or vendor reads to finish first.
+  const threads = threadSummaries.then((summaries) => withFullMessages(client, summaries));
+
+  const [fullThreads, posts, calendarRead, presenceRead, plans] = await Promise.all([
+    threads,
     collectPosts(client, family, {
-      limit: historyLimit,
+      ...(historyLimit !== undefined ? { limit: historyLimit } : {}),
       limitTracker: postLimit,
       since,
       ...(opts.child ? { child: opts.child } : {}),
     }),
-    loadCalendar(client, family, {
-      // `days` is primarily the digest's history window. Calendar is forward-
-      // looking and Aula accepts at most 50 days per request, so a 90-day
-      // message digest must not become a 90-day calendar request.
-      days: Math.min(Math.max(opts.days, 21), CALENDAR_MAX_SPAN_DAYS),
-      now,
-      ...(opts.child ? { child: opts.child } : {}),
-    }),
-    client.getNotifications().catch(() => []),
-    client.getDailyPresence(children.map((c) => c.id)).catch(() => []),
+    recoverRead(
+      'Aula-kalenderen',
+      loadCalendar(client, family, {
+        // `days` is primarily the digest's history window. Calendar is forward-
+        // looking and Aula accepts at most 50 days per request, so a 90-day
+        // message digest must not become a 90-day calendar request.
+        days: Math.min(Math.max(opts.days, 21), CALENDAR_MAX_SPAN_DAYS),
+        now,
+        ...(opts.child ? { child: opts.child } : {}),
+      }),
+      [],
+    ),
+    recoverRead('Komme/gå-status', client.getDailyPresence(children.map((c) => c.id)), []),
     // The vendors are third parties and go down independently of Aula. A dead
     // weekly-plan API must not cost the user their messages and calendar, so the
     // digest degrades to a warning rather than failing.
@@ -216,16 +240,21 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
       ...(opts.child ? { child: opts.child } : {}),
     }),
   ]);
-
-  const threads = await withFullMessages(client, threadSummaries);
+  const events = calendarRead.value;
+  const presence = presenceRead.value;
+  const fetchWarnings = [calendarRead.warning, presenceRead.warning].filter(
+    (warning): warning is string => warning !== null,
+  );
 
   // Structured signals so the summariser has something better than vibes to
   // rank on. The actual judgement of "is this important to me" stays with the
   // model — this only surfaces what Aula itself flags.
   const nowMs = now.getTime();
   const attention = {
-    unreadThreads: threads.filter((t) => t.unread).map((t) => ({ id: t.id, subject: t.subject })),
-    sensitiveThreads: threads
+    unreadThreads: fullThreads
+      .filter((t) => t.unread)
+      .map((t) => ({ id: t.id, subject: t.subject })),
+    sensitiveThreads: fullThreads
       .filter((t) => t.sensitive)
       .map((t) => ({ id: t.id, subject: t.subject })),
     importantPosts: posts.filter((p) => p.important).map((p) => ({ id: p.id, title: p.title })),
@@ -241,7 +270,7 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
     eventsWithinSevenDays: events
       .filter((e) => {
         const start = Date.parse(e.start);
-        return Number.isFinite(start) && start >= nowMs && start <= nowMs + 7 * 86_400_000;
+        return Number.isFinite(start) && start >= nowMs && start <= addLocalDays(now, 7).getTime();
       })
       .map((e) => ({ id: e.id, title: e.title, start: e.start, child: e.children })),
   };
@@ -265,15 +294,16 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
       widgets: family.widgets.map((w) => `${w.widgetId} ${w.name}`),
     },
     attention,
-    threads,
+    threads: fullThreads,
     posts,
     calendar: events,
     weeklyPlans: plans,
     presence: presence.map(normalisePresence),
-    notificationCount: notifications.length,
+    fetchWarnings,
+    calendarAvailable: calendarRead.warning === null,
     collectionLimits: {
-      posts: postLimit.hit ? historyLimit : null,
-      threads: threadLimit.hit ? historyLimit : null,
+      posts: postLimit.hit ? (historyLimit ?? null) : null,
+      threads: threadLimit.hit ? (historyLimit ?? null) : null,
     },
   };
 }
@@ -281,7 +311,7 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
 // ------------------------------------------------------------------ fetching
 
 export type ThreadFilter = {
-  limit: number;
+  limit?: number;
   limitTracker?: LimitTracker;
   since?: Date;
   unreadOnly: boolean;
@@ -299,12 +329,21 @@ export async function collectThreads(
   const restrictToChild = filter.child !== undefined;
 
   const collected: ThreadSummary[] = [];
-  for (let page = 0; page < 25; page++) {
+  const seen = new Set<number>();
+  for (let page = 0; ; page++) {
     const { threads, moreMessagesExist } = await client.getThreads(page);
-    if (threads.length === 0) break;
+    if (threads.length === 0) {
+      if (moreMessagesExist)
+        throw new Error(`Aula returned an empty thread page ${page} with more=true.`);
+      break;
+    }
 
     let pageWentPastWindow = false;
+    let newRows = 0;
     for (const thread of threads) {
+      if (seen.has(thread.id)) continue;
+      seen.add(thread.id);
+      newRows++;
       const at = threadTimestamp(thread);
       if (filter.since && at && at < filter.since) {
         pageWentPastWindow = true;
@@ -320,13 +359,14 @@ export async function collectThreads(
       collected.push(thread);
       // Read one qualifying row past the cap so a caller can distinguish a
       // genuinely complete N-row window from a silently truncated one.
-      if (collected.length > filter.limit) {
+      if (filter.limit !== undefined && collected.length > filter.limit) {
         if (filter.limitTracker) filter.limitTracker.hit = true;
         return collected.slice(0, filter.limit);
       }
     }
 
     if (!moreMessagesExist) break;
+    if (newRows === 0) throw new Error(`Aula repeated thread page ${page} with more=true.`);
     // Threads come back newest-first, so once a whole page is older than the
     // window there is nothing useful further back.
     if (filter.since && pageWentPastWindow) break;
@@ -338,7 +378,7 @@ export async function collectPosts(
   client: AulaClient,
   family: Family,
   opts: {
-    limit: number;
+    limit?: number;
     limitTracker?: LimitTracker;
     since?: Date;
     important?: boolean;
@@ -351,30 +391,40 @@ export async function collectPosts(
   // done here rather than by discarding rows afterwards. See `postIdsFor`.
   const institutionProfileIds = postIdsFor(family, selectChildren(family, opts.child));
 
-  for (let index = 0; index < 200; index += pageSize) {
+  const seen = new Set<number>();
+  for (let index = 0; ; index += pageSize) {
     const { posts, hasMorePosts } = await client.getPosts({
       institutionProfileIds,
       index,
       limit: pageSize,
       isImportant: opts.important ?? false,
     });
-    if (posts.length === 0) break;
+    if (posts.length === 0) {
+      if (hasMorePosts)
+        throw new Error(`Aula returned an empty post page ${index} with more=true.`);
+      break;
+    }
 
     let wentPastWindow = false;
+    let newRows = 0;
     for (const post of posts) {
+      if (seen.has(post.id)) continue;
+      seen.add(post.id);
+      newRows++;
       const at = Date.parse(post.publishAt ?? post.timestamp ?? '');
       if (opts.since && Number.isFinite(at) && at < opts.since.getTime()) {
         wentPastWindow = true;
         continue;
       }
       collected.push(post);
-      if (collected.length > opts.limit) {
+      if (opts.limit !== undefined && collected.length > opts.limit) {
         if (opts.limitTracker) opts.limitTracker.hit = true;
         return collected.slice(0, opts.limit).map(normalisePost);
       }
     }
 
     if (!hasMorePosts) break;
+    if (newRows === 0) throw new Error(`Aula repeated post page ${index} with more=true.`);
     if (opts.since && wentPastWindow) break;
   }
   return collected.map(normalisePost);
@@ -401,13 +451,21 @@ export async function collectAlbums(
   const children = selectChildren(family, opts.child);
   const childInstitutionProfileIds = children.map((c) => c.id);
   const collected: Album[] = [];
+  const seen = new Set<number>();
 
-  for (let index = 0; index < 1_000; index += pageSize) {
+  for (let index = 0; ; index += pageSize) {
     const page = await client.getAlbums({ childInstitutionProfileIds, index, limit: pageSize });
     // The synthetic "Medier af dig og dine børn" row has no id and no date, and
     // is not an album — it is a saved search over tagged media.
-    collected.push(...page.filter((a) => a.id != null));
+    let newRows = 0;
+    for (const album of page) {
+      if (album.id == null || seen.has(album.id)) continue;
+      seen.add(album.id);
+      collected.push(album);
+      newRows++;
+    }
     if (page.length < pageSize) break;
+    if (newRows === 0) throw new Error(`Aula repeated album page ${index}.`);
   }
 
   return collected
@@ -428,7 +486,7 @@ export async function loadCalendar(
 ) {
   const children = selectChildren(family, opts.child);
   const start = startOfDay(opts.now ?? new Date());
-  const end = new Date(start.getTime() + opts.days * 86_400_000);
+  const end = addLocalDays(start, opts.days);
   const events = await client.getCalendarEvents({
     childInstitutionProfileIds: children.map((c) => c.id),
     start,
@@ -448,7 +506,7 @@ function emptyMessages(): Array<ReturnType<typeof normaliseMessage>> {
 export async function withFullMessages(client: AulaClient, threads: ThreadSummary[]) {
   const details = await mapLimit(threads, 4, async (thread) => {
     try {
-      return await client.getThread(thread.id, 0);
+      return await readFullThread(client, thread.id);
     } catch (err) {
       // One unreadable thread should not sink a whole digest.
       process.emitWarning(`Could not load thread ${thread.id}: ${errorMessage(err)}`);
@@ -470,16 +528,100 @@ export async function withFullMessages(client: AulaClient, threads: ThreadSummar
         moreMessagesExist: false,
         messages: emptyMessages(),
         messagesUnavailable: true,
+        messagesIncomplete: false,
+        messageReadWarning: null,
       };
     }
     return {
       ...base,
       totalMessageCount: detail.totalMessageCount,
-      moreMessagesExist: detail.moreMessagesExist ?? false,
+      moreMessagesExist: detail.incomplete,
       messages: (detail.messages ?? []).map(normaliseMessage),
       messagesUnavailable: false,
+      messagesIncomplete: detail.incomplete,
+      messageReadWarning: detail.warning,
     };
   });
+}
+
+const MAX_THREAD_DETAIL_PAGES = 100;
+
+export type FullThreadDetail = ThreadDetail & {
+  /** True only when Aula claimed there was another page we could not read. */
+  incomplete: boolean;
+  warning: string | null;
+};
+
+/**
+ * Read and merge every page of one thread.
+ *
+ * The first-page failure still throws because there is no body to return. A
+ * later-page failure preserves the messages already read and marks the result
+ * incomplete, allowing the brief to stay useful without claiming completeness.
+ */
+export async function readFullThread(
+  client: AulaClient,
+  threadId: number,
+  maxPages = MAX_THREAD_DETAIL_PAGES,
+): Promise<FullThreadDetail> {
+  if (!Number.isInteger(maxPages) || maxPages < 1)
+    throw new RangeError('maxPages must be positive');
+  let first: ThreadDetail | null = null;
+  const messages = new Map<string, Message>();
+
+  for (let page = 0; page < maxPages; page++) {
+    let detail: ThreadDetail;
+    try {
+      detail = await client.getThread(threadId, page);
+    } catch (err) {
+      if (!first) throw err;
+      return {
+        ...first,
+        messages: [...messages.values()],
+        totalMessageCount: first.totalMessageCount ?? messages.size,
+        moreMessagesExist: true,
+        incomplete: true,
+        warning: `side ${page + 1} kunne ikke hentes: ${errorMessage(err)}`,
+      };
+    }
+    first ??= detail;
+    const before = messages.size;
+    for (const message of detail.messages ?? []) messages.set(message.id, message);
+    if (!detail.moreMessagesExist) {
+      const total = detail.totalMessageCount ?? first.totalMessageCount ?? messages.size;
+      const missing = total > messages.size;
+      return {
+        ...first,
+        messages: [...messages.values()],
+        totalMessageCount: total,
+        moreMessagesExist: missing,
+        incomplete: missing,
+        warning: missing
+          ? `Aula oplyste ${total} beskeder, men leverede kun ${messages.size}`
+          : null,
+      };
+    }
+    if (messages.size === before) {
+      return {
+        ...first,
+        messages: [...messages.values()],
+        totalMessageCount: detail.totalMessageCount ?? first.totalMessageCount ?? messages.size,
+        moreMessagesExist: true,
+        incomplete: true,
+        warning: `side ${page + 1} gentog de samme beskeder`,
+      };
+    }
+  }
+
+  if (!first) throw new Error(`Thread ${threadId} returned no page.`);
+  return {
+    ...first,
+    messages: [...messages.values()],
+    totalMessageCount: first.totalMessageCount ?? messages.size,
+    moreMessagesExist: true,
+    incomplete: true,
+    warning: `sikkerhedsgrænsen på ${maxPages} sider blev nået`,
+  };
 }
 
 // --------------------------------------------------------------- normalising
@@ -498,7 +640,7 @@ export function normaliseThread(thread: ThreadSummary) {
       .map((c) => c.displayName)
       .filter((n): n is string => Boolean(n)),
     createdBy: thread.creator?.fullName ?? null,
-    // Aula truncates this in list responses; use `thread <id>` or --full for the real text.
+    // Aula truncates this in list responses; use the fetched `messages` beside it for real text.
     latestMessagePreview: preview(htmlToText(thread.latestMessage?.text?.html)),
   };
 }
@@ -544,10 +686,11 @@ export function normalisePost(post: Post) {
  * does not need.
  */
 export function normaliseAlbum(album: Album) {
+  const createdAt = /^\d{4}-\d{2}-\d{2}/.exec(album.creationDate ?? '')?.[0] ?? null;
   return {
     id: album.id ?? null,
     title: album.title?.trim() || '(untitled)',
-    createdAt: album.creationDate ?? null,
+    createdAt,
     description: album.description?.trim() || null,
     author: album.creator?.name ?? null,
     institution: album.creator?.institutionName ?? null,

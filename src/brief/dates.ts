@@ -16,7 +16,7 @@
  * rarer than plain invention.
  */
 
-import { localIsoDate } from '../integrations/types.ts';
+import { isoWeekString, localIsoDate } from '../integrations/types.ts';
 import { isValidCalendarDate, parseIsoDateParts } from '../validation.ts';
 import { extractDates } from './rules.ts';
 import type { BriefInput } from './types.ts';
@@ -85,19 +85,19 @@ const STEM_TO_DAY: Record<string, number> = {
 
 export type DateClaim =
   | { kind: 'weekday'; day: number; raw: string }
-  | { kind: 'date'; month: number; day: number; raw: string }
+  | { kind: 'date'; month: number; day: number; year?: number; raw: string }
   | { kind: 'week'; week: number; raw: string };
 
 const WEEKDAY_RE = /\b(man|tirs|ons|tors|fre|lør|søn)dag(?:s|ene|en|e)?\b/gi;
-const NUMERIC_DATE_RE = /\b(\d{1,2})[./](\d{1,2})\b/g;
+const NUMERIC_DATE_RE = /\b(\d{1,2})[./](\d{1,2})(?:[./-](\d{2,4}))?\b/g;
 // Full names first so "september" is not eaten by "sep".
 const MONTH_ALT =
   'januar|februar|marts|april|maj|juni|juli|august|september|oktober|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|okt|nov|dec';
-const NAMED_DATE_RE = new RegExp(`\\b(\\d{1,2})\\.?\\s*(${MONTH_ALT})\\b`, 'gi');
+const NAMED_DATE_RE = new RegExp(`\\b(\\d{1,2})\\.?\\s*(${MONTH_ALT})\\b(?:\\s+(\\d{4}))?`, 'gi');
 // "24. til 28. august" / "24.-28. august": the start day never stands next to
 // the month name, so it needs its own pattern.
 const RANGE_START_RE = new RegExp(
-  `\\b(\\d{1,2})\\.?\\s*(?:til\\s*|[-–]\\s*)\\d{1,2}\\.?\\s*(${MONTH_ALT})\\b`,
+  `\\b(\\d{1,2})\\.?\\s*(?:til\\s*|[-–]\\s*)\\d{1,2}\\.?\\s*(${MONTH_ALT})\\b(?:\\s+(\\d{4}))?`,
   'gi',
 );
 const WEEK_RE = /\buge\s*(\d{1,2})\b/gi;
@@ -120,6 +120,12 @@ function monthIndex(name: string): number {
   return map[name.toLowerCase().slice(0, 3)] ?? 0;
 }
 
+function parsedYear(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  const value = Number(raw);
+  return value < 100 ? 2000 + value : value;
+}
+
 /** Every date-shaped assertion in a piece of Danish prose. */
 export function findDateClaims(text: string): DateClaim[] {
   const claims: DateClaim[] = [];
@@ -130,21 +136,28 @@ export function findDateClaims(text: string): DateClaim[] {
   for (const m of text.matchAll(NUMERIC_DATE_RE)) {
     const day = Number(m[1]);
     const month = Number(m[2]);
+    const year = parsedYear(m[3]);
     // Clock times ("kl. 17.30", "9.05") look identical; an impossible month
     // rules most out, and an explicit "kl." rules out the rest.
     if (!isValidCalendarDate(2000, month, day)) continue;
     if (/kl\.?\s*$/i.test(text.slice(Math.max(0, (m.index ?? 0) - 6), m.index))) continue;
-    claims.push({ kind: 'date', month, day, raw: m[0] });
+    claims.push({ kind: 'date', month, day, ...(year ? { year } : {}), raw: m[0] });
   }
   for (const m of text.matchAll(NAMED_DATE_RE)) {
     const day = Number(m[1]);
     const month = monthIndex(m[2] ?? '');
-    if (isValidCalendarDate(2000, month, day)) claims.push({ kind: 'date', month, day, raw: m[0] });
+    const year = parsedYear(m[3]);
+    if (isValidCalendarDate(year ?? 2000, month, day)) {
+      claims.push({ kind: 'date', month, day, ...(year ? { year } : {}), raw: m[0] });
+    }
   }
   for (const m of text.matchAll(RANGE_START_RE)) {
     const day = Number(m[1]);
     const month = monthIndex(m[2] ?? '');
-    if (isValidCalendarDate(2000, month, day)) claims.push({ kind: 'date', month, day, raw: m[0] });
+    const year = parsedYear(m[3]);
+    if (isValidCalendarDate(year ?? 2000, month, day)) {
+      claims.push({ kind: 'date', month, day, ...(year ? { year } : {}), raw: m[0] });
+    }
   }
   for (const m of text.matchAll(WEEK_RE)) {
     claims.push({ kind: 'week', week: Number(m[1]), raw: m[0] });
@@ -155,6 +168,7 @@ export function findDateClaims(text: string): DateClaim[] {
 type SourceDates = {
   weekdays: Set<number>;
   dates: Set<string>;
+  weeks: Set<string>;
 };
 
 export type DateSupport = {
@@ -180,10 +194,14 @@ function isoDate(
 const asLocalDate = (day: { year: number; month: number; day: number }) =>
   new Date(day.year, day.month - 1, day.day);
 
-const hasDayMonth = (dates: Set<string>, month: number, day: number) =>
+const supportsDateClaim = (dates: Set<string>, claim: Extract<DateClaim, { kind: 'date' }>) =>
   [...dates].some((value) => {
     const parsed = isoDate(value);
-    return parsed?.month === month && parsed.day === day;
+    return (
+      parsed?.month === claim.month &&
+      parsed.day === claim.day &&
+      (claim.year === undefined || parsed.year === claim.year)
+    );
   });
 
 /** Everything the sources, their timestamps, and today can vouch for. */
@@ -222,13 +240,20 @@ export function buildDateSupport(input: BriefInput): DateSupport {
     const per: SourceDates = {
       weekdays: new Set(),
       dates: new Set(),
+      weeks: new Set(),
     };
-    for (const claim of findDateClaims(text)) {
-      if (claim.kind === 'weekday') per.weekdays.add(claim.day);
-      else if (claim.kind === 'week') support.weeks.add(claim.week);
-    }
     const at = item.at ? isoDate(item.at) : null;
     const reference = at ?? todayParsed;
+    for (const claim of findDateClaims(text)) {
+      if (claim.kind === 'weekday') per.weekdays.add(claim.day);
+      else if (claim.kind === 'week') {
+        support.weeks.add(claim.week);
+        if (reference) {
+          const monday = extractDates(claim.raw, asLocalDate(reference))[0];
+          if (monday) per.weeks.add(isoWeekString(new Date(`${monday}T12:00:00`)));
+        }
+      }
+    }
     const addExtractedDates = (
       sourceText: string,
       sourceDate: ReturnType<typeof isoDate> | null,
@@ -317,8 +342,11 @@ export function unsupportedDateClaims(
       claim.kind === 'weekday'
         ? weekdayOk(claim.day)
         : claim.kind === 'date'
-          ? hasDayMonth(support.dates, claim.month, claim.day) ||
-            (dueAt !== null && dueAt.month === claim.month && dueAt.day === claim.day)
+          ? supportsDateClaim(support.dates, claim) ||
+            (dueAt !== null &&
+              dueAt.month === claim.month &&
+              dueAt.day === claim.day &&
+              (claim.year === undefined || dueAt.year === claim.year))
           : support.weeks.has(claim.week);
     if (!ok && !bad.includes(claim.raw)) bad.push(claim.raw);
   }
@@ -347,6 +375,7 @@ export function dueAtSupported(dueAt: string, sourceKey: string, support: DateSu
   const per = support.perSource.get(sourceKey);
   if (!per) return false;
   if (per.dates.has(parsed.iso)) return true;
+  if (per.weeks.has(isoWeekString(asLocalDate(parsed)))) return true;
   const inWindow =
     parsed.iso >= support.today && (!support.windowEnd || parsed.iso <= support.windowEnd);
   if (!inWindow) return false;

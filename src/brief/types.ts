@@ -52,10 +52,9 @@ export type ConversationMessage = {
  * who said what, in order. Both come from the same fetch, so keeping the
  * structure costs nothing and reconstructing it later would cost a round trip.
  *
- * `total` is Aula's own count and can exceed `messages.length`: `getThread`
- * pages, and the brief fetches one page. When it does, `truncated` is set and
- * the page says so rather than presenting a partial exchange as the whole
- * conversation.
+ * `total` is Aula's own count and can exceed `messages.length` only when a
+ * later page failed or the pagination safety guard fired. `truncated` keeps
+ * that degraded result visible to both the model and the reader.
  */
 export type Conversation = {
   messages: ConversationMessage[];
@@ -112,6 +111,8 @@ export type PresenceRow = {
 export type HealthNote = {
   level: 'ok' | 'warn';
   message: string;
+  /** A later scheduled attempt can plausibly repair this read. */
+  retryable?: boolean;
 };
 
 export type BriefFamily = {
@@ -155,8 +156,8 @@ export type BriefInput = {
  * are one card — and the page lists every one of them under *Læs mere*.
  *
  * The rules layer makes the same shape without a model: title from the source,
- * the matched sentence as the summary. It is the fallback, never a peer —
- * where the model has spoken, its cards are the cards.
+ * the matched sentence as the summary. It is the fallback; only a partial
+ * model answer is supplemented with exact-deduplicated rule obligations.
  */
 export type Card = {
   id: string;

@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, readFileSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
+  JsonlFileTracer,
   sanitizeHeaders,
   sanitizeRequestBody,
   sanitizeResponseBody,
@@ -122,4 +126,35 @@ describe('sanitizeResponseBody', () => {
     expect(parsed.refresh_token).toContain('redacted');
     expect(parsed.expires_in).toBe(60);
   });
+
+  test('redacts hidden auth fields and embedded tokens in HTML', () => {
+    const body = `<form><input type="hidden" name="SAMLResponse" value="SECRET_ASSERTION"><input type="hidden" name="unknown" value="SECRET_UNKNOWN"><script>{"access_token":"SECRET_TOKEN"}</script></form>`;
+    const out = sanitizeResponseBody(body);
+    expect(out.text).not.toContain('SECRET_ASSERTION');
+    expect(out.text).not.toContain('SECRET_UNKNOWN');
+    expect(out.text).not.toContain('SECRET_TOKEN');
+    expect(out.text).toContain('<redacted>');
+  });
+});
+
+test('JsonlFileTracer creates and repairs private paths', () => {
+  const root = mkdtempSync(join(tmpdir(), 'aula-wire-'));
+  const path = join(root, 'private', 'login-trace.jsonl');
+  const tracer = new JsonlFileTracer(path);
+  tracer.record({
+    ts: new Date(0).toISOString(),
+    seq: 1,
+    method: 'GET',
+    url: 'https://example.com',
+    requestHeaders: {},
+    requestBody: null,
+    status: 200,
+    responseHeaders: {},
+    responseBody: 'ok',
+    responseBodyBytes: 2,
+    durationMs: 1,
+  });
+  expect(statSync(join(root, 'private')).mode & 0o777).toBe(0o700);
+  expect(statSync(path).mode & 0o777).toBe(0o600);
+  expect(readFileSync(path, 'utf8')).toContain('"seq":1');
 });

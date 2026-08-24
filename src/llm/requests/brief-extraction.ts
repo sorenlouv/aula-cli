@@ -11,21 +11,28 @@ const PROMPT_TEXT_LIMIT = 8000;
 /**
  * A source's text, trimmed to something a prompt can carry.
  *
- * A conversation is trimmed from the **front**, everything else from the back.
- * Threads are ordered oldest-first (see `collect.ts`), so keeping the first
- * 8000 characters of a long exchange hands the model the opening pleasantries
- * and hides the question that was asked this morning. A post, by contrast, puts
- * its point at the top.
+ * Exceptional sources keep both their beginning and end. Threads are ordered
+ * oldest-first (see `collect.ts`), so the head supplies context while the tail
+ * preserves the latest question or decision. Posts usually put their point at
+ * the top, but append deadlines and corrections often sit at the end.
  *
  * Only the prompt is trimmed. `source.text` stays whole, so date grounding
  * still checks against everything that was fetched, and the page still shows
  * every message the reader expands.
  */
+function promptSourceText(item: SourceItem): string {
+  return item.kind === 'thread' && item.text.startsWith(`${item.title}\n\n`)
+    ? item.text.slice(item.title.length + 2)
+    : item.text;
+}
+
 function promptText(item: SourceItem): string {
-  if (item.text.length <= PROMPT_TEXT_LIMIT) return item.text;
-  return item.kind === 'thread'
-    ? `…${item.text.slice(-PROMPT_TEXT_LIMIT)}`
-    : `${item.text.slice(0, PROMPT_TEXT_LIMIT)}…`;
+  const text = promptSourceText(item);
+  if (text.length <= PROMPT_TEXT_LIMIT) return text;
+  const marker = '\n\n… [midten er forkortet] …\n\n';
+  const available = PROMPT_TEXT_LIMIT - marker.length;
+  const head = Math.ceil(available / 2);
+  return `${text.slice(0, head)}${marker}${text.slice(-(available - head))}`;
 }
 
 /** The payload the model sees. Trimmed, but never summarised before it gets there. */
@@ -50,8 +57,8 @@ export function extractionPayload(input: BriefInput) {
       childNames: item.childNames,
       audience: item.audience,
       important: item.important,
-      ...(item.conversation ? { messageCount: item.conversation.messages.length } : {}),
-      textTruncated: item.text.length > PROMPT_TEXT_LIMIT,
+      ...(item.conversation ? { sourceIncomplete: item.conversation.truncated } : {}),
+      textTruncated: promptSourceText(item).length > PROMPT_TEXT_LIMIT,
       text: promptText(item),
     })),
   };
@@ -82,6 +89,11 @@ export function extractionSchema(input: BriefInput) {
 
   return {
     type: 'object',
+    $defs: {
+      aulaKey: keyEnum(aulaKeys),
+      personalKey: keyEnum(personalKeys),
+      childName: keyEnum(firstNames),
+    },
     properties: {
       topline: {
         type: 'string',
@@ -107,7 +119,7 @@ export function extractionSchema(input: BriefInput) {
             },
             children: {
               type: 'array',
-              items: keyEnum(firstNames),
+              items: { $ref: '#/$defs/childName' },
               description:
                 'De børn kortet handler om. Tom, hvis det gælder alle eller ingen bestemt.',
             },
@@ -130,7 +142,7 @@ export function extractionSchema(input: BriefInput) {
             sourceKeys: {
               type: 'array',
               minItems: 1,
-              items: keyEnum(aulaKeys),
+              items: { $ref: '#/$defs/aulaKey' },
               description: 'De kilder, kortet bygger på. Flere, når de handler om det samme.',
             },
           },
@@ -149,7 +161,7 @@ export function extractionSchema(input: BriefInput) {
           properties: {
             sourceKey: {
               type: 'string',
-              ...keyEnum(personalKeys),
+              $ref: '#/$defs/personalKey',
               description: 'Den ene personlige kalenderaftale, vurderingen gælder.',
             },
             relevant: {
@@ -181,7 +193,7 @@ export function extractionSchema(input: BriefInput) {
       },
       hidden: {
         type: 'array',
-        items: keyEnum(aulaKeys),
+        items: { $ref: '#/$defs/aulaKey' },
         description:
           'Aula-kilder, der slet ikke skal vises — irrelevante efter relevans-tegnene, eller noget forælderens præferencer siger aldrig skal med. Personlige kalenderaftaler vurderes kun i personalEvents. En kilde med important=true bør ikke skjules uden en konkret grund i indholdet. Alt andet uden kort vises foldet sammen nederst.',
       },
@@ -206,7 +218,7 @@ Du afgør fire ting:
 Du afgør prioriteringen, men ikke sidens kronologiske visningsrækkefølge eller udseende.
 
 Sådan læser du en kilde:
-- "text" er kildens tekst og den eneste autoritet på, hvad der står. Når "textTruncated" er false, er den fuld; når feltet er true, er teksten forkortet ved ellipsen. Alt du skriver, skal kunne læses i den tekst, du har fået; læseren kan altid åbne den fulde kilde under kortet.
+- "text" er kildens tekst og den eneste autoritet på, hvad der står. Når "textTruncated" er false, er den fuld; når feltet er true, er midten forkortet ved markøren. For en beskedtråd betyder "sourceIncomplete": true, at Aula ikke leverede alle beskedsider; skriv kun ud fra de viste beskeder. Alt du skriver, skal kunne læses i den tekst, du har fået; læseren kan altid åbne kilden under kortet.
 - "audience" er, hvor bredt kilden er sendt ud: "child" og "class" af nogen, der kender barnet; "institution" til hele skolen eller huset; "municipal" til alle forældre i kommunen. Et fingerpeg, ikke et svar.
 - "important" er Aulas eget vigtigt-flag på kilden. Det er et stærkt tegn, men indholdet er stadig autoriteten.
 - Kilder med type "personal" er forælderens egne kalenderaftaler. Relevante aftaler bliver kompakte, sammenklappede kort mellem Aula-kortene på samme dag. Brug dem ikke til at analysere sammenfald med skoleindhold, hævde en konflikt eller berolige om, at der ikke er en.

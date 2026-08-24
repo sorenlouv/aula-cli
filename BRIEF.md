@@ -47,9 +47,8 @@ Date support keeps full calendar days, including the year. Relative phrases
 such as *i morgen* resolve from the source's written date — from the individual
 message timestamp inside a thread — not the day the brief runs. A card date
 must land between the beginning of the fetched history and one year after the
-brief. A card's date chip is checked against its own sources. Date-shaped prose
-is still checked against the union of all sources; that permits cross-source
-date borrowing and is an accepted residual risk at this seam.
+brief. Every date-shaped claim is checked against at least one of that card's
+own cited sources; an unrelated source elsewhere in the brief cannot license it.
 
 The renderer builds from `styles.ts` tokens, so the page cannot come out
 grey-on-white, and **the sections keep their places**: this is read in twenty
@@ -112,11 +111,11 @@ Sections render only when they have content, and never change order.
 6. **Skjult** — the muted foot naming the sources the model kept off the page
    entirely, so a hide is visible as a count, never silent.
 7. **Datastatus** — what was fetched, **what failed**, step-up state. Only a
-   `health` warning — something could not be *fetched* — hoists it under the
-   topline, because a thin list has to be readable as "Aula refused this"
-   rather than "a quiet week". Otherwise it folds shut at the very foot with a
-   summary that says so unopened. A `degraded` note (the model's answer was
-   partial) does **not** hoist it: nothing is missing from Aula because of it.
+   `health` warning — a failed fetch or a persistent session/configuration
+   problem — hoists it under the topline, because a thin list must not look like
+   a quiet week. Otherwise it folds shut at the very foot with a summary that
+   says so unopened. A `degraded` note (the model's answer was partial) does
+   **not** hoist it: nothing is missing from Aula because of it.
 
 ### Reading the original
 
@@ -205,10 +204,12 @@ aula new [--days 60] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 | File | Responsibility |
 | --- | --- |
 | `brief/index.ts` | The pipeline |
-| `brief/collect.ts` | Assemble and token-trim `BriefInput`; the history window |
+| `brief/collect.ts` | Assemble `BriefInput`; the history window and source health |
 | `brief/types.ts` | The `Card` / `SourceItem` vocabulary |
 | `brief/rules.ts` | Danish date and obligation extractors |
-| `brief/llm.ts` | `claude -p` transport, the schema and prompt, the validator, retry, content-hash cache |
+| `llm/claude.ts` | Shared bounded `claude -p` process transport |
+| `llm/requests/brief-extraction.ts` | Prompt, compact source projection and schema |
+| `brief/llm.ts` | Extraction validation, corrective retry and bounded content-hash cache |
 | `brief/dates.ts` | Date grounding against the sources |
 | `brief/rank.ts` | The model-order cap, placement by date, and the rules fallback |
 | `brief/render.ts` | The page |
@@ -219,22 +220,27 @@ aula new [--days 60] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 | `brief/state.ts` | `state.json` — what has been shown, and `lastRun.complete` |
 | `brief/done.ts` | Tick keys and the client-side store |
 
-`AULA_BRIEF_MODEL` and `AULA_BRIEF_EFFORT` override the model for extract and
-deploy alike. Extract is where everything is decided, so a stronger model buys
-real judgment. Aula's `important` flag travels with the source as a strong cue;
-code does not add or reorder a card because of it.
+`AULA_BRIEF_MODEL` and `AULA_BRIEF_EFFORT` override extraction, where stronger
+judgment can improve the answer. Calendar and publishing calls only transport
+deterministic tool arguments and default to Haiku at low effort; override them
+separately with `AULA_TOOL_MODEL` and `AULA_TOOL_EFFORT`. Aula's `important`
+flag travels with the source as a strong cue; code does not reorder a valid
+model card because of it.
 
 ### The history window
 
 Aula keeps years; a brief that read fourteen days of it missed the one post that
 mattered — the sleepover announced on 3 July, its date still six weeks ahead on
 23 August, and the only place that date stood. So `HISTORY_DAYS` is 60 and every
-post and thread fetched inside that window reaches the model. A deterministic
+post and thread collected inside that window reaches the model. A deterministic
 admission rule missed forms it did not parse — for example *Svar i uge 41* — so
 it could make the wider read silently narrower again. `expiresAt` is no useful
 substitute: the daycare sets nearly every post to expire a year out. Collection
-scales its row guard with the window and says so in *Datastatus* if even that
-guard is reached.
+pages until the date window is satisfied; there is no separate row or page cap.
+The interactive `digest --limit` command can impose an explicit row limit and
+reports when it truncates. Every selected thread is paged to completion. A
+failed later page preserves the messages already read, marks the source
+incomplete, and keeps scheduled retries eligible.
 
 ### Extraction: the model writes and prioritises the cards; rules are the fallback
 
@@ -243,8 +249,9 @@ forms Danish school communication uses — `d. 18/9`, `tirsdag den 1. september
 2026`, `uge 34`, `senest fredag`, and the triggers `husk`, `frist`,
 `tilmelding`, `medbring`, `forældremøde`, `afleveres` — and makes a card of each
 hit: the source's title, the matched sentence verbatim as the summary. Without a
-model, those are the page. With one, the model's cards are the cards and the
-rules do not add, remove or reorder any of them.
+model, those are the page. A complete model answer owns the cards. If the model
+answer is partial, its validated survivors remain and exact-deduplicated rule
+cards fill obligations the invalid portion might otherwise have lost.
 
 ### The model contract
 
@@ -272,7 +279,15 @@ problems without losing valid cards or calendar verdicts; otherwise the page
 keeps the first answer's survivors and marks the problem in *Datastatus*.
 Extraction is cached against a hash of the payload, instructions **and schema**,
 so a prompt or field-description edit takes effect on the next run rather than
-being masked by an entry the old wording produced.
+being masked by an entry the old wording produced. Only complete validated
+answers are cached, and the cache retains the newest 32 entries.
+
+Prompt projection removes a thread title already carried in its own field and
+keeps ordinary sources whole. An exceptional source over 8,000 characters keeps
+both head and tail with an explicit middle marker: context survives, as does a
+late correction or deadline. The full local source remains available for date
+validation and *Læs mere*. Reused source/child enums live once under schema
+`$defs` rather than being repeated in every field.
 
 The prompt (`INSTRUCTIONS` in `llm.ts`) is in Danish, written with the user,
 and says: who reads and why; the four things the model decides (the prioritised
@@ -406,17 +421,20 @@ start kills the process long after the publish landed.
 `schedule.ts` uses `caffeinate -i -s` and retries every
 `RETRY_EVERY_MINUTES` (15) for `RETRY_FOR_MINUTES` (180). Every trigger passes
 `--catch-up`; `state.json`'s `lastRun.complete` stops retries after a complete
-run. Fetch/model/deploy degradation and any rendered invariant violation keep
-it false.
+run. Retryable fetch failures, model/deploy degradation and any rendered
+invariant violation keep it false. Persistent problems that another identical
+run cannot fix remain visible in *Datastatus* without burning the whole retry
+window.
 
 ## Risks
 
 - **A miss is worse than the status quo.** Mitigated by never losing a source —
   a card, the fold, or a counted hide — the datastatus footer, and the model
   seeing Aula's `important` flag on every source.
-- **A generated layout can regress silently.** The page that looks fine and
-  omitted the meeting is the dangerous one, not the ugly page — hence
-  machine-checked invariants rather than instructions in a prompt.
+- **A renderer can regress silently.** The page that looks fine and omitted the
+  meeting is the dangerous one, not the ugly page — hence machine-checked
+  invariants around the one deterministic template.
 - **Vendor flakiness is routine.** Surfaced, never hidden.
 - **Notification counts are worthless as priority** — the great majority are
-  photo uploads. They feed the photo section and nothing else.
+  photo uploads, so the brief does not fetch or rank them. Albums come from the
+  gallery endpoint directly.

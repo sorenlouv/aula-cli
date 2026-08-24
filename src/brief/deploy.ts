@@ -124,7 +124,11 @@ export async function deployArtifact(
 ): Promise<DeployResult> {
   let url: string | null = null;
   if (!opts.create) {
-    url = readTarget(opts.configPath);
+    try {
+      url = readTarget(opts.configPath);
+    } catch (err) {
+      return { status: 'failed', reason: errorMessage(err) };
+    }
     if (!url) return { status: 'skipped', reason: 'ingen artifact-URL konfigureret' };
     if (!isArtifactUrl(url)) return { status: 'failed', reason: `ugyldig artifact-URL: ${url}` };
   }
@@ -144,7 +148,7 @@ export async function deployArtifact(
     '--strict-mcp-config',
     '--output-format',
     'json',
-    ...modelEffortArgs(),
+    ...modelEffortArgs('transport'),
   ];
   const timeoutMs = opts.timeoutMs ?? TIMEOUT_MS;
 
@@ -166,7 +170,7 @@ export async function deployArtifact(
         // which is exactly the trap this pipeline is meant to avoid.
         //
         // It is set on this one subprocess rather than on the agent, so the
-        // extraction and layout calls keep the environment they already had.
+        // extraction and calendar calls keep the environment they already had.
         //
         // This is an undocumented lever and may stop working on any `claude`
         // update. The failure is loud and harmless: the deploy reports the tool

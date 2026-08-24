@@ -21,7 +21,21 @@ test('a rendered invariant violation keeps the run incomplete', () => {
       extractionRan: true,
       origin: 'model',
       deploymentFailed: false,
+      retryableFetchFailures: false,
       violations,
+    }),
+  ).toBe(false);
+});
+
+test('a retryable fetch failure keeps the run incomplete', () => {
+  expect(
+    isBriefRunComplete({
+      modelWasRequested: true,
+      extractionRan: true,
+      origin: 'model',
+      deploymentFailed: false,
+      retryableFetchFailures: true,
+      violations: [],
     }),
   ).toBe(false);
 });

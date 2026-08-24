@@ -160,9 +160,10 @@ async function callTool(
     try {
       return await attemptTool(tool, expected, instruction, opts);
     } catch (err) {
-      // Nothing to retry: the connector genuinely is not set up, and a second
-      // process would only say so again a few seconds later.
       if (err instanceof CalendarNotConnectedError) throw err;
+      if (!(err instanceof CalendarToolUnavailableError || err instanceof CalendarTimeoutError)) {
+        throw err;
+      }
       last = err instanceof Error ? err : new Error(String(err));
     }
   }
@@ -175,6 +176,10 @@ async function callTool(
 /** Empty server discovery plus no tool call; retried before it means disconnected. */
 class CalendarToolUnavailableError extends Error {
   override readonly name = 'CalendarToolUnavailableError';
+}
+
+class CalendarTimeoutError extends Error {
+  override readonly name = 'CalendarTimeoutError';
 }
 
 async function attemptTool(
@@ -203,13 +208,15 @@ async function attemptTool(
       '--output-format',
       'stream-json',
       '--verbose',
-      ...modelEffortArgs(),
+      ...modelEffortArgs('transport'),
     ],
     { timeoutMs: opts.timeoutMs },
   );
 
   if (run.timedOut) {
-    throw new Error(`claude -p svarede ikke inden for ${Math.round(opts.timeoutMs / 1000)}s`);
+    throw new CalendarTimeoutError(
+      `claude -p svarede ikke inden for ${Math.round(opts.timeoutMs / 1000)}s`,
+    );
   }
 
   const stream = parseStream(run.stdout);

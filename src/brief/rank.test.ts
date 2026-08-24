@@ -268,6 +268,18 @@ describe('rank: without a model', () => {
     expect(brief.cards.map((c) => c.id)).toEqual(['a']);
     expect(brief.rest.map((s) => s.key)).toEqual(['post:1']);
   });
+
+  test('a partial model answer is supplemented by deterministic obligations', () => {
+    const rules = cardsFromRules(input([POST]), TODAY);
+    const brief = rank(input([POST, THREAD]), {
+      model: [card({ id: 'a', sourceKeys: ['thread:2'] })],
+      rules,
+      hidden: [],
+      supplementRules: true,
+    });
+    expect(rules[0]).toBeDefined();
+    expect(brief.cards.map((entry) => entry.id)).toContain(rules[0]!.id);
+  });
 });
 
 describe('cardsFromRules', () => {
@@ -343,6 +355,23 @@ describe('cardsFromRules', () => {
       hidden: [],
     });
     expect(brief.cards.map((c) => c.date).sort()).toEqual(['2026-08-20', '2026-08-25']);
+  });
+
+  test('two different obligations on the same day remain two cards', () => {
+    const post = item({
+      key: 'post:6',
+      text: 'Husk badetøj på mandag. Husk madpakke på mandag.',
+      at: '2026-08-12T09:00:00',
+    });
+    const brief = rank(input([post]), {
+      model: null,
+      rules: cardsFromRules(input([post]), TODAY),
+      hidden: [],
+    });
+    expect(brief.cards.map((c) => c.summary)).toEqual([
+      'Husk badetøj på mandag.',
+      'Husk madpakke på mandag.',
+    ]);
   });
 });
 

@@ -9,8 +9,8 @@ import {
   extractionInstructions,
   extractionPayload,
   extractionSchema,
+  modelEffortArgs,
   parseClaudeJson,
-  parseJsonLoosely,
   runClaude,
   spawnClaude,
   validateExtraction,
@@ -67,14 +67,16 @@ describe('extractionPayload', () => {
   });
 
   test('tells the model when an exceptional source was shortened', () => {
-    const text = 'x'.repeat(8_001);
+    const text = `${'x'.repeat(8_500)}Husk at aflevere sedlen senest fredag.`;
     const [source] = extractionPayload({
       ...INPUT,
       items: [{ ...SOURCE, text }],
     }).sources;
 
     expect(source?.textTruncated).toBe(true);
-    expect(source?.text.endsWith('…')).toBe(true);
+    expect(source?.text).toContain('[midten er forkortet]');
+    expect(source?.text).toStartWith('x'.repeat(100));
+    expect(source?.text).toEndWith('Husk at aflevere sedlen senest fredag.');
   });
 });
 
@@ -129,15 +131,35 @@ describe('personal appointment relevance policy', () => {
   });
 });
 
-describe('parseJsonLoosely', () => {
-  test('accepts a bare object, a fenced block, and prose around it', () => {
-    expect(parseJsonLoosely('{"a":1}')).toEqual({ a: 1 });
-    expect(parseJsonLoosely('```json\n{"a":1}\n```')).toEqual({ a: 1 });
-    expect(parseJsonLoosely('Her er svaret:\n{"a":1}\nHåber det hjælper.')).toEqual({ a: 1 });
-  });
+describe('model cost controls', () => {
+  test('uses a small low-effort model for deterministic tool transport', () => {
+    const previous = {
+      briefModel: process.env.AULA_BRIEF_MODEL,
+      briefEffort: process.env.AULA_BRIEF_EFFORT,
+      toolModel: process.env.AULA_TOOL_MODEL,
+      toolEffort: process.env.AULA_TOOL_EFFORT,
+    };
+    try {
+      delete process.env.AULA_BRIEF_MODEL;
+      delete process.env.AULA_BRIEF_EFFORT;
+      delete process.env.AULA_TOOL_MODEL;
+      delete process.env.AULA_TOOL_EFFORT;
+      expect(modelEffortArgs('transport')).toEqual(['--model', 'haiku', '--effort', 'low']);
 
-  test('throws when there is no object at all', () => {
-    expect(() => parseJsonLoosely('beklager, det kan jeg ikke')).toThrow();
+      process.env.AULA_BRIEF_MODEL = 'sonnet';
+      process.env.AULA_BRIEF_EFFORT = 'high';
+      expect(modelEffortArgs()).toEqual(['--model', 'sonnet', '--effort', 'high']);
+      expect(modelEffortArgs('transport')).toEqual(['--model', 'haiku', '--effort', 'low']);
+    } finally {
+      const restore = (name: string, value: string | undefined) => {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      };
+      restore('AULA_BRIEF_MODEL', previous.briefModel);
+      restore('AULA_BRIEF_EFFORT', previous.briefEffort);
+      restore('AULA_TOOL_MODEL', previous.toolModel);
+      restore('AULA_TOOL_EFFORT', previous.toolEffort);
+    }
   });
 });
 
@@ -374,6 +396,7 @@ describe('the claude subprocess', () => {
   afterEach(() => {
     delete process.env.FAKE_CLAUDE_MODE;
     delete process.env.FAKE_CLAUDE_RESULT_JSON;
+    delete process.env.FAKE_CLAUDE_STRUCTURED_JSON;
     delete process.env.FAKE_CLAUDE_LOG;
   });
 
@@ -384,7 +407,10 @@ describe('the claude subprocess', () => {
     writeFileSync(log, '');
     process.env.FAKE_CLAUDE_MODE = mode;
     process.env.FAKE_CLAUDE_LOG = log;
-    if (result !== undefined) process.env.FAKE_CLAUDE_RESULT_JSON = JSON.stringify(result);
+    if (result !== undefined) {
+      process.env.FAKE_CLAUDE_RESULT_JSON = JSON.stringify(result);
+      if (result.trim().startsWith('{')) process.env.FAKE_CLAUDE_STRUCTURED_JSON = result;
+    }
     const ownLog = log;
     return {
       log: ownLog,
@@ -396,6 +422,7 @@ describe('the claude subprocess', () => {
     const f = fake('ok');
     const file = `${f.log}.results`;
     writeFileSync(file, results.map((result) => JSON.stringify(result)).join('\n'));
+    writeFileSync(`${f.log}.structured`, results.join('\n'));
     return f;
   }
 
@@ -470,6 +497,14 @@ describe('the claude subprocess', () => {
       });
       expect(f.calls()[0]).toContain('--json-schema');
       expect(reply.text).toBe('{"signals":[]}');
+    });
+
+    test('a schema request never falls back to unvalidated result text', async () => {
+      const f = fake('ok', 'plain text that happens to be valid JSON later');
+      await expect(
+        runClaude('instr', '{}', { timeoutMs: 5_000, schema: { type: 'object' } }),
+      ).rejects.toThrow('no schema-validated structured_output');
+      expect(f.calls()).toHaveLength(1);
     });
 
     test('no schema means no flag, so the plain call is unchanged', async () => {

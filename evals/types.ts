@@ -6,6 +6,8 @@ export type ExpectedCard = {
   needsAction?: boolean;
   date?: string | null;
   children?: string[];
+  /** Disambiguates several obligations carried by the same source. */
+  textContains?: string;
 };
 
 export type BriefExtractionExpectation = {

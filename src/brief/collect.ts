@@ -12,10 +12,11 @@ import {
   type PersonalEvent,
 } from '../calendar/index.ts';
 import { readConfig } from '../config.ts';
-import { localIsoDate, type WeekPlan } from '../integrations/types.ts';
+import { addLocalDays, localIsoDate, type WeekPlan } from '../integrations/types.ts';
 import { buildDigest, collectAlbums, type ChildGroups, loadGroups } from './../digest.ts';
 import { resolveFamily } from './../family.ts';
 import { loadPreferences } from './../preferences.ts';
+import { errorMessage } from './../validation.ts';
 import { intervalLabel } from './dates.ts';
 import type { Audience, BriefInput, HealthNote, PresenceRow, SourceItem } from './types.ts';
 
@@ -129,14 +130,24 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
   const now = opts.now ?? new Date();
   const family = await resolveFamily(client);
 
-  const [digest, childGroups, albums] = await Promise.all([
+  const [digest, groupsRead, albumsRead] = await Promise.all([
     buildDigest(client, { days: opts.days, isoWeek: opts.isoWeek, family, now }),
-    loadGroups(client, family.children).catch((): ChildGroups[] => []),
-    collectAlbums(client, family, {
-      limit: 12,
-      since: new Date(now.getTime() - opts.days * 86_400_000),
-    }).catch(() => []),
+    recoverOptional(
+      loadGroups(client, family.children),
+      [] as ChildGroups[],
+      'Barnets klasse- og gruppetilknytning',
+    ),
+    recoverOptional(
+      collectAlbums(client, family, {
+        limit: 12,
+        since: addLocalDays(now, -opts.days),
+      }),
+      [],
+      'Gallerioversigten',
+    ),
   ]);
+  const childGroups = groupsRead.value;
+  const albums = albumsRead.value;
 
   const classGroupNames = new Set(
     childGroups.map((cg) => cg.className).filter((n): n is string => Boolean(n)),
@@ -144,16 +155,22 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
   const health: HealthNote[] = [];
   const items: SourceItem[] = [];
 
+  for (const message of [groupsRead.warning, albumsRead.warning, ...digest.fetchWarnings]) {
+    if (message) health.push({ level: 'warn', message, retryable: true });
+  }
+
   if (digest.collectionLimits.posts !== null) {
     health.push({
       level: 'warn',
       message: `Kun de nyeste ${digest.collectionLimits.posts} opslag blev læst.`,
+      retryable: false,
     });
   }
   if (digest.collectionLimits.threads !== null) {
     health.push({
       level: 'warn',
       message: `Kun de nyeste ${digest.collectionLimits.threads} beskedtråde blev læst.`,
+      retryable: false,
     });
   }
 
@@ -223,14 +240,20 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
   // told about.
   const unreadable = digest.threads.filter((t) => t.messagesUnavailable).map((t) => t.subject);
   if (unreadable.length > 0) {
-    health.push({ level: 'warn', message: describeUnreadableThreads(unreadable) });
+    health.push({ level: 'warn', message: describeUnreadableThreads(unreadable), retryable: true });
+  }
+  const incomplete = digest.threads
+    .filter((t) => t.messagesIncomplete)
+    .map((t) => ({ subject: t.subject, reason: t.messageReadWarning }));
+  if (incomplete.length > 0) {
+    health.push({ level: 'warn', message: describeIncompleteThreads(incomplete), retryable: true });
   }
 
   // ------------------------------------------------------------ weekly plans
   items.push(...sourcesFromPlans(digest.weeklyPlans));
   for (const plan of digest.weeklyPlans) {
     for (const warning of plan.warnings ?? []) {
-      health.push({ level: 'warn', message: summariseWarning(warning) });
+      health.push({ level: 'warn', message: summariseWarning(warning), retryable: true });
     }
   }
 
@@ -273,7 +296,7 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
   }
 
   // ----------------------------------------------------------------- health
-  if (digest.calendar.length === 0) {
+  if (digest.calendarAvailable && digest.calendar.length === 0) {
     health.push({
       level: 'ok',
       message:
@@ -285,6 +308,7 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
       level: 'warn',
       message:
         'Sessionen er ikke step-up-godkendt, så følsomme beskeder mangler. Kør `aula refresh-stepup`.',
+      retryable: false,
     });
   }
   const attention = digest.attention;
@@ -333,6 +357,20 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
   };
 }
 
+type OptionalRead<T> = { value: T; warning: string | null };
+
+async function recoverOptional<T>(
+  read: Promise<T>,
+  fallback: T,
+  label: string,
+): Promise<OptionalRead<T>> {
+  try {
+    return { value: await read, warning: null };
+  } catch (err) {
+    return { value: fallback, warning: `${label} kunne ikke hentes: ${errorMessage(err)}` };
+  }
+}
+
 /**
  * One line, however many threads failed.
  *
@@ -356,6 +394,19 @@ function describeUnreadableThreads(subjects: string[]): string {
   // to avoid.
   const lead = subjects.length > 2 ? 'heriblandt' : 'nemlig';
   return `Beskederne i ${subjects.length} tråde kunne ikke hentes — kun emnerne er med her, ${lead} ${named}.`;
+}
+
+function describeIncompleteThreads(
+  threads: Array<{ subject: string; reason: string | null }>,
+): string {
+  const named = threads
+    .slice(0, 2)
+    .map((thread) => `«${thread.subject}»`)
+    .join(' og ');
+  const reason = threads.length === 1 && threads[0]?.reason ? ` (${threads[0].reason})` : '';
+  return threads.length === 1
+    ? `Ikke alle beskeder i tråden ${named} kunne hentes${reason} — åbn den i Aula for resten.`
+    : `Ikke alle beskeder i ${threads.length} tråde kunne hentes, heriblandt ${named} — åbn dem i Aula for resten.`;
 }
 
 /**
@@ -395,7 +446,15 @@ function summariseWarning(warning: string): string {
  * could do.
  */
 async function collectPersonal(now: Date): Promise<{ items: SourceItem[]; health: HealthNote[] }> {
-  const calendars = readConfig().calendars ?? [];
+  let calendars;
+  try {
+    calendars = readConfig().calendars ?? [];
+  } catch (err) {
+    return {
+      items: [],
+      health: [{ level: 'warn', message: errorMessage(err), retryable: false }],
+    };
+  }
   if (calendars.length === 0) return { items: [], health: [] };
 
   // Aula history may be widened with `new --days`; private calendar data may
@@ -404,7 +463,11 @@ async function collectPersonal(now: Date): Promise<{ items: SourceItem[]; health
   const { from, to } = calendarWindow(now, PERSONAL_CALENDAR_DAYS);
   const loaded = await loadPersonalEvents(calendars, { from, to });
 
-  const health: HealthNote[] = loaded.warnings.map((message) => ({ level: 'warn', message }));
+  const health: HealthNote[] = loaded.warnings.map((message) => ({
+    level: 'warn',
+    message,
+    retryable: !loaded.notConnected,
+  }));
   if (loaded.notConnected) {
     const warning = health[0];
     if (warning) warning.message += ' Kør `aula calendars` for at komme videre.';

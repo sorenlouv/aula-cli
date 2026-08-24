@@ -1,7 +1,8 @@
 # Setting up aula-cli
 
-Perform steps 1–4 run without stopping. Then offer the optional steps.
-`aula new` reads 2 weeks of messages: give it a 10-minute timeout; everything else should answers in seconds.
+Perform steps 1–4 without stopping. Then offer the optional steps.
+`aula new` reads 60 days of posts and messages: give it a 10-minute timeout;
+everything else should answer in seconds.
 
 Needs git, the MitID app on the user's phone, and `claude` CLI on PATH.
 
@@ -30,8 +31,10 @@ fails saying so. Instead:
 4. Watch for `Login successful`, or a failure with its reason.
 
 `--no-browser` keeps it in the terminal for a machine with no desktop;
-`--method CODE_TOKEN` for numeric code instead of QR code; `--debug` writes a diagnostic trace to
-`~/.aula/login-trace.jsonl`. Never ask for or type their MitID password; the default method has none. The login refreshes automatically.
+`--method CODE_TOKEN` uses a numeric code instead of a QR code; `--debug` writes
+a redacted, owner-only diagnostic trace to `~/.aula/login-trace.jsonl`. Never
+ask for or type their MitID password; the default method has none. The login
+refreshes automatically.
 
 A _parallel session_ error (CAP008) means an earlier attempt is still live on
 MitID's side: reject any pending approval in the app, close aula.dk tabs, wait a
@@ -90,8 +93,11 @@ bun src/cli.ts schedule     # weekdays 06:30; --at HH:MM to change, --remove to 
 `schedule` installs a launchd agent (macOS) or Scheduled Task (Windows); on
 Linux it prints cron lines. It retries through the morning with `--catch-up`
 because the laptop is usually asleep at 06:30, and it bakes in PATH plus
-`AULA_BRIEF_MODEL` / `AULA_BRIEF_EFFORT` / `AULA_CACHE_TTL` from the shell it
-ran in — re-run it after changing node version or those variables. In Claude
+`AULA_BRIEF_MODEL`, `AULA_BRIEF_EFFORT`, `AULA_TOOL_MODEL`,
+`AULA_TOOL_EFFORT` and `AULA_CACHE_TTL` from the shell it ran in — re-run it
+after changing node version or those variables. Extraction uses the configured
+brief model; deterministic calendar and publishing tool calls default to Haiku
+at low effort to avoid paying extraction-model prices for transport. In Claude
 Code Desktop the Preview button (`.claude/launch.json`, port 4317, local only)
 shows the newest overview.
 

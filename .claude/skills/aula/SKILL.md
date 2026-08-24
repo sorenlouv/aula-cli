@@ -253,8 +253,9 @@ nothing clashed.
 
 `bun src/cli.ts new` generates the "Aula AI oversigt" — a self-contained HTML
 page in `~/.aula/brief/` — and opens it (`--no-open` to skip). It calls
-`claude` itself for extraction and layout; `--no-llm` produces a rules-only
-page. `bun src/cli.ts open` shows the newest page without regenerating, and
+`claude` itself for extraction; a deterministic local renderer builds the
+layout. `--no-llm` produces a rules-only page. `bun src/cli.ts open` shows the
+newest page without regenerating, and
 `open --web` opens the hosted copy where one is configured — `bun src/cli.ts
 publish` sets that up (it publishes the newest page and saves the URL in
 `~/.aula/config.json`; `publish --off` stops it). A

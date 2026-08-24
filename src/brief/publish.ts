@@ -11,7 +11,7 @@
  * Both scripts are inlined here rather than in the body, because `render.ts`
  * owns the markup and `validate.ts` checks that body for external references.
  * Putting behaviour in the document wrapper keeps that separation intact and
- * gets it onto the fallback layout for free.
+ * gives every output the same print and done-state behavior.
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs';

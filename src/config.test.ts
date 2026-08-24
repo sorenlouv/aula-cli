@@ -22,20 +22,29 @@ describe('config.json', () => {
     expect(readConfig(configPath())).toEqual({});
   });
 
-  test('a corrupt file is an empty config too — a broken preference must not stop the brief', () => {
+  test('a corrupt file is reported instead of treated as empty', () => {
     const path = configPath();
     writeConfig({}, path);
     writeFileSync(path, '{not json');
-    expect(readConfig(path)).toEqual({});
+    expect(() => readConfig(path)).toThrow(/config\.json.*ugyldig/i);
+    expect(() => updateConfig({ artifactUrl: URL }, path)).toThrow(/config\.json.*ugyldig/i);
+    expect(readFileSync(path, 'utf8')).toBe('{not json');
   });
 
-  test('a non-string url is ignored, a padded one is trimmed', () => {
+  test('a non-string url is rejected, a padded one is trimmed', () => {
     const path = configPath();
     writeConfig({}, path);
     writeFileSync(path, JSON.stringify({ artifactUrl: 42 }));
-    expect(readConfig(path)).toEqual({});
+    expect(() => readConfig(path)).toThrow(/artifactUrl/);
     writeFileSync(path, JSON.stringify({ artifactUrl: `  ${URL}\n` }));
     expect(readConfig(path)).toEqual({ artifactUrl: URL });
+  });
+
+  test('an arbitrary URL is not accepted as an artifact target', () => {
+    const path = configPath();
+    writeConfig({}, path);
+    writeFileSync(path, JSON.stringify({ artifactUrl: 'https://example.com/public-page' }));
+    expect(() => readConfig(path)).toThrow(/artifactUrl.*ugyldigt format/);
   });
 
   test('writes create the file and its directory, readable only by the owner', () => {
@@ -73,7 +82,7 @@ describe('config.json holds more than one preference', () => {
     expect(readConfig(path).somethingNewer).toEqual({ a: 1 });
   });
 
-  test('junk calendars are dropped, and duplicates collapse on id', () => {
+  test('junk or duplicate calendars are rejected rather than silently rewritten', () => {
     const path = configPath();
     // Written as raw JSON rather than through `writeConfig`, because the case
     // being tested is a hand-edited file — which the docs call a supported way
@@ -91,11 +100,14 @@ describe('config.json holds more than one preference', () => {
         ],
       }),
     );
-    expect(readConfig(path).calendars).toEqual([
-      { id: 'a@example.com', name: 'A' },
-      // No name given: the id is the least-wrong label to show.
-      { id: 'b@example.com', name: 'b@example.com' },
-    ]);
+    expect(() => readConfig(path)).toThrow(/calendars\[1\]\.id/);
+  });
+
+  test('every configured calendar keeps the displayed name the user selected', () => {
+    const path = configPath();
+    writeConfig({}, path);
+    writeFileSync(path, JSON.stringify({ calendars: [{ id: 'a@example.com' }] }));
+    expect(() => readConfig(path)).toThrow(/calendars\[0\]\.name mangler/);
   });
 
   test('an empty calendar list reads as absent rather than as an empty array', () => {
