@@ -707,6 +707,26 @@ test('new --catch-up runs when the last run was incomplete', () => {
   assert.equal(state.lastRun.day, day);
 });
 
+test('every completed brief records revision and phase timings privately', () => {
+  const box = sandbox();
+  const result = box.run('new', '--no-llm', '--no-deploy', '--no-open');
+  assert.equal(result.code, 0, result.stderr);
+
+  const entries = readFileSync(join(box.dir, 'logs', 'brief.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  const finished = entries.find((entry) => entry.event === 'brief.run.finished');
+
+  assert.ok(finished, 'completed runs should be diagnosable after the terminal closes');
+  assert.equal(finished.details.complete, true);
+  assert.equal(typeof finished.details.totalMs, 'number');
+  assert.equal(typeof finished.details.phaseMs.collect, 'number');
+  assert.equal(typeof finished.details.phaseMs.render, 'number');
+  assert.equal(finished.revision.commit?.length, 40);
+  assert.equal(typeof finished.revision.dirty, 'boolean');
+});
+
 test('a model outage is prominent on the page and leaves private diagnostics', () => {
   const box = sandboxWithClaude('error');
   const result = box.run('new', '--no-deploy', '--no-open');
@@ -725,10 +745,18 @@ test('a model outage is prominent on the page and leaves private diagnostics', (
   assert.match(page, /<footer>Genereret \d{1,2}\. \S+ \d{4} kl\. \d{2}:\d{2}<\/footer>/);
 
   const logPath = join(box.dir, 'logs', 'brief.jsonl');
-  const logged = JSON.parse(readFileSync(logPath, 'utf8'));
+  const entries = readFileSync(logPath, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  const logged = entries.find((entry) => entry.event === 'brief.model.failed');
+  assert.ok(logged, 'model failure should be logged');
   assert.equal(logged.event, 'brief.model.failed');
   assert.match(logged.details.message, /Not logged in/);
   assert.match(logged.details.details.attempts[0].stdout, /Not logged in/);
+  assert.equal(entries[0]?.event, 'brief.run.started');
+  assert.ok(entries.some((entry) => entry.event === 'brief.phase.finished'));
+  assert.equal(logged.revision.commit?.length, 40);
   assert.ok(output.notes.includes(`Udviklerlog: ${logPath}`));
 });
 

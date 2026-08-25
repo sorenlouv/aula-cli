@@ -25,7 +25,11 @@ import {
 import { BRIEF_DIR } from './state.ts';
 import type { BriefInput, Card, PersonalEventVerdict } from './types.ts';
 import { isRecord, parseIsoDateParts } from '../validation.ts';
-import { runClaude } from '../llm/claude.ts';
+import { ClaudeRunError, runClaude, type ClaudeAttempt } from '../llm/claude.ts';
+import {
+  briefCardRepairRequest,
+  type CardRepairCandidate,
+} from '../llm/requests/brief-card-repair.ts';
 import { briefExtractionRequest } from '../llm/requests/brief-extraction.ts';
 
 export {
@@ -52,7 +56,7 @@ const CACHE_FILE_LIMIT = 32;
  * read back with a field missing — the first run after an upgrade must not
  * spend its day on yesterday's answer shape.
  */
-const CONTRACT_VERSION = 7;
+const CONTRACT_VERSION = 8;
 /** Whitespace-insensitive containment. Aula's HTML flattening leaves odd runs of spaces. */
 export type ExtractResult = {
   topline: string | null;
@@ -62,6 +66,25 @@ export type ExtractResult = {
   /** Aula source keys the model kept off the page. Listed in the muted foot. */
   hidden: string[];
   problems: string[];
+  /** Numeric request/transport metadata for the private developer log. */
+  telemetry?: ExtractionTelemetry;
+};
+
+export type ExtractionTelemetry = {
+  cacheHit: boolean;
+  sourceCount: number;
+  personalEventCount: number;
+  payloadChars: number;
+  instructionsChars: number;
+  schemaChars: number;
+  primaryAttempts: ClaudeAttempt[];
+  repair?: {
+    candidateCount: number;
+    requestChars: number;
+    attempts: ClaudeAttempt[];
+  };
+  initialProblemCount: number;
+  finalProblemCount: number;
 };
 
 const EMPTY: ExtractResult = {
@@ -72,6 +95,8 @@ const EMPTY: ExtractResult = {
   hidden: [],
   problems: [],
 };
+
+type ValidationResult = ExtractResult & { repairCandidates: CardRepairCandidate[] };
 
 /**
  * Checks a model response against the input it was given.
@@ -88,8 +113,20 @@ const EMPTY: ExtractResult = {
  * page has a plain fallback for each.
  */
 export function validateExtraction(input: BriefInput, parsed: unknown): ExtractResult {
-  if (!isRecord(parsed)) return { ...EMPTY, problems: ['svaret var ikke et objekt'] };
+  const { repairCandidates: _repairCandidates, ...result } = validateExtractionDetailed(
+    input,
+    parsed,
+  );
+  return result;
+}
+
+/** Internal validation keeps only safe-to-repair card snapshots beside the public result. */
+function validateExtractionDetailed(input: BriefInput, parsed: unknown): ValidationResult {
+  if (!isRecord(parsed)) {
+    return { ...EMPTY, problems: ['svaret var ikke et objekt'], repairCandidates: [] };
+  }
   const problems: string[] = [];
+  const repairCandidates: CardRepairCandidate[] = [];
   const items = new Map(input.items.map((item) => [item.key, item]));
   const firstNames = new Set(input.family.children.map((c) => c.firstName));
   // Anthropic's structured-output contract explicitly permits string enum and
@@ -116,6 +153,34 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
   };
 
   const cards: Card[] = [];
+  const cardSnapshot = (
+    raw: Record<string, unknown>,
+    sourceKeys: string[],
+  ): Record<string, unknown> => ({
+    title: raw.title,
+    summary: raw.summary,
+    children: raw.children,
+    date: raw.date,
+    recurring: raw.recurring,
+    needsAction: raw.needsAction,
+    actionableNow: raw.actionableNow,
+    reason: raw.reason,
+    sourceKeys,
+  });
+  const rejectedDateCard = (
+    cardIndex: number,
+    raw: Record<string, unknown>,
+    sourceKeys: string[],
+    problem: string,
+  ) => {
+    problems.push(problem);
+    repairCandidates.push({
+      cardIndex,
+      problem,
+      card: cardSnapshot(raw, sourceKeys),
+      sourceKeys,
+    });
+  };
   const rawCards = Array.isArray(parsed.cards) ? parsed.cards : [];
   if (!Array.isArray(parsed.cards)) problems.push('"cards" mangler eller er ikke en liste');
   for (const [index, raw] of rawCards.entries()) {
@@ -152,7 +217,12 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
         continue;
       }
       if (!sourceKeys.some((key) => dueAtSupported(iso.iso, key, support))) {
-        problems.push(`${label}: date ${iso.iso} har ikke belæg i nogen af kortets kilder`);
+        rejectedDateCard(
+          index,
+          raw,
+          sourceKeys,
+          `${label}: date ${iso.iso} har ikke belæg i nogen af kortets kilder`,
+        );
         continue;
       }
       date = iso.iso;
@@ -160,7 +230,10 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
     const reason = typeof raw.reason === 'string' && raw.reason.trim() ? raw.reason.trim() : null;
     const invented = unsupportedAcross([title, summary, reason ?? ''].join(' '), sourceKeys, date);
     if (invented.length > 0) {
-      problems.push(
+      rejectedDateCard(
+        index,
+        raw,
+        sourceKeys,
         `${label}: dato uden belæg i kortets kilder: ${invented.map((d) => `"${d}"`).join(', ')}`,
       );
       continue;
@@ -301,19 +374,72 @@ export function validateExtraction(input: BriefInput, parsed: unknown): ExtractR
     }
   }
 
-  return { topline, cards, personalEvents, childSummaries, hidden, problems };
+  return { topline, cards, personalEvents, childSummaries, hidden, problems, repairCandidates };
 }
 
 function cacheKey(payload: unknown): string {
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, 32);
 }
 
+function sameStringArray(left: unknown, right: unknown): boolean {
+  return (
+    Array.isArray(left) &&
+    Array.isArray(right) &&
+    left.length === right.length &&
+    left.every((value, index) => typeof value === 'string' && value === right[index])
+  );
+}
+
+/** A card repair may only replace the rejected slot and keep its original semantics. */
+function mergeCardRepairs(
+  parsed: unknown,
+  candidates: CardRepairCandidate[],
+  repaired: unknown,
+): unknown | null {
+  if (!isRecord(parsed) || !Array.isArray(parsed.cards)) return null;
+  if (!isRecord(repaired) || !Array.isArray(repaired.repairs)) return null;
+  if (repaired.repairs.length !== candidates.length) return null;
+
+  const byIndex = new Map(candidates.map((candidate) => [candidate.cardIndex, candidate]));
+  const replacements = new Map<number, Record<string, unknown>>();
+  for (const raw of repaired.repairs) {
+    if (
+      !isRecord(raw) ||
+      typeof raw.cardIndex !== 'number' ||
+      !Number.isInteger(raw.cardIndex) ||
+      !isRecord(raw.card)
+    ) {
+      return null;
+    }
+    const cardIndex = raw.cardIndex;
+    const candidate = byIndex.get(cardIndex);
+    if (!candidate || replacements.has(cardIndex)) return null;
+    if (
+      !sameStringArray(raw.card.sourceKeys, candidate.sourceKeys) ||
+      !sameStringArray(raw.card.children, candidate.card.children) ||
+      raw.card.recurring !== candidate.card.recurring ||
+      raw.card.needsAction !== candidate.card.needsAction ||
+      raw.card.actionableNow !== candidate.card.actionableNow
+    ) {
+      return null;
+    }
+    replacements.set(cardIndex, {
+      ...raw.card,
+      children: candidate.card.children,
+      sourceKeys: candidate.sourceKeys,
+    });
+  }
+  if (replacements.size !== candidates.length) return null;
+
+  const cards = [...parsed.cards];
+  for (const [index, card] of replacements) cards[index] = card;
+  return { ...parsed, cards };
+}
+
 /**
- * One extraction pass, with a single corrective retry.
- *
- * A retry is worth exactly one attempt: the failures that survive a round of
- * "here is what was wrong with your last answer" are not the kind another go
- * fixes, and the rules layer is a perfectly serviceable floor.
+ * One full extraction pass, followed only by a source-bounded repair for cards
+ * rejected by date grounding. Re-ranking every source to repair one date made
+ * the common validation edge cost another complete high-effort model turn.
  */
 export async function extractCards(
   input: BriefInput,
@@ -334,12 +460,30 @@ export async function extractCards(
   // tuning one must invalidate the answer written under its old wording.
   const key = cacheKey({ contract: CONTRACT_VERSION, payload, instructions, schema });
   const cachePath = join(CACHE_DIR, `extract-${key}.json`);
+  const telemetryBase = {
+    sourceCount: input.items.length,
+    personalEventCount: input.items.filter((item) => item.kind === 'personal').length,
+    payloadChars: JSON.stringify(payload).length,
+    instructionsChars: instructions.length,
+    schemaChars: JSON.stringify(schema).length,
+  };
 
   if (opts.useCache !== false) {
     try {
       const cached = JSON.parse(readFileSync(cachePath, 'utf8'));
       const validated = validateExtraction(input, cached);
-      if (validated.problems.length === 0) return validated;
+      if (validated.problems.length === 0) {
+        return {
+          ...validated,
+          telemetry: {
+            ...telemetryBase,
+            cacheHit: true,
+            primaryAttempts: [],
+            initialProblemCount: 0,
+            finalProblemCount: 0,
+          },
+        };
+      }
     } catch {
       // No usable cache entry; fall through and call the model.
     }
@@ -354,40 +498,64 @@ export async function extractCards(
   // so letting it through still produces a brief — it just produces an honest
   // one. Nothing is written to the cache on this path either; a 06:30 outage
   // must not pin a degraded brief for the rest of the day.
-  const call = { timeoutMs: opts.timeoutMs ?? 300_000, schema };
+  const call = { timeoutMs: opts.timeoutMs ?? 300_000, schema, purpose: 'brief' as const };
   const answer = await runClaude(instructions, body, call);
 
   // `runClaude` requires the schema-checked tool parameters. Unstructured text
   // is never accepted as a second contract: a missing structured result is a
   // transport failure and the caller honestly falls back to rules.
   let parsed = answer.structured;
-  let result = validateExtraction(input, parsed);
+  let validated = validateExtractionDetailed(input, parsed);
+  const initialProblemCount = validated.problems.length;
+  let repairTelemetry: ExtractionTelemetry['repair'];
 
-  // The shape and the source keys are the schema's, so a second pass only ever
-  // fixes the one thing checked against the sources themselves: a date that is
-  // not in the text it was said to come from.
-  if (result.problems.length > 0) {
-    const retry = `${instructions}
-
-Dit forrige svar havde disse fejl. Ret dem, og svar igen med det hele:
-${result.problems.map((p) => `- ${p}`).join('\n')}`;
+  // A date-only rejection retains all the ranking work that did validate. Its
+  // repair sees only that card and its current citations, runs once at the
+  // low-cost repair setting, and still faces the full production validator.
+  if (
+    validated.repairCandidates.length > 0 &&
+    validated.repairCandidates.length === validated.problems.length
+  ) {
+    const repairInput = { input, candidates: validated.repairCandidates };
+    const repairPayload = briefCardRepairRequest.payload(repairInput);
+    const repairInstructions = briefCardRepairRequest.instructions(repairInput);
+    const repairSchema = briefCardRepairRequest.schema(repairInput);
+    repairTelemetry = {
+      candidateCount: validated.repairCandidates.length,
+      requestChars:
+        JSON.stringify(repairPayload).length +
+        repairInstructions.length +
+        JSON.stringify(repairSchema).length,
+      attempts: [],
+    };
     try {
-      const second = await runClaude(retry, body, call);
-      const secondParsed = second.structured;
-      const reparsed = validateExtraction(input, secondParsed);
-      // A corrective answer may fix the named date and forget valid cards or
-      // calendar verdicts. Fewer problems is better only when it preserves both
-      // kinds of survivor; otherwise the first partial answer is more useful.
-      if (
-        reparsed.problems.length < result.problems.length &&
-        reparsed.cards.length >= result.cards.length &&
-        reparsed.personalEvents.length >= result.personalEvents.length
-      ) {
-        result = reparsed;
-        parsed = secondParsed;
+      const repair = await runClaude(repairInstructions, JSON.stringify(repairPayload), {
+        timeoutMs: Math.min(opts.timeoutMs ?? 300_000, 120_000),
+        schema: repairSchema,
+        maxAttempts: 1,
+        purpose: 'repair',
+      });
+      repairTelemetry.attempts = repair.attempts;
+      const merged = mergeCardRepairs(parsed, validated.repairCandidates, repair.structured);
+      if (merged !== null) {
+        const repaired = validateExtractionDetailed(input, merged);
+        if (repaired.problems.length === 0) {
+          parsed = merged;
+          validated = repaired;
+        }
       }
-    } catch {
-      // Keep the first result; the caller degrades gracefully.
+    } catch (error) {
+      if (error instanceof ClaudeRunError) {
+        repairTelemetry.attempts = error.details.attempts.map(
+          ({ code, timedOut, stoppedAfterOutput, durationMs }) => ({
+            code,
+            timedOut,
+            stoppedAfterOutput,
+            durationMs,
+          }),
+        );
+      }
+      // Keep the first result; a failed small repair is visible and retryable.
     }
   }
 
@@ -395,7 +563,7 @@ ${result.problems.map((p) => `- ${p}`).join('\n')}`;
   // `--no-cache` run (or a model comparison) pins its answer for whoever runs
   // next inside the content window. Invalid/partial answers are not cached
   // either: the next run deserves another chance to obtain every verdict.
-  if (opts.useCache !== false && result.problems.length === 0) {
+  if (opts.useCache !== false && validated.problems.length === 0) {
     try {
       mkdirSync(CACHE_DIR, { recursive: true });
       writeFileSync(cachePath, JSON.stringify(parsed, null, 2));
@@ -404,7 +572,18 @@ ${result.problems.map((p) => `- ${p}`).join('\n')}`;
       // A brief that cannot cache is still a brief.
     }
   }
-  return result;
+  const { repairCandidates: _repairCandidates, ...result } = validated;
+  return {
+    ...result,
+    telemetry: {
+      ...telemetryBase,
+      cacheHit: false,
+      primaryAttempts: answer.attempts,
+      ...(repairTelemetry ? { repair: repairTelemetry } : {}),
+      initialProblemCount,
+      finalProblemCount: result.problems.length,
+    },
+  };
 }
 
 function pruneExtractionCache(keepPath: string): void {

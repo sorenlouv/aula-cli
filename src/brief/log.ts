@@ -2,8 +2,8 @@
  * Durable developer diagnostics for brief generation.
  *
  * The terminal is ephemeral, while a scheduled model failure often gets
- * investigated hours later. Only failures and incomplete model answers are
- * appended here; prompts and source payloads are deliberately excluded. The
+ * investigated hours later. Lifecycle entries make a successful-but-slow run
+ * debuggable too; prompts and source payloads are deliberately excluded. The
  * Claude transport error carries its captured process output, which is enough
  * to distinguish an API outage, timeout, missing login and malformed reply.
  */
@@ -24,7 +24,12 @@ export type SourceRevision = {
 
 export type BriefLogEvent = {
   at: string;
-  event: 'brief.model.failed' | 'brief.model.incomplete';
+  event:
+    | 'brief.run.started'
+    | 'brief.phase.finished'
+    | 'brief.run.finished'
+    | 'brief.model.failed'
+    | 'brief.model.incomplete';
   day: string;
   isoWeek: string;
   model: string | null;

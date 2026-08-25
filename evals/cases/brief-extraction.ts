@@ -296,7 +296,82 @@ const futureBirthday = aulaSource({
   important: true,
 });
 
+/**
+ * A fictional size match for the observed daily brief: many ordinary sources,
+ * a handful of obligations and twenty private appointments. It is deliberately
+ * synthetic so effort comparisons never retain a family's data in Git.
+ */
+const latencyStressNoise = Array.from({ length: 45 }, (_, index) =>
+  aulaSource({
+    key: `post:stress-noise-${index + 1}`,
+    title: `Ugens orientering ${index + 1}`,
+    text: `Almindelig orientering til 2.E nummer ${index + 1}. Ingen handling er nødvendig.`,
+    at: `2026-08-${String(1 + (index % 22)).padStart(2, '0')}T09:00:00+02:00`,
+    important: false,
+  }),
+);
+const latencyStressPersonal = Array.from({ length: 20 }, (_, index) =>
+  personal(
+    `stress-${index + 1}`,
+    index === 0 ? 'Alma svømning' : `Voksenaftale ${index + 1}`,
+    `2026-08-${String(24 + (index % 7)).padStart(2, '0')}T${String(8 + (index % 9)).padStart(2, '0')}:00:00+02:00`,
+    index === 0 ? 'Almas svømmetræning' : 'Privat voksenaktivitet',
+  ),
+);
+const latencyStressInput = input(
+  [
+    photoRegistration,
+    consentThread,
+    twoObligations,
+    longTailAction,
+    ...latencyStressNoise,
+    ...latencyStressPersonal,
+  ],
+  { today: '2026-08-23', isoWeek: '2026-W34' },
+);
+
 export const briefExtractionCases: BriefExtractionEvalCase[] = [
+  {
+    id: 'synthetic-latency-stress',
+    description:
+      'A 69-source fictional input for high/medium effort comparison, including twenty personal verdicts and independent obligations.',
+    provenance: 'synthetic',
+    input: latencyStressInput,
+    expected: {
+      requiredCards: [
+        {
+          sourceKeys: [consentThread.key],
+          needsAction: true,
+          actionableNow: true,
+          placement: 'action',
+          date: '2026-08-25',
+          children: ['Alma'],
+          textContains: 'svar',
+        },
+        {
+          sourceKeys: [twoObligations.key],
+          needsAction: true,
+          actionableNow: false,
+          placement: 'future',
+          date: '2026-08-31',
+          childrenCovered: ['Alma'],
+          textContains: 'badetøj',
+        },
+        {
+          sourceKeys: [twoObligations.key],
+          needsAction: true,
+          actionableNow: false,
+          placement: 'future',
+          date: '2026-08-31',
+          childrenCovered: ['Alma'],
+          textContains: 'madpakke',
+        },
+      ],
+      relevantPersonalEvents: [latencyStressPersonal[0]!.key],
+      irrelevantPersonalEvents: latencyStressPersonal.slice(1).map((item) => item.key),
+      hiddenExcludes: [consentThread.key, twoObligations.key],
+    },
+  },
   {
     id: 'actionable-now-and-future-sections',
     description:

@@ -2,7 +2,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { extractCards } from '../src/brief/llm.ts';
+import { extractCards, type ExtractionTelemetry } from '../src/brief/llm.ts';
 import { briefExtractionRequest } from '../src/llm/requests/brief-extraction.ts';
 import { assertBriefExtraction } from './assert-brief-extraction.ts';
 import { briefExtractionCases } from './cases/brief-extraction.ts';
@@ -24,6 +24,7 @@ type RunRecord = {
   durationMs: number;
   passed: boolean;
   failures: EvalFailure[];
+  telemetry?: ExtractionTelemetry;
   output?: unknown;
   error?: string;
 };
@@ -147,6 +148,7 @@ async function main(): Promise<void> {
             passed: failures.length === 0,
             failures,
             output,
+            ...(output.telemetry ? { telemetry: output.telemetry } : {}),
           };
         } catch (error) {
           record = {

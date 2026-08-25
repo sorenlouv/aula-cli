@@ -41,9 +41,11 @@ see at a glance: whether the dates are real.
 in its title, summary or reason — must be supported by at least one of the
 card's own sources (`dates.ts`); the topline and per-child lines are checked
 against every source. A card that fails is dropped and reported, never kept
-with the date removed, because the date is usually the point. Invented small
-deadlines ("senest søndag", stated nowhere) are the one failure mode every model
-shows occasionally; grounding turns them into a dropped card and one retry.
+with the date removed, because the date is usually the point. An unsupported
+card date is the one narrow exception: one small repair request sees only that
+card and the sources it already cites. It may correct or remove the date, but
+cannot change its citations, children or action semantics; the merged answer
+must still pass ordinary validation. Everything else stays degraded and visible.
 Dates in a personal appointment's summary and reason are checked against that
 appointment alone.
 
@@ -221,7 +223,7 @@ this*; *I never want to see this* is a preference.
 aula new [--days 60] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 
   collect   →  BriefInput    reuse buildDigest + galleries; every source in the 60-day window
-  extract   →  cards/verdicts one model call, answered in a schema, dates grounded
+  extract   →  cards/verdicts one full model call, dates grounded; bad card dates get a small repair
   rank      →  RankedBrief   actions + capped primary/future cards + compact events
   render    →  HTML          the page, built locally; invariants checked
   publish   →  files         HTML (+ PDF/PNG), open, update state
@@ -231,12 +233,12 @@ aula new [--days 60] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 | --- | --- |
 | `brief/index.ts` | The pipeline |
 | `brief/collect.ts` | Assemble `BriefInput`; the history window and source health |
-| `brief/log.ts` | Private JSONL diagnostics for failed/incomplete model runs |
+| `brief/log.ts` | Private JSONL lifecycle, timing and model diagnostics |
 | `brief/types.ts` | The `Card` / `SourceItem` vocabulary |
 | `brief/rules.ts` | Danish date and obligation extractors |
 | `llm/claude.ts` | Shared bounded `claude -p` process transport |
 | `llm/requests/brief-extraction.ts` | Prompt, compact source projection and schema |
-| `brief/llm.ts` | Extraction validation, corrective retry and bounded content-hash cache |
+| `brief/llm.ts` | Extraction validation, source-bounded card repair and bounded content-hash cache |
 | `brief/dates.ts` | Date grounding against the sources |
 | `brief/rank.ts` | Action/date placement, section caps, and the rules fallback |
 | `brief/render.ts` | The page |
@@ -248,7 +250,10 @@ aula new [--days 60] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 | `brief/done.ts` | Tick keys and the client-side store |
 
 `AULA_BRIEF_MODEL` and `AULA_BRIEF_EFFORT` override extraction, where stronger
-judgment can improve the answer. Calendar and publishing calls only transport
+judgment can improve the answer. A date-only repair defaults separately to
+Haiku at low effort (`AULA_BRIEF_REPAIR_MODEL` and
+`AULA_BRIEF_REPAIR_EFFORT`), because it may only rewrite one rejected card
+against its existing sources. Calendar and publishing calls only transport
 deterministic tool arguments and default to Haiku at low effort; override them
 separately with `AULA_TOOL_MODEL` and `AULA_TOOL_EFFORT`. Aula's `important`
 flag travels with the source as a strong cue; code does not reorder a valid
@@ -283,9 +288,10 @@ cards fill obligations the invalid portion might otherwise have lost.
 If the model cannot run, the rules-only overview is still published but carries
 a visible warning that its prioritisation may be incomplete. The terminal keeps
 the technical error, and a private developer record is appended to
-`~/.aula/logs/brief.jsonl` (or `$AULA_DIR/logs/brief.jsonl`) with the stack,
-model settings, source revision and bounded Claude stdout/stderr. Prompts and
-source payloads are not logged.
+`~/.aula/logs/brief.jsonl` (or `$AULA_DIR/logs/brief.jsonl`). Every run records
+its revision, phase timings, source/request counts, model attempt outcomes and
+completion state; failed model attempts additionally keep bounded Claude
+stdout/stderr. Prompts and source payloads are not logged.
 
 ### The model contract
 
@@ -315,11 +321,13 @@ five minutes and gets one fresh-process retry.
 | field semantics | `description`s on the field they govern, written once each |
 
 What a schema cannot know — whether a date stands in the text — is
-`validateExtraction`'s, as described under *The seam*. Failures are fed back for
-exactly one retry. The retry replaces the first answer only when it has fewer
-problems without losing valid cards or calendar verdicts; otherwise the page
-keeps the first answer's survivors and marks the problem in *Datastatus*.
-Extraction is cached against a hash of the payload, instructions **and schema**,
+`validateExtraction`'s, as described under *The seam*. When the only failures
+are card dates, one small repair request sees each rejected card and precisely
+its existing sources; it cannot re-rank the brief or change a valid card. The
+full validator still decides whether the repaired answer is complete. Any other
+failure, or a failed repair, keeps the first answer's survivors and marks the
+problem in *Datastatus*. Extraction is cached against a hash of the payload,
+instructions **and schema**,
 so a prompt or field-description edit takes effect on the next run rather than
 being masked by an entry the old wording produced. Only complete validated
 answers are cached, and the cache retains the newest 32 entries.
@@ -402,9 +410,14 @@ audience `family`. The model must return exactly one
 `personalEvents` verdict for each occurrence: relevance, a short factual
 summary, and a reason. An irrelevant appointment lands in the muted hidden
 count; a relevant one becomes the compact card described under *The page*.
-Missing, duplicate or invalid verdicts trigger the corrective retry, are never
-cached, and keep the run incomplete. A still-missing verdict fails open to a
+Missing, duplicate or invalid verdicts are never repaired locally or cached,
+and keep the run incomplete. A still-missing verdict fails open to a
 source-only compact card, so model degradation cannot look like a free day.
+
+The Aula and personal-calendar collection phases remain sequential. The private
+brief log records both elapsed times separately, so a concurrency change is made
+only when repeated production timings show it improves the critical path without
+overloading the connector or making the slow path less reliable.
 
 The source owns identity, title, date, time, location and link. The model may
 summarise and judge relevance but cannot rewrite those facts, infer a child,
