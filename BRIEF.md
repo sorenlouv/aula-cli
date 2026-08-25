@@ -112,22 +112,24 @@ Sections render only when they have content, and never change order.
    first `CARD_CAP` (12) cards and *Senere* the first `FUTURE_CARD_CAP` (6), so
    later events cannot crowd out this week; overflow is folded, never dropped.
    Five to ten full Aula cards is normal. Any card with `needsAction` is drawn
-   with the warm left edge; chronological actions carry a *Kræver handling*
-   badge, while cards already under *Skal gøres* do not repeat the heading as a
-   badge. Two tails remain: *Uden fast dato*
-   for cards with no day, *Tidligere* for cards whose day has passed but that
-   still say something (a decision, a new standing arrangement). Each
-   card: date chip (*I dag*, *I morgen*, else the day), a *Gentages hver …*
-   badge when the day is the next occurrence of a weekly routine, the children,
-   title, summary, and *Læs mere* — which opens with *Vist fordi:* the model's
-   reason, then every source the card rests on, each with its title, when it is
-   from, its author, a link, and the original. Relevant personal appointments
-   sit between these cards on their calendar day. Each is a compact,
-   individually collapsed card: the closed face keeps the source's date, time
-   and title; opening it reveals the model's summary and relevance reason,
-   location, calendar and link. They never get action styling and never consume
-   either Aula-card cap. Neither the model nor the page computes a clash or
-   claims the absence of one.
+   with the warm left edge, and that edge is the whole of the marking: there is
+   no *Kræver handling* badge, because *Skal gøres* already heads the work a
+   parent can complete now. Two tails remain: *Uden fast dato* for cards with no
+   day, *Tidligere* for cards whose day has passed but that still say something
+   (a decision, a new standing arrangement). Each card: a date chip (*I dag*, *I
+   morgen*, else the day) — but only where the heading above it does not already
+   name the day, so a card in a dated group drops it and the groups that span
+   days (*Skal gøres*, *Næste uge*, *Senere*, *Tidligere*) keep it — a *Gentages
+   hver …* badge when the day is the next occurrence of a weekly routine, the
+   children, title, summary, and *Læs mere* — which opens with *Vist fordi:* the
+   model's reason, then every source the card rests on, each with its title,
+   when it is from, its author, a link, and the original. Relevant personal
+   appointments sit between these cards on their calendar day. Each is a
+   compact, individually collapsed card: the closed face keeps the source's time
+   and title, and its date under the same rule; opening it reveals the model's
+   summary and relevance reason, location, calendar and link. They never get
+   action styling and never consume either Aula-card cap. Neither the model nor
+   the page computes a clash or claims the absence of one.
 3. **Per barn** — one card per child: check-in state, planned pickup, and the
    model's one calendar-like line for the child.
 4. **Galleri** — album tiles.

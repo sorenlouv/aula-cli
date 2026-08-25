@@ -152,25 +152,42 @@ describe('a card', () => {
     expect(html).toContain('<p class="title">Tilmeld Alma til skolefoto inden mandag</p>');
     expect(html).toContain('<p class="summary">Eksempel Foto fotograferer 24.–28. august');
     expect(html).toContain('<span class="chip soon">Mandag 24. august</span>');
-    expect(html).not.toContain('<span class="chip act">Skal gøres</span>');
     expect(html).toContain('<span class="who"><span class="dot c1"></span>Alma</span>');
     expect(html).toMatch(/<div class="card act" data-signal-id="model:0"/);
-    // A card to merely know is drawn without the badge or the warm edge.
+    // A card to merely know is drawn without the warm edge.
     expect(html).toMatch(/<div class="card " data-signal-id="model:1"/);
-    expect(page([{ ...SIGNUP, actionableNow: false }]).html).toContain(
-      '<span class="chip act">Kræver handling</span>',
-    );
     expect(validatePage(html, brief)).toEqual([]);
   });
 
-  test('today and tomorrow are named as such on the chip', () => {
+  test('needing action is the warm edge alone — never a badge', () => {
+    for (const entry of [SIGNUP, { ...SIGNUP, actionableNow: false }]) {
+      expect(page([entry]).html).not.toContain('Kræver handling');
+    }
+    expect(BRIEF_CSS).not.toContain('.chip.act');
+  });
+
+  test('a card drops its date under a heading that already names the day', () => {
     const today = card({ ...SIGNUP, id: 'a', date: TODAY, actionableNow: false });
     const tomorrow = card({ ...MEETING, id: 'b', date: '2026-08-18' });
     const { html } = page([today, tomorrow]);
     expect(html).toContain('<h3 class="timeline-heading">I dag (d. 17. august)</h3>');
     expect(html).toContain('<h3 class="timeline-heading">I morgen (d. 18. august)</h3>');
-    expect(html).toContain('<span class="chip now">I dag</span>');
-    expect(html).toContain('<span class="chip soon">I morgen</span>');
+    expect(html).not.toContain('<span class="chip now">I dag</span>');
+    expect(html).not.toContain('<span class="chip soon">I morgen</span>');
+    // A card left with no chips at all loses the row rather than keeping an
+    // empty one above the title.
+    const bare = page([card({ ...MEETING, id: 'c', date: TODAY, children: [] })]).html;
+    expect(bare).not.toContain('<div class="row">');
+  });
+
+  test('the groups that span several days keep the date on every card', () => {
+    const action = card({ ...SIGNUP, id: 'action', date: '2026-09-09' });
+    const nextWeek = card({ ...MEETING, id: 'next-week', date: '2026-08-26' });
+    const past = card({ ...MEETING, id: 'past', date: '2026-08-10', sourceKeys: [DIARY.key] });
+    const { html } = page([action, nextWeek, past]);
+    expect(html).toContain('<span class="chip soon">Onsdag 9. september</span>');
+    expect(html).toContain('<span class="chip soon">Onsdag 26. august</span>');
+    expect(html).toContain('<span class="chip soon">Mandag 10. august</span>');
   });
 
   test('a card that gathers several sources lists every one of them under Læs mere', () => {
@@ -263,7 +280,7 @@ describe('the list', () => {
     ]);
     const html = renderPage(brief);
 
-    expect(html).toContain('<span class="chip now">I dag</span>');
+    expect(html).toContain('<h3 class="timeline-heading">I dag (d. 24. august)</h3>');
     expect(html).toContain('<span class="chip recurring">Gentages hver mandag</span>');
     expect(html).not.toContain('Uden fast dato');
     expect(html).toContain('data-done-keys="post:running|2026-08-24"');
