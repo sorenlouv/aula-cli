@@ -284,8 +284,8 @@ If the model cannot run, the rules-only overview is still published but carries
 a visible warning that its prioritisation may be incomplete. The terminal keeps
 the technical error, and a private developer record is appended to
 `~/.aula/logs/brief.jsonl` (or `$AULA_DIR/logs/brief.jsonl`) with the stack,
-model settings and bounded Claude stdout/stderr. Prompts and source payloads are
-not logged.
+model settings, source revision and bounded Claude stdout/stderr. Prompts and
+source payloads are not logged.
 
 ### The model contract
 
@@ -294,6 +294,12 @@ its text — and **answers in a schema**. `extractionSchema` is built per run an
 passed as `--json-schema`; the CLI turns that into a forced tool call whose
 parameters are the schema, checks the answer against it, and hands back a
 parsed `structured_output`. What the schema can state, the prompt does not say:
+
+The extraction subprocess uses Claude's safe mode with no session persistence,
+and reads `stream-json`. Once the matching `StructuredOutput` tool result says
+the schema was accepted, the payload is retained; a later CLI cleanup stall
+cannot discard it. Without a confirmed payload an attempt remains bounded at
+five minutes and gets one fresh-process retry.
 
 | | |
 | --- | --- |
@@ -465,13 +471,18 @@ start kills the process long after the publish landed.
 
 ### Sleeping Macs
 
-`schedule.ts` uses `caffeinate -i -s` and retries every
-`RETRY_EVERY_MINUTES` (15) for `RETRY_FOR_MINUTES` (180). Every trigger passes
-`--catch-up`; `state.json`'s `lastRun.complete` stops retries after a complete
-run. Retryable fetch failures, model/deploy degradation and any rendered
-invariant violation keep it false. Persistent problems that another identical
-run cannot fix remain visible in *Datastatus* without burning the whole retry
-window.
+On macOS, `schedule.ts` starts a lightweight coordinator. A battery DarkWake
+does not start Aula or Claude: the coordinator is suspended with the Mac and
+resumes when AC power or a full graphical wake makes a long request viable.
+Only the expensive child runs under `caffeinate -i -s`. Calendar triggers still
+repeat every `RETRY_EVERY_MINUTES` (15) for `RETRY_FOR_MINUTES` (180) as crash
+recovery. The live coordinator can continue after that window until the run is
+complete or the local day ends.
+
+Every generation passes `--catch-up`; `state.json`'s `lastRun.complete` stops
+retries after a complete run. Retryable fetch failures, model/deploy degradation
+and any rendered invariant violation keep it false. Persistent problems remain
+visible in *Datastatus*.
 
 ## Risks
 

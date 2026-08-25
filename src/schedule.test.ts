@@ -50,13 +50,10 @@ describe('buildPlist', () => {
     logPath: '/tmp/launchd.log',
   });
 
-  test('runs `new --text --catch-up` through bun, under caffeinate, weekdays only', () => {
-    expect(plist).toContain('<string>/usr/bin/caffeinate</string>');
-    expect(plist).toContain('<string>-s</string>');
+  test('runs the wake-aware coordinator through bun, weekdays only', () => {
     expect(plist).toContain('<string>/opt/homebrew/bin/bun</string>');
-    expect(plist).toContain('<string>new</string>');
-    expect(plist).toContain('<string>--text</string>');
-    expect(plist).toContain('<string>--catch-up</string>');
+    expect(plist).toContain('/src/scheduled-brief.ts</string>');
+    expect(plist).not.toContain('<string>/usr/bin/caffeinate</string>');
     // Weekdays 1-5, one calendar entry per weekday per time — weekends stay quiet.
     const times = scheduleTimes({ hour: 6, minute: 30 }).length;
     expect(plist.match(/<key>Weekday<\/key>/g)).toHaveLength(5 * times);

@@ -28,7 +28,13 @@ import { isRecord, parseIsoDateParts } from '../validation.ts';
 import { runClaude } from '../llm/claude.ts';
 import { briefExtractionRequest } from '../llm/requests/brief-extraction.ts';
 
-export { modelEffortArgs, parseClaudeJson, runClaude, spawnClaude } from '../llm/claude.ts';
+export {
+  modelEffortArgs,
+  parseClaudeJson,
+  parseClaudeStreamJson,
+  runClaude,
+  spawnClaude,
+} from '../llm/claude.ts';
 export type { ClaudeExit, ClaudeReply } from '../llm/claude.ts';
 export {
   briefExtractionRequest,
@@ -348,7 +354,7 @@ export async function extractCards(
   // so letting it through still produces a brief — it just produces an honest
   // one. Nothing is written to the cache on this path either; a 06:30 outage
   // must not pin a degraded brief for the rest of the day.
-  const call = { timeoutMs: opts.timeoutMs ?? 240_000, schema };
+  const call = { timeoutMs: opts.timeoutMs ?? 300_000, schema };
   const answer = await runClaude(instructions, body, call);
 
   // `runClaude` requires the schema-checked tool parameters. Unstructured text

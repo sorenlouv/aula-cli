@@ -24,6 +24,8 @@ export type ClaudeExit = {
   code: number;
   /** The deadline passed and the process was killed by this module. */
   timedOut: boolean;
+  /** A caller-defined complete answer arrived, then final CLI cleanup exceeded its grace. */
+  stoppedAfterOutput: boolean;
 };
 
 type ClaudeExitDiagnostic = ClaudeExit & {
@@ -71,7 +73,15 @@ function diagnosticExit(exit: ClaudeExit): ClaudeExitDiagnostic {
  */
 export async function spawnClaude(
   args: string[],
-  opts: { stdin?: string; timeoutMs: number; graceMs?: number; env?: Record<string, string> },
+  opts: {
+    stdin?: string;
+    timeoutMs: number;
+    graceMs?: number;
+    env?: Record<string, string>;
+    /** Once true, the CLI gets a short grace to emit its final result and exit. */
+    stopWhen?: (stdout: string) => boolean;
+    finalizationGraceMs?: number;
+  },
 ): Promise<ClaudeExit> {
   const proc = Bun.spawn(['claude', ...args], {
     stdin: opts.stdin === undefined ? 'ignore' : new TextEncoder().encode(opts.stdin),
@@ -82,18 +92,38 @@ export async function spawnClaude(
   });
 
   let timedOut = false;
+  let stoppedAfterOutput = false;
   let hardKill: ReturnType<typeof setTimeout> | undefined;
-  const deadline = setTimeout(() => {
-    timedOut = true;
+  let finalizationDeadline: ReturnType<typeof setTimeout> | undefined;
+  const terminate = (reason: 'timeout' | 'complete-output') => {
+    if (reason === 'timeout') timedOut = true;
+    else stoppedAfterOutput = true;
     proc.kill('SIGTERM');
     hardKill = setTimeout(() => proc.kill('SIGKILL'), opts.graceMs ?? 10_000);
-  }, opts.timeoutMs);
+  };
+  const deadline = setTimeout(() => terminate('timeout'), opts.timeoutMs);
 
   const out = proc.stdout.getReader();
   const err = proc.stderr.getReader();
   const outChunks: Uint8Array[] = [];
   const errChunks: Uint8Array[] = [];
-  const draining = Promise.all([drain(out, outChunks), drain(err, errChunks)]);
+  const draining = Promise.all([
+    drain(out, outChunks, () => {
+      if (!opts.stopWhen || finalizationDeadline || timedOut) return;
+      try {
+        const stdout = Buffer.concat(outChunks).toString('utf8');
+        if (!opts.stopWhen(stdout)) return;
+        clearTimeout(deadline);
+        finalizationDeadline = setTimeout(
+          () => terminate('complete-output'),
+          opts.finalizationGraceMs ?? 10_000,
+        );
+      } catch {
+        // A parser used only for an early-success optimization cannot break the request.
+      }
+    }),
+    drain(err, errChunks),
+  ]);
   try {
     const code = await proc.exited;
     await Promise.race([draining, Bun.sleep(1_000)]);
@@ -102,9 +132,11 @@ export async function spawnClaude(
       stderr: Buffer.concat(errChunks).toString('utf8'),
       code,
       timedOut,
+      stoppedAfterOutput,
     };
   } finally {
     clearTimeout(deadline);
+    if (finalizationDeadline) clearTimeout(finalizationDeadline);
     if (hardKill) clearTimeout(hardKill);
     for (const reader of [out, err]) reader.cancel().catch(() => {});
   }
@@ -114,12 +146,16 @@ export async function spawnClaude(
 async function drain<T>(
   reader: { read(): Promise<{ done: boolean; value?: T }> },
   into: T[],
+  onChunk?: () => void,
 ): Promise<void> {
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) return;
-      if (value) into.push(value);
+      if (value) {
+        into.push(value);
+        onChunk?.();
+      }
     }
   } catch {
     // A stream torn down by the kill is the expected end here.
@@ -155,6 +191,70 @@ export function parseClaudeJson(stdout: string): ClaudeReply | null {
   }
 }
 
+export type ClaudeStreamReply = {
+  final: ClaudeReply | null;
+  /** Schema-checked tool input whose matching tool result reported success. */
+  confirmedStructured: unknown;
+};
+
+/** Recover the schema tool's input before Claude CLI's final cleanup finishes. */
+export function parseClaudeStreamJson(stdout: string): ClaudeStreamReply {
+  let final: ClaudeReply | null = null;
+  const pending = new Map<string, unknown>();
+  let confirmedStructured: unknown;
+
+  for (const line of stdout.split('\n')) {
+    if (!line.trim()) continue;
+    let event: unknown;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!isRecord(event)) continue;
+
+    if (event.type === 'result') {
+      const parsed = parseClaudeJson(line);
+      if (parsed) final = parsed;
+      continue;
+    }
+
+    if (event.type === 'assistant' && isRecord(event.message)) {
+      const content = event.message.content;
+      if (!Array.isArray(content)) continue;
+      for (const block of content) {
+        if (
+          isRecord(block) &&
+          block.type === 'tool_use' &&
+          block.name === 'StructuredOutput' &&
+          typeof block.id === 'string'
+        ) {
+          pending.set(block.id, block.input);
+        }
+      }
+      continue;
+    }
+
+    if (event.type === 'user' && isRecord(event.message)) {
+      const content = event.message.content;
+      if (!Array.isArray(content)) continue;
+      for (const block of content) {
+        if (
+          isRecord(block) &&
+          block.type === 'tool_result' &&
+          typeof block.tool_use_id === 'string' &&
+          block.is_error !== true &&
+          pending.has(block.tool_use_id)
+        ) {
+          confirmedStructured = pending.get(block.tool_use_id);
+        }
+      }
+    }
+  }
+
+  return { final, confirmedStructured };
+}
+
 /**
  * Runs a structured request with every tool disabled.
  *
@@ -165,9 +265,15 @@ export function parseClaudeJson(stdout: string): ClaudeReply | null {
 export async function runClaude(
   instructions: string,
   stdin: string,
-  opts: { timeoutMs?: number; graceMs?: number; schema?: unknown } = {},
+  opts: {
+    timeoutMs?: number;
+    graceMs?: number;
+    finalizationGraceMs?: number;
+    schema?: unknown;
+  } = {},
 ): Promise<{ text: string; structured: unknown }> {
-  const timeoutMs = opts.timeoutMs ?? 240_000;
+  const timeoutMs = opts.timeoutMs ?? 300_000;
+  const streamsStructuredOutput = opts.schema !== undefined;
   const attempts: ClaudeExit[] = [];
   const failure = (message: string) =>
     new ClaudeRunError(message, {
@@ -185,16 +291,39 @@ export async function runClaude(
         '--tools',
         '',
         '--strict-mcp-config',
+        '--safe-mode',
+        '--no-session-persistence',
         '--output-format',
-        'json',
+        streamsStructuredOutput ? 'stream-json' : 'json',
+        ...(streamsStructuredOutput ? ['--verbose'] : []),
         ...(opts.schema === undefined ? [] : ['--json-schema', JSON.stringify(opts.schema)]),
         ...modelEffortArgs(),
       ],
-      { stdin, timeoutMs, ...(opts.graceMs !== undefined ? { graceMs: opts.graceMs } : {}) },
+      {
+        stdin,
+        timeoutMs,
+        ...(opts.graceMs !== undefined ? { graceMs: opts.graceMs } : {}),
+        ...(opts.finalizationGraceMs !== undefined
+          ? { finalizationGraceMs: opts.finalizationGraceMs }
+          : {}),
+        ...(streamsStructuredOutput
+          ? {
+              stopWhen: (stdout: string) =>
+                parseClaudeStreamJson(stdout).confirmedStructured !== undefined,
+            }
+          : {}),
+      },
     );
     attempts.push(run);
-    if (run.timedOut) continue;
-    const reply = parseClaudeJson(run.stdout);
+    const streamed = streamsStructuredOutput ? parseClaudeStreamJson(run.stdout) : null;
+    if (streamed?.confirmedStructured !== undefined) {
+      return {
+        text: (streamed.final?.text ?? '').trim(),
+        structured: streamed.confirmedStructured,
+      };
+    }
+    if (run.timedOut || run.stoppedAfterOutput) continue;
+    const reply = streamed?.final ?? parseClaudeJson(run.stdout);
     if (run.code !== 0 || reply?.isError) {
       const detail = reply?.text.trim() || run.stderr.trim() || run.stdout.trim() || '(no stderr)';
       throw failure(`claude -p exited ${run.code}: ${detail}`);
