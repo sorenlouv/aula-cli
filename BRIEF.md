@@ -173,7 +173,7 @@ quote reads as current however old it is.
   fra Aula*; a source the model hid is counted in the foot. The brief may
   demote; it may not lose.
 - **A missing section and a failed fetch look different.** A vendor 500 must
-  read as *"ugeplan for Viggo og Ida kunne ikke hentes"*, never as a quiet week,
+  read as *"ugeplan for Viggo og Karla kunne ikke hentes"*, never as a quiet week,
   and it takes the panel to the top of the page to say so.
 - **Every date on the page is grounded** in a source the reader can open from
   the same card — so a deadline can be believed without opening Aula.
