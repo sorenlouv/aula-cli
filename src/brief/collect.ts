@@ -21,6 +21,8 @@ export type CollectOptions = {
   days: number;
   isoWeek: string;
   now?: Date;
+  /** Numeric collection timings for private developer diagnostics. */
+  onPhase?: (phase: 'aula' | 'calendar', elapsedMs: number) => void;
 };
 
 /** How far back the brief reads. Every source in that window reaches the model. */
@@ -122,6 +124,7 @@ function planKindLabel(kind: string): string {
 }
 
 export async function collect(client: AulaClient, opts: CollectOptions): Promise<BriefInput> {
+  const startedAt = performance.now();
   const now = opts.now ?? new Date();
   const family = await resolveFamily(client);
 
@@ -143,6 +146,7 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
   ]);
   const childGroups = groupsRead.value;
   const albums = albumsRead.value;
+  opts.onPhase?.('aula', Math.round(performance.now() - startedAt));
 
   const classGroupNames = new Set(
     childGroups.map((cg) => cg.className).filter((n): n is string => Boolean(n)),
@@ -273,7 +277,9 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
   }
 
   // --------------------------------------------------- the family's own diary
+  const calendarStartedAt = performance.now();
   const personal = await collectPersonal(now);
+  opts.onPhase?.('calendar', Math.round(performance.now() - calendarStartedAt));
   items.push(...personal.items);
   health.push(...personal.health);
 

@@ -76,12 +76,16 @@ describe('buildPlist', () => {
       env: {
         AULA_BRIEF_EFFORT: 'high',
         AULA_BRIEF_MODEL: 'a<b&c',
+        AULA_BRIEF_REPAIR_MODEL: 'haiku',
+        AULA_BRIEF_REPAIR_EFFORT: 'low',
         AULA_TOOL_MODEL: 'haiku',
         AULA_TOOL_EFFORT: 'low',
       },
     });
     expect(withEnv).toContain('<key>AULA_BRIEF_EFFORT</key><string>high</string>');
     expect(withEnv).toContain('<key>AULA_BRIEF_MODEL</key><string>a&lt;b&amp;c</string>');
+    expect(withEnv).toContain('<key>AULA_BRIEF_REPAIR_MODEL</key><string>haiku</string>');
+    expect(withEnv).toContain('<key>AULA_BRIEF_REPAIR_EFFORT</key><string>low</string>');
     expect(withEnv).toContain('<key>AULA_TOOL_MODEL</key><string>haiku</string>');
     expect(withEnv).toContain('<key>AULA_TOOL_EFFORT</key><string>low</string>');
   });

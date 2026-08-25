@@ -701,7 +701,7 @@ describe('the claude subprocess', () => {
     });
   });
 
-  describe('extractCards corrective retry', () => {
+  describe('extractCards targeted card repair', () => {
     const sources = Array.from({ length: 10 }, (_, index) =>
       sourceItem({ key: `post:${index}`, title: `Opslag ${index}`, text: `Indhold ${index}` }),
     );
@@ -725,8 +725,10 @@ describe('the claude subprocess', () => {
       hidden: [],
     });
 
-    test('an empty retry cannot replace nine valid cards', async () => {
-      fakeSequence([
+    const repair = (cards: Array<{ cardIndex: number; card: unknown }>) => ({ repairs: cards });
+
+    test('a malformed repair cannot replace nine valid cards', async () => {
+      const f = fakeSequence([
         JSON.stringify(
           answer([
             ...Array.from({ length: 9 }, (_, index) => modelCard(index)),
@@ -739,18 +741,64 @@ describe('the claude subprocess', () => {
       const result = await extractCards(input, { useCache: false, timeoutMs: 5_000 });
 
       expect(result.cards).toHaveLength(9);
+      expect(f.calls()).toHaveLength(2);
+      expect(result.problems).toHaveLength(1);
     });
 
-    test('a retry with fewer problems and more valid cards wins', async () => {
-      fakeSequence([
+    test('repairs only the rejected card without re-ranking the valid cards', async () => {
+      const f = fakeSequence([
         JSON.stringify(answer([modelCard(0), { ...modelCard(9), date: '2026-09-24' }])),
-        JSON.stringify(answer([modelCard(0), modelCard(1)])),
+        JSON.stringify(repair([{ cardIndex: 1, card: modelCard(9) }])),
       ]);
 
       const result = await extractCards(input, { useCache: false, timeoutMs: 5_000 });
 
-      expect(result.cards.map((card) => card.title)).toEqual(['Kort 0', 'Kort 1']);
+      expect(result.cards.map((card) => card.title)).toEqual(['Kort 0', 'Kort 9']);
       expect(result.problems).toEqual([]);
+      expect(result.telemetry?.repair).toMatchObject({
+        candidateCount: 1,
+        attempts: [{ code: 0 }],
+      });
+      expect(f.calls()).toHaveLength(2);
+      expect(f.calls()[1]).toContain('--model haiku --effort low');
+    });
+
+    test('rejects a repair that widens the card beyond its original citations', async () => {
+      fakeSequence([
+        JSON.stringify(answer([modelCard(0), { ...modelCard(9), date: '2026-09-24' }])),
+        JSON.stringify(
+          repair([
+            {
+              cardIndex: 1,
+              card: { ...modelCard(9), sourceKeys: ['post:9', 'post:0'] },
+            },
+          ]),
+        ),
+      ]);
+
+      const result = await extractCards(input, { useCache: false, timeoutMs: 5_000 });
+
+      expect(result.cards.map((card) => card.title)).toEqual(['Kort 0']);
+      expect(result.problems).toHaveLength(1);
+    });
+
+    test('rejects a date repair that changes action semantics', async () => {
+      fakeSequence([
+        JSON.stringify(answer([modelCard(0), { ...modelCard(9), date: '2026-09-24' }])),
+        JSON.stringify(
+          repair([
+            {
+              cardIndex: 1,
+              card: { ...modelCard(9), needsAction: true, actionableNow: true },
+            },
+          ]),
+        ),
+      ]);
+
+      const result = await extractCards(input, { useCache: false, timeoutMs: 5_000 });
+
+      expect(result.cards.map((card) => card.title)).toEqual(['Kort 0']);
+      expect(result.problems).toHaveLength(1);
     });
   });
 });

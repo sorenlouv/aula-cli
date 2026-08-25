@@ -8,11 +8,12 @@
  * is not, and the whole point is that not opening Aula stops costing anything.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { AulaClient } from '../client.ts';
-import { isoWeekString } from '../integrations/types.ts';
+import { isoWeekString, localIsoDate } from '../integrations/types.ts';
 import { collect, HISTORY_DAYS } from './collect.ts';
 import { deployArtifact, type DeployResult } from './deploy.ts';
-import { appendBriefLog, errorForBriefLog } from './log.ts';
+import { appendBriefLog, errorForBriefLog, sourceRevision } from './log.ts';
 import { extractCards } from './llm.ts';
 import { publish, type PublishResult } from './publish.ts';
 import { cardsFromRules, rank } from './rank.ts';
@@ -89,8 +90,52 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   const days = opts.days ?? HISTORY_DAYS;
   const isoWeek = opts.isoWeek ?? isoWeekString(now);
   const notes: string[] = [];
+  const runId = randomUUID();
+  const revision = sourceRevision();
+  const startedAt = performance.now();
+  const phaseMs: Record<string, number> = {};
+  const log = (event: Parameters<typeof appendBriefLog>[0]['event'], details: unknown) =>
+    appendBriefLog(
+      {
+        at: new Date().toISOString(),
+        event,
+        day: localIsoDate(now),
+        isoWeek,
+        model: process.env.AULA_BRIEF_MODEL ?? null,
+        effort: process.env.AULA_BRIEF_EFFORT ?? null,
+        useCache: opts.useCache !== false,
+        details: { runId, ...((details as Record<string, unknown>) ?? {}) },
+      },
+      undefined,
+      revision,
+    );
+  const phase = (name: string, phaseStartedAt: number, details: Record<string, unknown> = {}) => {
+    const elapsedMs = Math.round(performance.now() - phaseStartedAt);
+    phaseMs[name] = elapsedMs;
+    log('brief.phase.finished', { phase: name, elapsedMs, ...details });
+    return elapsedMs;
+  };
 
-  const input = await collect(client, { days, isoWeek, now });
+  log('brief.run.started', {
+    days,
+    deploy: opts.deploy !== false,
+    useModel: opts.useModel !== false,
+  });
+
+  const collectStartedAt = performance.now();
+  const input = await collect(client, {
+    days,
+    isoWeek,
+    now,
+    onPhase: (name, elapsedMs) => {
+      phaseMs[name] = elapsedMs;
+      log('brief.phase.finished', { phase: name, elapsedMs });
+    },
+  });
+  phase('collect', collectStartedAt, {
+    sourceCount: input.items.length,
+    personalEventCount: input.items.filter((item) => item.kind === 'personal').length,
+  });
 
   // ------------------------------------------------------------- the model
   let topline: string | null = null;
@@ -104,10 +149,14 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   let supplementRules = false;
   let extractionStatus: string | null = null;
   let overviewWarning: string | null = null;
+  let extractionTelemetry: unknown = null;
 
   if (opts.useModel !== false) {
+    const extractStartedAt = performance.now();
     try {
       const extracted = await extractCards(input, { useCache: opts.useCache !== false });
+      extractionTelemetry = extracted.telemetry ?? null;
+      phase('extract', extractStartedAt, { extraction: extractionTelemetry });
       topline = extracted.topline;
       summaries = extracted.childSummaries;
       modelCards = extracted.cards;
@@ -119,15 +168,11 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
         extractionStatus =
           `Modellens svar var ufuldstændigt (${extracted.problems.length} fejl), ` +
           'så siden bruger de validerede kort og reglerne som reserve for resten.';
-        const logged = appendBriefLog({
-          at: now.toISOString(),
+        const logged = log('brief.model.incomplete', {
           event: 'brief.model.incomplete',
-          day: input.today,
-          isoWeek,
-          model: process.env.AULA_BRIEF_MODEL ?? null,
-          effort: process.env.AULA_BRIEF_EFFORT ?? null,
-          useCache: opts.useCache !== false,
-          details: { problems: extracted.problems },
+          problemCount: extracted.problems.length,
+          problems: extracted.problems,
+          extraction: extractionTelemetry,
         });
         notes.push(
           logged.ok
@@ -139,21 +184,13 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
         notes.push(`Udtræk afvist: ${problem}`);
       }
     } catch (err) {
+      phase('extract', extractStartedAt, { error: errorForBriefLog(err) });
       overviewWarning =
         'Modellen kunne ikke prioritere indholdet. Oversigten er derfor kun bygget med ' +
         'simple regler og kan mangle vigtige punkter eller have en mindre nyttig rækkefølge. ' +
         'Prøv at generere den igen senere.';
       notes.push(`Modellen kunne ikke køre (${errorMessage(err)}) — kun reglerne blev brugt.`);
-      const logged = appendBriefLog({
-        at: now.toISOString(),
-        event: 'brief.model.failed',
-        day: input.today,
-        isoWeek,
-        model: process.env.AULA_BRIEF_MODEL ?? null,
-        effort: process.env.AULA_BRIEF_EFFORT ?? null,
-        useCache: opts.useCache !== false,
-        details: errorForBriefLog(err),
-      });
+      const logged = log('brief.model.failed', errorForBriefLog(err));
       notes.push(
         logged.ok
           ? `Udviklerlog: ${logged.path}`
@@ -172,6 +209,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   if (extractionStatus) brief.degraded.push(extractionStatus);
 
   // ----------------------------------------------------------------- render
+  const renderStartedAt = performance.now();
   const state = loadState();
   const newKeys = whichAreNew(
     state,
@@ -201,8 +239,10 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
     // Datastatus. The scheduler will retry because completion is gated below.
     body = renderPage(brief, pageOptions);
   }
+  phase('render', renderStartedAt, { pageViolationCount: violations.length });
 
   // ---------------------------------------------------------------- publish
+  const publishStartedAt = performance.now();
   const published = await publish(body, {
     day: input.today,
     title: BRIEF_TITLE,
@@ -211,11 +251,13 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
     ...(opts.png === true ? { png: true } : {}),
   });
   notes.push(...published.warnings);
+  phase('publish', publishStartedAt, { warningCount: published.warnings.length });
 
   // Local first, hosted second. The file on disk is the brief; the artifact is
   // a convenience on top of it, so a deploy that fails is a note on an
   // otherwise good run rather than a failed one.
   let deployment: DeployResult = { status: 'skipped', reason: 'slået fra med --no-deploy' };
+  const deployStartedAt = performance.now();
   if (opts.deploy !== false) {
     deployment = await deployArtifact(published.artifactPath, { title: BRIEF_TITLE });
     if (deployment.status === 'failed') {
@@ -223,6 +265,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
     }
     if (deployment.status === 'ok') recordDeploy(state, deployment.url, now);
   }
+  phase('deploy', deployStartedAt, { status: deployment.status });
 
   // A run counts as complete only when nothing retryable had to be papered over:
   // the model's extraction ran, its page passed validation, and the hosted copy
@@ -246,6 +289,15 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   pruneState(state);
   recordRun(state, { day: input.today, complete }, now);
   saveState(state);
+
+  log('brief.run.finished', {
+    complete,
+    origin,
+    totalMs: Math.round(performance.now() - startedAt),
+    phaseMs,
+    extraction: extractionTelemetry,
+    deployment: { status: deployment.status },
+  });
 
   return { brief, topline, origin, published, deployment, notes, complete };
 }

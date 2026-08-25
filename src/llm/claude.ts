@@ -8,12 +8,30 @@
 
 import { isRecord } from '../validation.ts';
 
-/** Extraction quality and deterministic tool transport have separate cost dials. */
-export function modelEffortArgs(purpose: 'brief' | 'transport' = 'brief'): string[] {
+type ModelPurpose = 'brief' | 'repair' | 'transport';
+
+function modelSettings(purpose: ModelPurpose): {
+  model: string | undefined;
+  effort: string | undefined;
+} {
   const model =
-    purpose === 'brief' ? process.env.AULA_BRIEF_MODEL : (process.env.AULA_TOOL_MODEL ?? 'haiku');
+    purpose === 'brief'
+      ? process.env.AULA_BRIEF_MODEL
+      : purpose === 'repair'
+        ? (process.env.AULA_BRIEF_REPAIR_MODEL ?? 'haiku')
+        : (process.env.AULA_TOOL_MODEL ?? 'haiku');
   const effort =
-    purpose === 'brief' ? process.env.AULA_BRIEF_EFFORT : (process.env.AULA_TOOL_EFFORT ?? 'low');
+    purpose === 'brief'
+      ? process.env.AULA_BRIEF_EFFORT
+      : purpose === 'repair'
+        ? (process.env.AULA_BRIEF_REPAIR_EFFORT ?? 'low')
+        : (process.env.AULA_TOOL_EFFORT ?? 'low');
+  return { model, effort };
+}
+
+/** Extraction, bounded repair, and deterministic tool transport have separate cost dials. */
+export function modelEffortArgs(purpose: ModelPurpose = 'brief'): string[] {
+  const { model, effort } = modelSettings(purpose);
   return [...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])];
 }
 
@@ -26,6 +44,8 @@ export type ClaudeExit = {
   timedOut: boolean;
   /** A caller-defined complete answer arrived, then final CLI cleanup exceeded its grace. */
   stoppedAfterOutput: boolean;
+  /** Monotonic wall-clock time spent in this `claude -p` subprocess. */
+  durationMs: number;
 };
 
 type ClaudeExitDiagnostic = ClaudeExit & {
@@ -40,6 +60,12 @@ export type ClaudeFailureDetails = {
   schemaRequested: boolean;
   attempts: ClaudeExitDiagnostic[];
 };
+
+/** Safe attempt metadata for run-level performance diagnostics. */
+export type ClaudeAttempt = Pick<
+  ClaudeExit,
+  'code' | 'timedOut' | 'stoppedAfterOutput' | 'durationMs'
+>;
 
 /** A transport failure whose captured process diagnostics can be logged later. */
 export class ClaudeRunError extends Error {
@@ -83,6 +109,7 @@ export async function spawnClaude(
     finalizationGraceMs?: number;
   },
 ): Promise<ClaudeExit> {
+  const startedAt = performance.now();
   const proc = Bun.spawn(['claude', ...args], {
     stdin: opts.stdin === undefined ? 'ignore' : new TextEncoder().encode(opts.stdin),
     stdout: 'pipe',
@@ -133,6 +160,7 @@ export async function spawnClaude(
       code,
       timedOut,
       stoppedAfterOutput,
+      durationMs: Math.round(performance.now() - startedAt),
     };
   } finally {
     clearTimeout(deadline);
@@ -270,20 +298,26 @@ export async function runClaude(
     graceMs?: number;
     finalizationGraceMs?: number;
     schema?: unknown;
+    /** The repair path is deliberately bounded to one fresh process. */
+    maxAttempts?: 1 | 2;
+    /** Picks the model/effort environment pair without changing the caller's prompt. */
+    purpose?: ModelPurpose;
   } = {},
-): Promise<{ text: string; structured: unknown }> {
+): Promise<{ text: string; structured: unknown; attempts: ClaudeAttempt[] }> {
   const timeoutMs = opts.timeoutMs ?? 300_000;
+  const maxAttempts = opts.maxAttempts ?? 2;
   const streamsStructuredOutput = opts.schema !== undefined;
   const attempts: ClaudeExit[] = [];
+  const settings = modelSettings(opts.purpose ?? 'brief');
   const failure = (message: string) =>
     new ClaudeRunError(message, {
       timeoutMs,
-      model: process.env.AULA_BRIEF_MODEL ?? null,
-      effort: process.env.AULA_BRIEF_EFFORT ?? null,
+      model: settings.model ?? null,
+      effort: settings.effort ?? null,
       schemaRequested: opts.schema !== undefined,
       attempts: attempts.map(diagnosticExit),
     });
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const run = await spawnClaude(
       [
         '-p',
@@ -297,7 +331,7 @@ export async function runClaude(
         streamsStructuredOutput ? 'stream-json' : 'json',
         ...(streamsStructuredOutput ? ['--verbose'] : []),
         ...(opts.schema === undefined ? [] : ['--json-schema', JSON.stringify(opts.schema)]),
-        ...modelEffortArgs(),
+        ...modelEffortArgs(opts.purpose ?? 'brief'),
       ],
       {
         stdin,
@@ -320,6 +354,12 @@ export async function runClaude(
       return {
         text: (streamed.final?.text ?? '').trim(),
         structured: streamed.confirmedStructured,
+        attempts: attempts.map(({ code, timedOut, stoppedAfterOutput, durationMs }) => ({
+          code,
+          timedOut,
+          stoppedAfterOutput,
+          durationMs,
+        })),
       };
     }
     if (run.timedOut || run.stoppedAfterOutput) continue;
@@ -331,7 +371,18 @@ export async function runClaude(
     if (opts.schema !== undefined && reply?.structured === undefined) {
       throw failure('claude -p returned no schema-validated structured_output. Update Claude CLI.');
     }
-    return { text: (reply?.text ?? run.stdout).trim(), structured: reply?.structured };
+    return {
+      text: (reply?.text ?? run.stdout).trim(),
+      structured: reply?.structured,
+      attempts: attempts.map(({ code, timedOut, stoppedAfterOutput, durationMs }) => ({
+        code,
+        timedOut,
+        stoppedAfterOutput,
+        durationMs,
+      })),
+    };
   }
-  throw failure(`claude -p timed out after ${Math.round(timeoutMs / 1000)}s (2 attempts)`);
+  throw failure(
+    `claude -p timed out after ${Math.round(timeoutMs / 1000)}s (${maxAttempts} attempt${maxAttempts === 1 ? '' : 's'})`,
+  );
 }

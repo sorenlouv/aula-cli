@@ -96,12 +96,13 @@ battery DarkWake and starts the brief after a full wake or AC connection; the
 calendar retries remain as crash recovery. Every generation uses `--catch-up`,
 and the schedule bakes in PATH plus
 `AULA_BRIEF_MODEL`, `AULA_BRIEF_EFFORT`, `AULA_TOOL_MODEL`,
-`AULA_TOOL_EFFORT` and `AULA_CACHE_TTL` from the shell it ran in — re-run it
-after changing node version or those variables. Extraction uses the configured
-brief model; deterministic calendar and publishing tool calls default to Haiku
-at low effort to avoid paying extraction-model prices for transport. In Claude
-Code Desktop the Preview button (`.claude/launch.json`, port 4317, local only)
-shows the newest overview.
+`AULA_TOOL_EFFORT`, `AULA_BRIEF_REPAIR_MODEL`, `AULA_BRIEF_REPAIR_EFFORT` and
+`AULA_CACHE_TTL` from the shell it ran in — re-run it after changing node
+version or those variables. Extraction uses the configured brief model; a
+source-bounded date repair and deterministic calendar/publishing tool calls
+default to Haiku at low effort to avoid paying extraction-model prices for
+transport. In Claude Code Desktop the Preview button (`.claude/launch.json`,
+port 4317, local only) shows the newest overview.
 
 **C. A hosted copy, readable on a phone.**
 
@@ -175,6 +176,9 @@ events from other parents".
 out`: the Mac slept mid-run; the retries redo the morning. `Not logged in`:
   `claude` has no credentials outside a terminal — run `claude` once and log in.
   `command not found`: a plugin hook off launchd's bare PATH — re-run `schedule`.
+- **A brief was slow or incomplete** — inspect the owner-only lifecycle log:
+  `tail -n 20 ~/.aula/logs/brief.jsonl | jq '{at,event,revision,details}'`.
+  It records phase times and model attempts, never the prompt or source payload.
 - **Hosted link stale** — the same log's `Artifact blev ikke opdateret:` line
   says why; `publish` redeploys now.
 
