@@ -40,7 +40,7 @@ const DENTIST_VERDICT = {
 };
 
 describe('classifyAudience', () => {
-  const classes = new Set(['Sommerfuglene', '1B']);
+  const classes = new Set(['Sommerfuglene', '2E']);
   test("a child's own stue or class is `class`", () => {
     expect(classifyAudience(['Sommerfuglene', 'Mariehønsene'], classes)).toBe('class');
   });
@@ -542,7 +542,7 @@ describe('cardsFromRules', () => {
             at: '2026-08-10T09:00:00+00:00',
             text: 'Husk at vi ses i morgen.',
           },
-          { from: 'Yrsa', at: '2026-08-22T09:00:00+00:00', text: 'Tak for aftalen.' },
+          { from: 'Yrsa S.', at: '2026-08-22T09:00:00+00:00', text: 'Tak for aftalen.' },
         ],
         total: 2,
         truncated: false,

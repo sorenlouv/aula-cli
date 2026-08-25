@@ -79,8 +79,8 @@ const INPUT: BriefInput = briefInput({
       {
         name: 'Alma E.',
         firstName: 'Alma',
-        institution: 'Skolen',
-        className: '1B',
+        institution: 'Eksempelskolen',
+        className: '2E',
         presence: null,
       },
       {
@@ -94,13 +94,13 @@ const INPUT: BriefInput = briefInput({
     isSteppedUp: true,
   },
   items: [PHOTO, PHOTO_REMINDER, DIARY, COURSE],
-  albums: [{ title: 'Skovtur med 1B', at: '2026-08-12', childNames: ['Alma'] }],
+  albums: [{ title: 'Skovtur med 2E', at: '2026-08-12', childNames: ['Alma'] }],
 });
 
 const SIGNUP: Card = card({
   id: 'model:0',
   title: 'Tilmeld Alma til skolefoto inden mandag',
-  summary: 'Eksempel Foto fotograferer 24.–28. august, og 1.B er på tirsdag. Koden er Eksempel26.',
+  summary: 'Eksempel Foto fotograferer 24.–28. august, og 2.E er på tirsdag. Koden er Eksempel26.',
   children: ['Alma'],
   date: '2026-08-24',
   needsAction: true,
@@ -111,7 +111,7 @@ const SIGNUP: Card = card({
 
 const MEETING: Card = card({
   id: 'model:1',
-  title: 'Forældremøde i 1.B onsdag kl. 17-19',
+  title: 'Forældremøde i 2.E onsdag kl. 17-19',
   summary: 'Årets første forældremøde.',
   children: ['Alma'],
   date: '2026-08-26',
@@ -381,7 +381,9 @@ describe('what is not a card', () => {
     expect(html).toContain('<summary>2 opslag og beskeder, der ikke blev fremhævet</summary>');
     // The folded card keeps its title and summary; the rest source its title and dateline.
     expect(html).toContain(`<b>${brief.folded[0]?.title}</b>`);
-    expect(html).toContain('<b>Sommerfuglene, onsdag d. 12/8</b><p>skrevet 12. august · Palle P.</p>');
+    expect(html).toContain(
+      '<b>Sommerfuglene, onsdag d. 12/8</b><p>skrevet 12. august · Palle P.</p>',
+    );
     expect(validatePage(html, brief)).toEqual([]);
   });
 
@@ -492,7 +494,7 @@ describe('the rest of the page', () => {
   test('per-child lines, album tiles and the kids in the header', () => {
     const { html } = page([SIGNUP], { summaries: { Alma: 'Fotodag tirsdag (fint tøj).' } });
     expect(html).toContain('<span>Fotodag tirsdag (fint tøj).</span>');
-    expect(html).toContain('Skovtur med 1B');
+    expect(html).toContain('Skovtur med 2E');
     expect(html).toContain('<b>Viggo</b><span>Sommerfuglene</span>');
   });
 

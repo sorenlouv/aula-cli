@@ -271,7 +271,7 @@ describe('dueAtSupported', () => {
       conversation: {
         messages: [
           { from: 'Palle', at: '2026-08-10T09:00:00+00:00', text: 'Vi ses i morgen.' },
-          { from: 'Yrsa', at: '2026-08-22T09:00:00+00:00', text: 'Tak for aftalen.' },
+          { from: 'Yrsa S.', at: '2026-08-22T09:00:00+00:00', text: 'Tak for aftalen.' },
         ],
         total: 2,
         truncated: false,

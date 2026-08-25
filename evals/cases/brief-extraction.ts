@@ -202,7 +202,7 @@ const fatherMessage = aulaSource({
   kind: 'thread',
   title: 'Besked fra Hjaltes far',
   text: 'Hjalte vil gerne lege med Alma efter skole en dag.',
-  author: 'John, Hjaltes far',
+  author: 'Jens, Ottos far',
 });
 const municipalNewsletter = aulaSource({
   key: 'post:municipal-newsletter',
@@ -627,7 +627,7 @@ export const briefExtractionCases: BriefExtractionEvalCase[] = [
     provenance: 'user-labelled',
     input: input([fatherMessage, municipalNewsletter], {
       preferences: [
-        'Beskeder fra John, Hjaltes far, er altid relevante.',
+        'Beskeder fra Jens, Ottos far, er altid relevante.',
         'Kommunale nyhedsbreve er aldrig relevante.',
       ],
     }),

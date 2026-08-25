@@ -90,7 +90,7 @@ test('Meebook is keyed on UniLogin, not the numeric child id', async () => {
             tasks: [
               {
                 type: 'comment',
-                author: 'Yrsa',
+                author: 'Yrsa S.',
                 pill: 'Matematik',
                 content: 'Husk lineal.',
                 editUrl: 'https://app.meebook.com/x',
