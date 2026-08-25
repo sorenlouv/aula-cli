@@ -14,21 +14,15 @@
  * Windows tasks inherit the user's PATH from the registry, so nothing needs
  * baking there.
  *
- * **A laptop is asleep at 06:30.** That is the normal case, and it is where a
- * single trigger fails: macOS Power Nap wakes the machine for 180-second
- * maintenance windows, launchd starts the job in one of them, and the Mac goes
- * back to sleep with `claude -p` mid-request. Measured on two consecutive
- * mornings — the transcripts show the prompt sent and nothing ever coming back.
- * Two defences, both here:
+ * **A laptop is asleep at 06:30.** That is the normal case. macOS Power Nap can
+ * start a calendar job during a short battery DarkWake, where `caffeinate -s`
+ * is not honoured. Starting Aula and Claude there consumes the trigger but
+ * cannot finish the brief.
  *
- * - The job runs under `caffeinate -i -s`, which holds the Mac awake for the
- *   few minutes the run takes. Honoured on AC power; on battery macOS may still
- *   sleep through it.
- * - The agent fires again every 15 minutes for three hours, and every trigger
- *   passes `--catch-up`: do nothing when today's overview is already complete,
- *   otherwise do it over. A morning that went right costs the retries nothing
- *   but a state-file read; a morning that went wrong gets fixed as soon as the
- *   Mac is properly awake.
+ * The launchd job therefore starts `scheduled-brief.ts`, a cheap coordinator
+ * that waits without a sleep assertion. It is suspended with the Mac and
+ * resumes on the next wake; only a full wake or AC power starts the expensive
+ * child under caffeinate. Calendar retries remain as crash recovery.
  */
 
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -41,7 +35,7 @@ const LABEL = 'com.aula-cli.brief';
 const TASK_NAME = 'aula-cli-brief';
 const REPO = join(import.meta.dir, '..');
 const ENTRY = join(REPO, 'src', 'cli.ts');
-const CAFFEINATE = '/usr/bin/caffeinate';
+const SCHEDULED_ENTRY = join(REPO, 'src', 'scheduled-brief.ts');
 
 /** The scheduled command. `--catch-up` is what makes the retries below free. */
 const RUN_ARGS = ['new', '--text', '--catch-up'];
@@ -132,7 +126,7 @@ export function buildPlist(opts: {
     `<key>Hour</key><integer>${at.hour}</integer>` +
     `<key>Minute</key><integer>${at.minute}</integer></dict>`;
   const times = scheduleTimes(opts.at);
-  const program = [CAFFEINATE, '-i', '-s', opts.bun, ENTRY, ...RUN_ARGS];
+  const program = [opts.bun, SCHEDULED_ENTRY];
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -286,7 +280,7 @@ function installDarwin(at: At): number {
   }
   console.log(`Installed — every weekday at ${clock(at)}, ${retryNote(at)}.`);
   console.log(
-    '  The run holds the Mac awake (caffeinate); a Mac asleep on battery is what the retries are for.',
+    '  On macOS, model work waits for a full wake or AC power, then holds the Mac awake.',
   );
   if (Object.keys(env).length > 0) {
     console.log(

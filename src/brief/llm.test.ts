@@ -12,6 +12,7 @@ import {
   extractionSchema,
   modelEffortArgs,
   parseClaudeJson,
+  parseClaudeStreamJson,
   runClaude,
   spawnClaude,
   validateExtraction,
@@ -552,6 +553,20 @@ describe('the claude subprocess', () => {
     });
   });
 
+  describe('parseClaudeStreamJson', () => {
+    test('accepts structured input only after its matching tool result succeeds', () => {
+      const tool =
+        '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"StructuredOutput","input":{"signals":[]}}]}}';
+      expect(parseClaudeStreamJson(tool).confirmedStructured).toBeUndefined();
+
+      const result =
+        '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"Structured output provided successfully"}]}}';
+      expect(parseClaudeStreamJson(`${tool}\n${result}\n`).confirmedStructured).toEqual({
+        signals: [],
+      });
+    });
+  });
+
   describe('spawnClaude', () => {
     test('collects the envelope and the exit code', async () => {
       fake('ok', 'svar');
@@ -591,7 +606,8 @@ describe('the claude subprocess', () => {
     test('returns the envelope text, tools off', async () => {
       const f = fake('ok', '{"signals":[]}');
       expect((await runClaude('instr', '{}', { timeoutMs: 5_000 })).text).toBe('{"signals":[]}');
-      expect(f.calls()[0]).toContain('--tools  --strict-mcp-config --output-format json');
+      expect(f.calls()[0]).toContain('--tools  --strict-mcp-config --safe-mode');
+      expect(f.calls()[0]).toContain('--no-session-persistence --output-format json');
     });
 
     test('a schema is handed to the CLI, and its parsed answer is preferred', async () => {
@@ -603,7 +619,34 @@ describe('the claude subprocess', () => {
         schema: { type: 'object' },
       });
       expect(f.calls()[0]).toContain('--json-schema');
+      expect(f.calls()[0]).toContain('--output-format stream-json --verbose');
       expect(reply.text).toBe('{"signals":[]}');
+    });
+
+    test('keeps confirmed structured output when final CLI cleanup stalls', async () => {
+      const f = fake('structured-then-stall', '{"signals":[]}');
+      const reply = await runClaude('instr', '{}', {
+        timeoutMs: 5_000,
+        graceMs: 200,
+        finalizationGraceMs: 100,
+        schema: { type: 'object' },
+      });
+
+      expect(reply.structured).toEqual({ signals: [] });
+      expect(f.calls()).toHaveLength(1);
+    });
+
+    test('does not trust a structured tool call without its successful result', async () => {
+      const f = fake('structured-unconfirmed-stall', '{"signals":[]}');
+      await expect(
+        runClaude('instr', '{}', {
+          timeoutMs: 300,
+          graceMs: 200,
+          finalizationGraceMs: 100,
+          schema: { type: 'object' },
+        }),
+      ).rejects.toThrow(/timed out/);
+      expect(f.calls()).toHaveLength(2);
     });
 
     test('a schema request never falls back to unvalidated result text', async () => {

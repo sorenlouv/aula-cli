@@ -91,8 +91,10 @@ bun src/cli.ts schedule     # weekdays 06:30; --at HH:MM to change, --remove to 
 ```
 
 `schedule` installs a launchd agent (macOS) or Scheduled Task (Windows); on
-Linux it prints cron lines. It retries through the morning with `--catch-up`
-because the laptop is usually asleep at 06:30, and it bakes in PATH plus
+Linux it prints cron lines. On macOS a lightweight coordinator waits through
+battery DarkWake and starts the brief after a full wake or AC connection; the
+calendar retries remain as crash recovery. Every generation uses `--catch-up`,
+and the schedule bakes in PATH plus
 `AULA_BRIEF_MODEL`, `AULA_BRIEF_EFFORT`, `AULA_TOOL_MODEL`,
 `AULA_TOOL_EFFORT` and `AULA_CACHE_TTL` from the shell it ran in — re-run it
 after changing node version or those variables. Extraction uses the configured

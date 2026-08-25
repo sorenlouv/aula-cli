@@ -11,7 +11,8 @@
  * Behaviour is chosen per call through the environment, so one installation
  * serves a whole test file:
  *
- *   FAKE_CLAUDE_MODE         ok | error | denied | stall | stall-ignore-term | stall-then-ok
+ *   FAKE_CLAUDE_MODE         ok | error | denied | stall | stall-ignore-term | stall-then-ok |
+ *                            structured-then-stall | structured-unconfirmed-stall
  *   FAKE_CLAUDE_RESULT_JSON  the `result` field for `ok`, already JSON-encoded (default "OK")
  *   FAKE_CLAUDE_LOG          append one line per call (the argv), and count calls from it
  *                            `<log>.results` may hold one JSON result per call
@@ -41,6 +42,15 @@ case "$mode" in
     ;;
   stall-ignore-term)
     trap '' TERM
+    sleep 10
+    ;;
+  structured-then-stall|structured-unconfirmed-stall)
+    structured_json="\${FAKE_CLAUDE_STRUCTURED_JSON:-}"
+    if [ -z "$structured_json" ]; then structured_json='{}'; fi
+    printf '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_fake","name":"StructuredOutput","input":%s}]}}\n' "$structured_json"
+    if [ "$mode" = "structured-then-stall" ]; then
+      printf '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_fake","content":"Structured output provided successfully"}]}}\n'
+    fi
     sleep 10
     ;;
   error)

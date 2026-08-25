@@ -83,6 +83,7 @@ test('preserves Claude process output and the stack for after-the-fact debugging
         stderr: 'request id: abc',
         code: 1,
         timedOut: false,
+        stoppedAfterOutput: false,
         stdoutTruncated: false,
         stderrTruncated: false,
       },
