@@ -253,35 +253,55 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
   const today = input.today;
   const colour = new Map(input.family.children.map((c, i) => [c.firstName, `c${i + 1}`]));
 
-  const card = (c: RankedCard) => `
+  /**
+   * `showDate` is false under a heading that already names the day: a group of
+   * one date says it once, and repeating it on every card below is the same
+   * three words down the whole screen. The groups that gather several dates —
+   * *Skal gøres*, *Næste uge*, *Senere*, *Tidligere* — keep the chip, because
+   * there the day is precisely what their heading does not say.
+   *
+   * There is no *Kræver handling* chip. The warm left edge already says it, and
+   * the work a parent can do now has its own heading; a badge repeating either
+   * only crowded out the chips that carry a fact.
+   */
+  const card = (c: RankedCard, showDate: boolean) => {
+    const chips = [
+      showDate && c.date
+        ? `<span class="chip ${c.date === today ? 'now' : 'soon'}">${escapeHtml(chipLabel(c.date, today))}</span>`
+        : '',
+      c.recurrenceWeekday !== null
+        ? `<span class="chip recurring">Gentages hver ${escapeHtml(DA_WEEKDAYS[c.recurrenceWeekday] ?? '')}</span>`
+        : '',
+      c.sourceKeys.some((key) => opts.isNew?.(key)) ? '<span class="chip new">Ny</span>' : '',
+      ...c.children.map(
+        (name) =>
+          `<span class="who"><span class="dot ${colour.get(name) ?? 'c1'}"></span>${escapeHtml(name)}</span>`,
+      ),
+    ].filter(Boolean);
+    return `
     <div class="card ${c.needsAction ? 'act' : ''}" data-signal-id="${escapeHtml(c.id)}" data-source-id="${escapeHtml(c.sourceKeys[0] ?? '')}" data-done-keys="${escapeHtml(doneKeys(c).join(' '))}" data-placement="${c.placement}">
-      <div class="row">
-        ${c.date ? `<span class="chip ${c.date === today ? 'now' : 'soon'}">${escapeHtml(chipLabel(c.date, today))}</span>` : ''}
-        ${c.recurrenceWeekday !== null ? `<span class="chip recurring">Gentages hver ${escapeHtml(DA_WEEKDAYS[c.recurrenceWeekday] ?? '')}</span>` : ''}
-        ${c.needsAction && c.placement !== 'action' ? '<span class="chip act">Kræver handling</span>' : ''}
-        ${c.sourceKeys.some((key) => opts.isNew?.(key)) ? '<span class="chip new">Ny</span>' : ''}
-        ${c.children.map((name) => `<span class="who"><span class="dot ${colour.get(name) ?? 'c1'}"></span>${escapeHtml(name)}</span>`).join('')}
-      </div>
+      ${chips.length > 0 ? `<div class="row">${chips.join('')}</div>` : ''}
       <p class="title">${escapeHtml(c.title)}</p>
       ${c.summary ? `<p class="summary">${escapeHtml(c.summary)}</p>` : ''}
       ${moreBlock(c, today)}
       <div class="src">${sourceLine(c, today)}</div>
       <button class="tick" type="button" aria-pressed="false" aria-label="Markér som klaret"></button>
     </div>`;
+  };
 
   /**
    * A personal appointment is a card in the timeline, but not a full Aula card.
    * Its closed face keeps the source's title and interval intact; the model's
    * summary and relevance reason stay behind the individual fold.
    */
-  const personal = (event: RankedPersonalEvent) => {
+  const personal = (event: RankedPersonalEvent, showDate: boolean) => {
     const source = event.source;
     const meta = [source.location, source.author].filter(Boolean).join(' · ');
     return `
     <div class="card calendar-card" data-signal-id="${escapeHtml(event.id)}" data-source-id="${escapeHtml(event.sourceKey)}" data-done-keys="${escapeHtml(doneKeys({ sourceKeys: [event.sourceKey], date: event.date }).join(' '))}" data-placement="${event.placement}">
       <details class="calendar-details">
         <summary><span class="calendar-face">
-          ${event.date ? `<span class="chip ${event.date === today ? 'now' : 'soon'}">${escapeHtml(chipLabel(event.date, today))}</span>` : ''}
+          ${showDate && event.date ? `<span class="chip ${event.date === today ? 'now' : 'soon'}">${escapeHtml(chipLabel(event.date, today))}</span>` : ''}
           <span class="calendar-when">${escapeHtml(whenLabel(source))}</span>
           <span class="calendar-title">${escapeHtml(event.title)}</span>
           ${opts.isNew?.(event.sourceKey) ? '<span class="chip new">Ny</span>' : ''}
@@ -338,7 +358,12 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
       (group) => `<div class="timeline-group" data-timeline-group="${escapeHtml(group.key)}">
         <h3 class="timeline-heading">${escapeHtml(group.label)}</h3>
         ${group.entries
-          .map((entry) => (entry.entryType === 'card' ? card(entry) : personal(entry)))
+          .map((entry) => {
+            // A `day:` group's heading carries the full date; every other group
+            // spans days, so its cards keep their own.
+            const showDate = !group.key.startsWith('day:');
+            return entry.entryType === 'card' ? card(entry, showDate) : personal(entry, showDate);
+          })
           .join('')}
       </div>`,
     )

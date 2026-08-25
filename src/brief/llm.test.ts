@@ -407,7 +407,7 @@ describe('validateExtraction', () => {
   test('a child the family does not have is dropped from the card, not the card', () => {
     const result = validateExtraction(
       input,
-      answer({ cards: [{ ...good, children: ['Viggo', 'Ida'] }] }),
+      answer({ cards: [{ ...good, children: ['Viggo', 'Karla'] }] }),
     );
     expect(result.cards[0]?.children).toEqual(['Viggo']);
   });

@@ -14,8 +14,19 @@ install runbook.
   `#request` to try something; `presence.updatePresenceTemplate` is absent on
   purpose.
 - **Never perform a MitID approval.** That is the user's phone and identity.
-- **Real family data never enters tracked files.** Fixtures and docs use the
-  fictional Eksempelsen family; anything real goes in the gitignored `data/`.
+- **Real family data never enters tracked files.** Before writing a fixture, a
+  test, an example, a doc or a commit message, **read `data/private-terms.txt`**
+  — a gitignored, hand-maintained list of the real names of this family, the
+  people around them, their institutions and their identifiers. Nothing on that
+  list may appear anywhere in tracked content. This repository is public.
+  Being inspired by a live Aula response is fine; pasting one is not — change
+  the names, the class, the institution and any signup code before it lands.
+  Invent a name rather than borrowing one, and check the invention against the
+  list first: the fictional cast once reused names that turned out to belong to
+  real people in the class. Fixtures and docs use the fictional Eksempelsen
+  family with `eksempel.dk` values; anything real goes in the gitignored
+  `data/`. Add to the list the moment a new real name appears, and never move a
+  term out of it into a tracked file.
 - **Preferences are the model's to read.** The model interprets the prose in
   `preferences.md` and returns a typed relevance verdict; ranking code acts on
   that verdict. Do not parse preference wording in code.

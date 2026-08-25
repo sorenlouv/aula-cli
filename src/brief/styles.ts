@@ -78,11 +78,11 @@ h2::after,.timeline-heading::after{content:"";flex:1;height:1px;background:var(-
 .card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:14px;
   padding:18px 58px 16px 20px;
   margin-bottom:10px;box-shadow:var(--shadow);border-left:3px solid var(--line)}
-/* A card that asks something of the family is drawn with the warm edge; the
-   chip beside its date says so in words. Cards to merely know keep the quiet
-   edge, so the reader's eye finds the work in a list that is otherwise by date. */
+/* A card that asks something of the family is drawn with the warm edge — the
+   whole of what says so, now that Skal gøres heads the work that can be done
+   now and a badge saying the same thing has gone. Cards to merely know keep the
+   quiet edge, so the reader's eye finds the work in a list that is by date. */
 .card.act{border-left-color:var(--now)}
-.chip.act{background:var(--now-bg);color:var(--now)}
 .row{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:7px}
 .chip{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;padding:3px 9px;border-radius:6px}
 .chip.now{background:var(--now-bg);color:var(--now)}

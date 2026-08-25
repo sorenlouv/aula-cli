@@ -944,8 +944,9 @@ test('htmlToText flattens Aula message markup', () => {
   assert.equal(htmlToText(null), '');
 });
 
-// These four fragments are copied verbatim out of live Aula responses; they are
-// the shapes its editor actually emits.
+// These four fragments reproduce the shapes Aula's editor really emits. Copy the
+// *markup* out of a live response, never the words inside it: a fixture pasted
+// whole is how a child's name and a signup code once reached this public repo.
 test('htmlToText handles the markup Aula really produces', () => {
   // Pretty-printed <p> blocks: paragraphs stay separated.
   assert.equal(
@@ -1217,15 +1218,15 @@ test('birthdays are ordered by how soon they are, wrapping the year', () => {
   };
 
   const rows = upcomingBirthdays([
-    { fullName: 'Sent', birthday: localDate(-1), group: '5A' },
-    { fullName: 'Snart', birthday: localDate(3), group: '5A' },
+    { fullName: 'Eksempel Sent', birthday: localDate(-1), group: '5A' },
+    { fullName: 'Eksempel Snart', birthday: localDate(3), group: '5A' },
     // No birthday shared — dropped rather than rendered as "unknown".
     { fullName: 'Ukendt', group: '5A' },
   ]);
 
   assert.deepEqual(
     rows.map((r) => r.name),
-    ['Snart', 'Sent'],
+    ['Eksempel Snart', 'Eksempel Sent'],
   );
   assert.equal(rows[0]?.inDays, 3);
   assert.ok((rows[1]?.inDays ?? 0) > 300, 'a birthday just past wraps to next year');
