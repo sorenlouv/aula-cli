@@ -59,7 +59,7 @@ function copyFor(state: ViewState): Copy {
     case 'starting':
       return {
         title: 'Kontakter MitID',
-        lede: 'Tag din telefon frem, og åbn MitID-appen.',
+        lede: 'Åbn MitID på din telefon.',
         tone: 'neutral',
       };
     case 'otp':
@@ -131,7 +131,7 @@ function announcementFor(state: ViewState): string {
       return `Vælg, hvem du logger ind som. ${count} ${count === 1 ? 'mulighed' : 'muligheder'}.`;
     }
     case 'starting':
-      return 'Kontakter MitID. Tag din telefon frem, og åbn MitID-appen.';
+      return 'Kontakter MitID. Åbn MitID på din telefon.';
     case 'otp':
       return `Godkend koden i MitID-appen. Koden er ${spaced(state.otp)}.`;
     case 'qr':
