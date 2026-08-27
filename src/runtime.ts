@@ -54,24 +54,33 @@ export function cliInvocation(): string[] {
 }
 
 /**
- * How the skill and the docs should spell a command for this installation:
- * `aula` when there is a binary on PATH, `bun src/cli.ts` from a checkout.
+ * How the installed skill spells a command.
  *
- * The binary form is the absolute path rather than the bare name, because
- * nothing guarantees the reader's PATH includes wherever it was installed.
+ * Deliberately the short, relative `bun src/cli.ts` for a checkout: the skill
+ * states the directory on the line above and tells the agent to run from
+ * there, so the relative form is both correct and readable in that context.
+ * The binary form is an absolute path rather than a bare name, because nothing
+ * guarantees the reader's PATH includes wherever it was installed.
+ *
+ * For anything the user reads *outside* that context — an error, a remedy —
+ * use {@link cmd}, which does not assume a working directory.
  */
 export function commandPrefix(): string {
   return isCompiled() ? process.execPath : 'bun src/cli.ts';
 }
 
 /**
- * One command, spelled the way *this* installation can actually run it.
+ * One command, runnable as printed, from wherever the reader happens to be.
  *
- * Every "run this to fix it" string has to go through here. A binary user has
- * no `bun` and no checkout, so telling them to `bun run login` when their
- * session expires leaves them holding an instruction they cannot carry out —
- * and that is precisely the moment they most need a working one.
+ * Every "run this to fix it" string has to go through here, and the bar is
+ * higher than just naming the right program. A binary user has no `bun` and no
+ * checkout, so `bun run login` is an instruction they cannot carry out — but
+ * `bun src/cli.ts login` is no better for someone running a checkout through a
+ * wrapper on their PATH, because that path resolves against a directory they
+ * are not in. Both fail at the same moment: when a session has just expired and
+ * the message is the only thing they have to go on. Hence the full invocation,
+ * absolute on both sides.
  */
 export function cmd(args: string): string {
-  return `${commandPrefix()} ${args}`;
+  return `${cliInvocation().join(' ')} ${args}`;
 }
