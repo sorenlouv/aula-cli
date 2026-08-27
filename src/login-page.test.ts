@@ -73,15 +73,40 @@ describe('login page', () => {
     }
   });
 
-  test('never offers a password field', async () => {
+  test('ships its whole client inline, and never a password field', async () => {
     const page = startLoginPage();
     try {
-      const shell = await fetch(page.url);
+      const html = await (await fetch(page.url)).text();
+
       // A hard rule from AGENTS.md: this tool never performs a MitID approval
       // and never handles a secret. Everything secret happens on the user's own
       // phone, so a password input on this page would always be a phishing
       // surface — there is no legitimate reason for one to appear.
-      expect(await shell.text()).not.toContain('type="password"');
+      //
+      // Asserted on the attribute's *value*, not on `type="password"`. This
+      // page no longer serves markup: JSX compiles an attribute to an object
+      // property, so the HTML spelling cannot appear in these bytes even when
+      // the field does — the old assertion could not fail any more. A minifier
+      // renames identifiers and preserves string literals, so the value is the
+      // one thing a password field must leave behind.
+      expect(html).not.toMatch(/password|adgangskode/i);
+
+      // Anchored on copy only the compiled client carries, because the
+      // assertion above is equally true of a page that inlined nothing — which
+      // is exactly what a silently failed macro would serve.
+      expect(html).toContain('MitID-brugernavn');
+
+      // The client is inline under `script-src 'unsafe-inline'`, so it is
+      // parsed as part of this document: one `</script>` inside it ends the
+      // script early and the rest of the client becomes text on the page. The
+      // macro refuses such a bundle at transpile time; this is the same fact
+      // checked on the bytes that actually reach a browser.
+      expect(html.match(/<\/script/gi)).toHaveLength(1);
+
+      // `default-src 'none'` is worth only what the markup asks for: nothing on
+      // this page may be fetched from anywhere.
+      expect(html).not.toMatch(/<script[^>]+\bsrc=/i);
+      expect(html).not.toMatch(/<link[^>]+href="https?:/i);
     } finally {
       page.close();
     }

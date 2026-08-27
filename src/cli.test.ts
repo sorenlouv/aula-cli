@@ -123,7 +123,13 @@ test('unknown commands and malformed arguments are rejected before authenticatio
     const result = runWithoutLogin(...args);
     assert.equal(result.code, 1, args.join(' '));
     assert.match(result.stderr, message);
-    assert.doesNotMatch(result.stderr, /login|token file/i);
+    // Stripped of the checkout path first. A usage error names the script it
+    // was run from, so `cmd()` puts an absolute path in this string, and the
+    // assertion would otherwise be reading the name of whatever directory the
+    // repo happens to sit in — a worktree named for the login page fails it
+    // while leaking nothing. `ROOT` rather than `process.cwd()`: it is derived
+    // from this file's own URL, so it is right however the runner was invoked.
+    assert.doesNotMatch(result.stderr.replaceAll(ROOT, ''), /login|token file/i);
     assert.deepEqual(result.requests, []);
   }
 });

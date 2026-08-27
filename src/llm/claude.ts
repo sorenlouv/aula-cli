@@ -156,7 +156,7 @@ export async function spawnClaude(
       stdout: 'pipe',
       stderr: 'pipe',
       // Always explicit: tests change PATH after startup to install a fake CLI.
-      env: { ...process.env, ...(opts.env ?? {}) },
+      env: { ...process.env, ...opts.env },
     });
   let proc: ReturnType<typeof spawn>;
   try {

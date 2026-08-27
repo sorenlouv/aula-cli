@@ -1,0 +1,41 @@
+# The gate a contributor runs before pushing, run again on the push itself.
+#
+# It existed only in release.yml until now, which meant it ran on a version tag
+# and nowhere else — a release is far too late to learn that the login page's
+# browser client stopped typechecking. That client is the reason this file is
+# worth its minute: it lives in its own TypeScript project and is compiled by a
+# macro at transpile time, so nothing about it is exercised by importing the
+# server. `typecheck` is the only thing that reads it, and `test` is the only
+# thing that builds it.
+#
+# One runner, not a matrix: this checks the source, and release.yml is what
+# checks the binaries on each platform they ship for.
+name: ci
+
+on:
+  push:
+    branches: ['main']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      # Two projects: the server with no DOM, and src/browser with no Bun. The
+      # second is the whole point — the root project excludes it, so without
+      # this line the TSX would be checked by nothing.
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun run format:check
+
+      # Spawns `bun build` for the login page's client (src/browser/bundle.ts),
+      # so the browser half is compiled here as well as typechecked.
+      - run: bun test --timeout 30000 src/ evals/

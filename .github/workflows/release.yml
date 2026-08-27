@@ -40,6 +40,7 @@ jobs:
       # The gate is the same one a contributor runs before pushing; a release
       # that fails it should never reach a user's machine.
       - run: bun run typecheck
+      - run: bun run lint
       - run: bun run format:check
       - run: bun test --timeout 30000 src/ evals/
 

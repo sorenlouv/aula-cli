@@ -62,9 +62,12 @@ export async function loadPersonalEvents(
 
   for (const calendar of calendars) {
     try {
-      const raw = await listEvents(calendar.id, from, to, {
-        ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
-      });
+      const raw = await listEvents(
+        calendar.id,
+        from,
+        to,
+        opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {},
+      );
       const calendarEvents: PersonalEvent[] = [];
       for (const item of raw) {
         const event = toPersonalEvent(item, calendar);

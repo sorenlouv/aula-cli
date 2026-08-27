@@ -115,7 +115,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
         model: process.env.AULA_BRIEF_MODEL ?? null,
         effort: process.env.AULA_BRIEF_EFFORT ?? null,
         useCache: opts.useCache !== false,
-        details: { runId, ...((details as Record<string, unknown>) ?? {}) },
+        details: { runId, ...(details as Record<string, unknown>) },
       },
       undefined,
       revision,

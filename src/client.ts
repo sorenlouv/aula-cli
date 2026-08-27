@@ -493,6 +493,10 @@ export class AulaClient {
     const res = await fetch(url, {
       method: httpMethod,
       headers,
+      // A GET sends `undefined`, which fetch specifies as no body at all. The
+      // rule reads the property, not the ternary that empties it; it stays on
+      // because a genuine GET-with-body is worth catching.
+      // oxlint-disable-next-line unicorn/no-invalid-fetch-options
       body: httpMethod === 'POST' ? JSON.stringify(opts.body) : undefined,
       redirect: 'manual',
       signal: remoteReadSignal(),

@@ -1,0 +1,337 @@
+/*
+ * The login page's whole stylesheet, inlined into the shell by the same macro
+ * that bundles the client.
+ *
+ * A real .css file rather than a run of lines inside a template literal:
+ * Prettier formats this, an editor knows what it is, and a diff on it is
+ * readable. That is half of what made the old page unsafe to change.
+ *
+ * Served in the shell's <style>, not injected by the client. Three reasons, in
+ * order of how badly the alternative fails: `default-src 'none'` means no
+ * stylesheet can ever be fetched, so a <link> is not an option at all; a sheet
+ * that arrives with the bundle paints nothing until the script has parsed, on a
+ * page whose first frame is the whole product; and the <noscript> below is
+ * styled on a page where no script ever runs. `style-src 'unsafe-inline'` is
+ * what permits the tag.
+ *
+ * Nothing here may fetch — `default-src 'none'` covers fonts and images too —
+ * so the type stack is whatever the machine already has, and the only graphics
+ * on the page are the two server-rendered SVGs.
+ */
+
+:root {
+  /* Not decoration: this is what makes the text caret, the selection and the
+     scrollbar pick the right ground in dark mode. The tokens below only cover
+     what we paint ourselves. */
+  color-scheme: light dark;
+
+  --bg: #faf8f5;
+  --panel: #fff;
+  --ink: #1c1a17;
+  --ink-2: #57534e;
+  /* 5.1:1 on --bg. The old #8a837c was 3.3:1 and carried the smallest text on
+     the page. */
+  --ink-3: #6b645c;
+  --line: #e7e2db;
+  --line-strong: #cfc8bf;
+  --accent: #4f46e5;
+  /* Darker than the old mid teal: the outcome heading is ~21.6px, which counts
+     as large text only because it is bold, and it should not have to. */
+  --ok: #0f766e;
+  --bad: #be123c;
+  --shadow: 0 1px 2px rgba(28, 26, 23, 0.04), 0 4px 16px -6px rgba(28, 26, 23, 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16151a;
+    --panel: #1e1d23;
+    --ink: #f0eeea;
+    --ink-2: #b4afa8;
+    --ink-3: #a8a29a;
+    --line: #302e37;
+    --line-strong: #45424e;
+    --accent: #a5a0fb;
+    --ok: #5eead4;
+    --bad: #fda4af;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px -6px rgba(0, 0, 0, 0.5);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  margin: 0;
+  padding: 2rem 1.25rem;
+  background: var(--bg);
+  color: var(--ink);
+  font:
+    16px/1.55 ui-sans-serif,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+}
+
+/* One measure for the whole page, and left-aligned: prose and a form are read
+   left to right. The two things that genuinely want to be centred — the code
+   and the symbols — say so themselves, below. */
+main {
+  width: 100%;
+  max-width: 30rem;
+}
+
+/* With JavaScript off nothing ever renders into it, and an empty 30rem-wide
+   flex item would shove the <noscript> off the middle of the page. */
+main:empty {
+  display: none;
+}
+
+.title {
+  margin: 0 0 0.4rem;
+  font-size: 1.35rem;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.title[data-tone='ok'] {
+  color: var(--ok);
+}
+
+.title[data-tone='bad'] {
+  color: var(--bad);
+}
+
+.lede {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+/* Unscoped, so a control added later cannot arrive without a ring. The old page
+   had one on the text input and nothing on the button or the choices. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.card {
+  margin-top: 1.25rem;
+  padding: 1.25rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+
+.waiting {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1.25rem 0 0;
+  color: var(--ink-2);
+}
+
+/* The only animation on the page, and the only thing that distinguishes "MitID
+   has not answered yet" from "this tab is hung". */
+.dot {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.field {
+  display: block;
+}
+
+.field-label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+}
+
+.field input {
+  width: 100%;
+  padding: 0.7rem 0.8rem;
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+}
+
+/* Driven by the ARIA attribute rather than a class, so what the page looks like
+   and what it reports cannot drift apart. */
+.field input[aria-invalid='true'] {
+  border-color: var(--bad);
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.option {
+  display: block;
+  width: 100%;
+  padding: 0.75rem 0.8rem;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.option:hover:enabled {
+  border-color: var(--accent);
+}
+
+.go {
+  width: 100%;
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  /* Text in the page background colour, so the contrast holds in both themes —
+     the accent is dark in one and pale in the other. */
+  color: var(--bg);
+  background: var(--accent);
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.otp {
+  margin: 0;
+  text-align: center;
+  font:
+    700 clamp(2.25rem, 11vw, 3.5rem) / 1.1 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  letter-spacing: 0.12em;
+  /* Letter-spacing also lands after the last digit and drags the line off
+     centre; this puts it back. */
+  text-indent: 0.12em;
+  /* Full ink, not the accent: this is the one string on the page that has to be
+     read digit-perfect against a phone. */
+  color: var(--ink);
+}
+
+/* The pair stays side by side even on a phone: the app is held up to both, and
+   a wrapped code is one a parent will try to scan alone. */
+.codes {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
+/*
+ * The white ground and the padding live on the host, not on the <svg> inside
+ * it. Two reasons, both load-bearing: a scanner measures the symbol's edges
+ * from its quiet zone, so a dark page must not come near it — and when a
+ * rotation replaces the markup, the box the phone is pointed at stays a white
+ * square of the same size in the same place. There is no frame in which the
+ * page shows through.
+ */
+.code {
+  padding: 0.4rem;
+  background: #fff;
+  border-radius: 10px;
+  line-height: 0;
+}
+
+.code svg {
+  display: block;
+  width: min(13rem, 38vw);
+  height: auto;
+}
+
+.error {
+  margin: 0.75rem 0 0;
+  color: var(--bad);
+  font-size: 0.9rem;
+}
+
+/* Empty is the resting state — the node is always in the tree so that an error
+   appearing is a text change inside a live region rather than an insertion, and
+   so that it never shifts the control it belongs to. */
+.error:empty {
+  margin: 0;
+}
+
+.noscript {
+  max-width: 30rem;
+  color: var(--bad);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Written as a blanket rule so anything added later lands inside it without
+   anyone remembering to. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  /* A forced palette repaints the symbol, and a repainted symbol does not scan.
+     This is the one place on the page that opts out of the user's own colours,
+     and it opts out because the alternative is a QR code that cannot be read. */
+  .code,
+  .code svg {
+    forced-color-adjust: none;
+    background: #fff;
+  }
+
+  /* Backgrounds are dropped in forced colours, so borders carry the shape. */
+  .card,
+  .option,
+  .field input {
+    border-color: CanvasText;
+  }
+
+  .go {
+    border: 1px solid ButtonText;
+  }
+}

@@ -104,7 +104,7 @@ export function detectWidgets(context: ProfileContext): DetectedWidget[] {
     seen.set(widgetId, {
       widgetId,
       name: config.widget?.name ?? known?.name ?? `widget ${widgetId}`,
-      ...(known ?? {}),
+      ...known,
     });
   }
   return [...seen.values()].sort((a, b) => a.widgetId.localeCompare(b.widgetId));

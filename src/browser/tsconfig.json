@@ -1,0 +1,30 @@
+{
+  // Everything in this directory ships to a browser, so it gets its own project
+  // rather than its own settings: the root project must never see "dom", and
+  // this one must never see Bun. Two libs cannot coexist in one program.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["es2023", "dom", "dom.iterable"],
+
+    // Automatic runtime: no `import { h }`, no /** @jsx */ pragma, and the
+    // factory `bun build` resolves is preact's rather than React's.
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+
+    // Empty on purpose, overriding the root's ["bun"]. Left unset, TypeScript
+    // auto-includes every package under node_modules/@types — which here means
+    // @types/bun, and a `Bun.spawnSync` in a file that ships to a browser would
+    // typecheck cleanly and then throw in the page. This is the whole reason
+    // the directory is a separate project rather than a subdirectory.
+    "types": []
+  },
+
+  // Both overrides are load-bearing: paths in an inherited include/exclude
+  // resolve against the base config's directory, so without them this project
+  // would inherit the root's "src/**/*.ts" and typecheck the server instead.
+  "include": ["**/*.ts", "**/*.tsx"],
+
+  // The macro runs in Bun at transpile time, not in the browser — the root
+  // project is where it belongs and where it is checked.
+  "exclude": ["bundle.ts"]
+}

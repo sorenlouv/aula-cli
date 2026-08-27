@@ -29,7 +29,7 @@ function sourceFiles(dir: string): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) out.push(...sourceFiles(path));
-    else if (extname(entry.name) === '.ts') out.push(path);
+    else if (['.ts', '.tsx', '.css'].includes(extname(entry.name))) out.push(path);
   }
   return out;
 }

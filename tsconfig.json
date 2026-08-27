@@ -23,5 +23,16 @@
 
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "scripts/**/*.ts", "evals/**/*.ts"]
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "evals/**/*.ts"],
+
+  // Everything under src/browser runs in the browser, so it is a separate
+  // project with a separate lib — see src/browser/tsconfig.json. The exclude is
+  // a no-op for login.tsx (the include above never matched ".tsx" anyway) and
+  // exists for the next file: a plain ".ts" helper added next to it would
+  // otherwise land here and be checked against a lib with no DOM at all.
+  //
+  // bundle.ts is still pulled into this program by the macro import in
+  // login-page.ts, which is right — a file calling Bun.spawnSync belongs to the
+  // project that has Bun's types and not the DOM's.
+  "exclude": ["src/browser/**"]
 }
