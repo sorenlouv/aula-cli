@@ -100,8 +100,9 @@ there is no flag for the answer:
   identity). The login stops at a numbered list after the phone approval.
 - Anything else that ends in `stdin is empty`.
 
-In both cases, ask the user to run `bun src/cli.ts login --username "<name>"`
-themselves in a terminal window, and continue once they say it succeeded.
+In both cases, ask the user to open a terminal, `cd` to the folder from step 1,
+run `bun src/cli.ts login --username "<name>"` themselves, and answer the
+question it asks. Continue once they say it succeeded.
 
 A **parallel session** error (CAP008) means an earlier attempt is still live on
 MitID's side: reject any pending approval in the app, close aula.dk tabs, wait
@@ -203,9 +204,11 @@ Lead with the address. Tell the user, in their own words:
 > be signed in to claude.ai to see it; it is private to your account.
 
 Then mention, briefly, that they can also ask about Aula in plain language in
-a new session, and that you can teach the overview what matters to them —
-for example `bun src/cli.ts remember "beskeder fra Johns far er altid
-vigtige"`.
+a new session, and that the overview can be taught what matters to them:
+
+```bash
+bun src/cli.ts remember "vis altid beskeder fra Johns far"
+```
 
 ## Optional extras
 
