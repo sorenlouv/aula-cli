@@ -1,14 +1,10 @@
 # Aula CLI
 
-Read-only client for Aula, the Danish school and daycare platform.
+Aula er et kaos af informationer og beskeder. Med Aula CLI kan din AI agent (f.eks Claude Code) give dig et dagligt overblik over de informationer, der er vigtige for netop DIG. 
 
-It generates a daily overview of what a parent needs to act on — deadlines,
-gear to remember, dates — so that not opening Aula stops costing anything, and
-it answers ad-hoc questions about school and daycare in plain language. You ask
-your agent; the agent runs it. See [GOALS.md](GOALS.md).
+Hver dag klokken 6 vågner agenten op og danner dit Aula overblik. Du kan tilpasse overblikket, så bestemte informationer altid bliver fremhævet - og bestemte informationer nedtonet. 
 
-### Getting started
+### Kom godt i gang
 
-You need the MitID app on your phone and about ten minutes. Ask your agent:
-
-> Clone https://github.com/sorenlouv/aula-cli to ~/aula-cli and follow its SETUP.md.
+Det er nemt at komme igang. Du skal blot sige til din agent
+> Clone https://github.com/sorenlouv/aula-cli and follow the instructions in SETUP.md to complete the setup.
