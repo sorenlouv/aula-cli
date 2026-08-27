@@ -26,6 +26,25 @@ describe('command-line contracts', () => {
     );
   });
 
+  test('login takes only --debug and --no-open now that the kodeviser method is gone', () => {
+    // The kodeviser flow ended at a password prompt and six typed digits, which
+    // is unanswerable for the agent that runs this command — and the login page
+    // is now the only surface, so there is nowhere to type them either. The
+    // flag has to fail loudly rather than be accepted and ignored.
+    //
+    // `--no-open` withholds the browser, not the page: the address is printed
+    // either way, so it changes nothing about where the login happens.
+    // `--username` is absent on purpose — the page asks for it, and a flag for
+    // it is what put the username in the chat in the first place.
+    expect(optionsFor('login')).toEqual(['--debug', '--no-open']);
+    expect(() => parseCommandLine('login', ['--method', 'CODE_TOKEN'])).toThrow(
+      "Unknown option '--method'",
+    );
+    expect(() => parseCommandLine('login', ['--username', 'testbruger'])).toThrow(
+      "Unknown option '--username'",
+    );
+  });
+
   test('checks positional arity before command code runs', () => {
     expect(() => parseCommandLine('thread', [])).toThrow('Usage: aula thread <threadId>');
     expect(() => parseCommandLine('thread', ['12', '13'])).toThrow('Usage: aula thread <threadId>');

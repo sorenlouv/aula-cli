@@ -56,9 +56,11 @@ export function buildFlowProofMessage(ctx: FlowProofContext): Buffer {
  * Sign the flow-proof message with a key derived from `prefix + hex(K)`,
  * hex-encoded — every live path uses hex. (The removed APP `/complete` path
  * was the one consumer of a base64 proof.)
- *   • APP `/prove` path: prefix='flowValues'
- *   • CODE_TOKEN path:   prefix='OTP'+digits
- *   • PASSWORD path:     prefix='flowValues'
+ *
+ * `prefix` is the only reason this is a parameter rather than a constant, and
+ * only one caller is left: the APP `/prove` path, which passes 'flowValues'.
+ * The removed kodeviser path passed 'OTP' + the six digits, which is why the
+ * prefix exists at all — it is where the value being proved enters the key.
  *
  * The Python reference derives the key in two slightly different ways across
  * authenticators (one calls `m.digest()`, the other `hex_to_bytes(m.hexdigest())`)

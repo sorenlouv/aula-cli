@@ -4,7 +4,6 @@ import {
   aesGcmDecrypt,
   aesGcmEncrypt,
   hmacSha256,
-  pbkdf2Sha256,
   randomBase64Url,
   randomBytes,
   sha256,
@@ -31,28 +30,6 @@ describe('hmacSha256', () => {
     const key = Buffer.alloc(20, 0x0b);
     expect(hmacSha256(key, 'Hi There').toString('hex')).toBe(
       'b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7',
-    );
-  });
-});
-
-describe('pbkdf2Sha256', () => {
-  // Self-consistency / regression vector — locks our wrapper to a known output
-  // so refactors don't silently change the param order or hash.
-  test('PBKDF2-SHA256("password", "salt", 1, 32)', () => {
-    expect(pbkdf2Sha256('password', 'salt', 1, 32).toString('hex')).toBe(
-      '120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b',
-    );
-  });
-
-  test('matches Aula MitID PASSWORD flow defaults (20000 iters, 32-byte key)', () => {
-    // Regression-locks the parameters used by mitid_browserclient's password path:
-    //   pbkdf2_hmac("sha256", password, salt, 20000, 32).hex()
-    // Recompute via:
-    //   node -e "console.log(require('crypto').pbkdf2Sync('hunter2', Buffer.from('cafebabe','hex'), 20000, 32, 'sha256').toString('hex'))"
-    const out = pbkdf2Sha256('hunter2', Buffer.from('cafebabe', 'hex'), 20000, 32);
-    expect(out.length).toBe(32);
-    expect(out.toString('hex')).toBe(
-      '74b62387fcbe6647776e85fc15b3df1042aa30101ae147defcc8b64fe43cfd4d',
     );
   });
 });

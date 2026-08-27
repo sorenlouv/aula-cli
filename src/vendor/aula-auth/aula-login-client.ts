@@ -4,7 +4,7 @@
  *   1.  Build the OIDC authorize URL with PKCE + state.
  *   2.  Walk the redirect chain through broker.unilogin.dk → MitID.
  *   3.  POST /login/mitid/initialize, parse the Aux blob.
- *   4.  Drive MitidClient (APP or CODE_TOKEN+PASSWORD).
+ *   4.  Drive MitidClient (MitID app approval).
  *   5.  POST /login/mitid with the MitID authorization code.
  *   6.  Optional identity selection (multi-child guardian).
  *   7.  POST broker SAML endpoint.
@@ -46,22 +46,11 @@ import type { AvailableAuthenticators } from './mitid-types.ts';
 import { mitidUrls } from './mitid-urls.ts';
 import { generatePkce } from './pkce.ts';
 
-export type AulaAuthMethod = 'APP' | 'CODE_TOKEN';
-
-export interface AulaLoginCredentials {
-  /** MitID username — typically what the user enters in the MitID app. */
-  username: string;
-  /** Required for CODE_TOKEN. Aula calls this the MitID password. */
-  password?: string;
-}
-
 export type IdentitySelector = (options: IdentityOption[]) => Promise<number>;
 
-export interface AulaLoginOptions extends AulaLoginCredentials {
-  /** Defaults to APP. */
-  method?: AulaAuthMethod;
-  /** Required for CODE_TOKEN — return the 6-digit value from the kodeviser. */
-  promptForCodeToken?: () => Promise<string>;
+export interface AulaLoginOptions {
+  /** MitID username — typically what the user enters in the MitID app. */
+  username: string;
   /**
    * Called when MitID returns multiple identities. Default: throw, since
    * picking blindly is rarely what the user wants. Return a 1-based index.
@@ -102,19 +91,6 @@ export class AulaLoginClient {
 
   /** Run the full MitID-backed login. Returns Aula OAuth tokens. */
   async login(opts: AulaLoginOptions): Promise<AulaTokens> {
-    const method = opts.method ?? 'APP';
-    let codeTokenPrompt: (() => Promise<string>) | undefined;
-    let codeTokenPassword: string | undefined;
-    if (method === 'CODE_TOKEN') {
-      if (!opts.promptForCodeToken || !opts.password) {
-        throw new AulaLoginError(
-          'CODE_TOKEN method requires both `password` and `promptForCodeToken`',
-        );
-      }
-      codeTokenPrompt = opts.promptForCodeToken;
-      codeTokenPassword = opts.password;
-    }
-
     // 1. PKCE + state + authorize URL.
     const pkce = generatePkce();
     const state = randomBase64Url(16);
@@ -123,7 +99,7 @@ export class AulaLoginClient {
       state,
       codeChallenge: pkce.challenge,
     });
-    this.logger.info('aula.login.start', { method, username: opts.username });
+    this.logger.info('aula.login.start', { username: opts.username });
     this.logger.debug('oauth.authorize_url', { authorizeUrl });
 
     // 2. Walk OAuth redirect chain → broker page or MitID page.
@@ -151,22 +127,8 @@ export class AulaLoginClient {
 
     // 4. Drive MitidClient.
     const mitid = await MitidClient.create({ http: this.http, aux, logger: this.logger });
-    const available = await mitid.identifyAsUser(opts.username);
-    this.assertMethodAvailable(method, available);
-
-    if (method === 'APP') {
-      await mitid.authenticateWithApp(opts.appCallbacks ?? {});
-    } else {
-      // Asserted non-null above when method === 'CODE_TOKEN'.
-      const prompt = codeTokenPrompt;
-      const password = codeTokenPassword;
-      if (!prompt || !password) {
-        throw new AulaLoginError('Internal error: CODE_TOKEN prompt/password lost');
-      }
-      const digits = await prompt();
-      await mitid.authenticateWithToken(digits.trim());
-      await mitid.authenticateWithPassword(password);
-    }
+    this.assertAppAvailable(await mitid.identifyAsUser(opts.username));
+    await mitid.authenticateWithApp(opts.appCallbacks ?? {});
     const authorizationCode = await mitid.finalize();
 
     // 5. POST /login/mitid completion.
@@ -402,15 +364,20 @@ export class AulaLoginClient {
     throw new AulaLoginError(`Broker IdP selection failed; tried: ${triedDescriptions.join(', ')}`);
   }
 
-  private assertMethodAvailable(method: AulaAuthMethod, available: AvailableAuthenticators): void {
-    if (method === 'APP' && available.APP == null) {
+  /**
+   * Fails on the authenticator list rather than one round-trip later.
+   *
+   * `selectAuthenticator('APP')` would eventually notice too, but its error
+   * names the wrong thing — "asked for APP, server returned CODE_TOKEN" reads
+   * like a protocol bug and suggests no remedy. The combinations list is the
+   * one place where "this MitID account has no app, only a kodeviser" can be
+   * said plainly, and for such an account it is terminal: the app approval is
+   * the only authenticator this CLI drives.
+   */
+  private assertAppAvailable(available: AvailableAuthenticators): void {
+    if (available.APP == null) {
       throw new AulaLoginError(
         `APP authenticator not available. Found: ${Object.keys(available).join(', ') || 'none'}`,
-      );
-    }
-    if (method === 'CODE_TOKEN' && available.CODE_TOKEN == null) {
-      throw new AulaLoginError(
-        `CODE_TOKEN authenticator not available. Found: ${Object.keys(available).join(', ') || 'none'}`,
       );
     }
   }

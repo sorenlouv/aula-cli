@@ -11,6 +11,20 @@ async function fetchState(url: string, since = 0): Promise<Record<string, unknow
   return (await response.json()) as Record<string, unknown>;
 }
 
+/** One submit, the way the page makes it — overrides are how a test misbehaves. */
+async function postInput(
+  url: string,
+  value: string,
+  overrides: { method?: string; headers?: Record<string, string>; body?: string } = {},
+): Promise<Response> {
+  const init: RequestInit = {
+    method: overrides.method ?? 'POST',
+    headers: { 'content-type': 'application/json', ...overrides.headers },
+  };
+  if (init.method !== 'GET') init.body = overrides.body ?? JSON.stringify({ value });
+  return fetch(`${url}/input`, init);
+}
+
 describe('login page', () => {
   test('serves the shell on the token path and nothing anywhere else', async () => {
     const page = startLoginPage();
@@ -19,11 +33,19 @@ describe('login page', () => {
 
       const shell = await fetch(page.url);
       expect(shell.status).toBe(200);
-      expect(await shell.text()).toContain('<title>MitID login — aula</title>');
+      expect(await shell.text()).toContain('<title>MitID-login — aula</title>');
 
       // The token is the access control, so every other spelling is a 404 —
-      // including the one an unlucky guess would land on.
-      for (const path of ['/', '/state', '/../etc/passwd', `/${crypto.randomUUID()}`]) {
+      // including the one an unlucky guess would land on, and including the
+      // input endpoint, which is a 404 before it is anything else.
+      for (const path of [
+        '/',
+        '/state',
+        '/input',
+        '/../etc/passwd',
+        `/${crypto.randomUUID()}`,
+        `/${crypto.randomUUID()}/input`,
+      ]) {
         expect((await fetch(origin + path)).status).toBe(404);
       }
     } finally {
@@ -40,8 +62,33 @@ describe('login page', () => {
     }
   });
 
-  test('answers a client that is already current with a short body', async () => {
+  test('opens on the username form, before any MitID session exists', async () => {
     const page = startLoginPage();
+    try {
+      // The whole point of the change: the page is up and asking while nothing
+      // MitID-side has started ticking.
+      expect((await fetchState(page.url)).kind).toBe('ask-username');
+    } finally {
+      page.close();
+    }
+  });
+
+  test('never offers a password field', async () => {
+    const page = startLoginPage();
+    try {
+      const shell = await fetch(page.url);
+      // A hard rule from AGENTS.md: this tool never performs a MitID approval
+      // and never handles a secret. Everything secret happens on the user's own
+      // phone, so a password input on this page would always be a phishing
+      // surface — there is no legitimate reason for one to appear.
+      expect(await shell.text()).not.toContain('type="password"');
+    } finally {
+      page.close();
+    }
+  });
+
+  test('answers a client that is already current with a short body', async () => {
+    const page = startLoginPage({ kind: 'starting' });
     try {
       const first = await fetchState(page.url);
       expect(first.kind).toBe('starting');
@@ -112,5 +159,166 @@ describe('login page', () => {
     // A headless login should not pay for a page nobody opened.
     expect((Bun.nanoseconds() - started) / 1e6).toBeLessThan(100);
     await expect(fetch(page.url)).rejects.toThrow();
+  });
+});
+
+describe('login page input', () => {
+  test('a submitted username resolves the ask and moves the page on', async () => {
+    const page = startLoginPage();
+    try {
+      const asked = page.askUsername();
+      const armed = await fetchState(page.url);
+      expect(armed.kind).toBe('ask-username');
+
+      const response = await postInput(page.url, '  eksempelforaelder  ');
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+
+      // Trimmed, because a copied username brings a space with it often enough.
+      expect(await asked).toBe('eksempelforaelder');
+
+      // The page must not be left on a form whose submit is now a 409.
+      const after = await fetchState(page.url, armed.rev as number);
+      expect(after.kind).toBe('starting');
+      expect(after.rev).toBe((armed.rev as number) + 1);
+    } finally {
+      page.close();
+    }
+  });
+
+  test('re-asking carries the error onto the form', async () => {
+    const page = startLoginPage({ kind: 'starting' });
+    try {
+      void page.askUsername({ error: 'MitID kender ikke det brugernavn.' });
+      const state = await fetchState(page.url);
+      expect(state).toMatchObject({
+        kind: 'ask-username',
+        error: 'MitID kender ikke det brugernavn.',
+      });
+    } finally {
+      page.close();
+    }
+  });
+
+  test('an unusable value is answered inline and leaves the ask armed', async () => {
+    const page = startLoginPage();
+    try {
+      const asked = page.askUsername();
+
+      const rejected = await postInput(page.url, '   ');
+      // 200 with ok:false, not a 4xx: the page shows the message beside the
+      // field, and the CLI never hears about a value it cannot use.
+      expect(rejected.status).toBe(200);
+      expect(await rejected.json()).toMatchObject({ ok: false });
+
+      // Still armed, so the typo can simply be corrected.
+      const second = await postInput(page.url, 'eksempelforaelder');
+      expect(await second.json()).toEqual({ ok: true });
+      expect(await asked).toBe('eksempelforaelder');
+    } finally {
+      page.close();
+    }
+  });
+
+  test('a second submit with nothing armed is a 409, not a race', async () => {
+    const page = startLoginPage();
+    try {
+      const asked = page.askUsername();
+      expect((await postInput(page.url, 'eksempelforaelder')).status).toBe(200);
+      await asked;
+
+      const again = await postInput(page.url, 'en-anden-bruger');
+      expect(again.status).toBe(409);
+      expect(await again.json()).toMatchObject({ ok: false });
+    } finally {
+      page.close();
+    }
+  });
+
+  test('a submit that lands after the outcome cannot overwrite it', async () => {
+    const page = startLoginPage();
+    await fetchState(page.url); // a browser is watching, so finish() waits for one
+
+    // The deadline expiring while the parent is mid-click: the ask is still
+    // armed when the login gives up and publishes why it did.
+    void page.askIdentity(['Alma Eksempelsen', 'Viggo Eksempelsen']);
+    const finished = page.finish({ ok: false, message: 'Der gik for lang tid.' });
+
+    expect((await postInput(page.url, '1')).status).toBe(409);
+
+    // The Danish explanation is the only account of the failure the parent
+    // gets, so it has to survive the late submit rather than being replaced by
+    // the spinner that accepting one would show.
+    const state = await fetchState(page.url);
+    expect(state).toMatchObject({ kind: 'done', ok: false, message: 'Der gik for lang tid.' });
+    await finished;
+  });
+
+  test('rejects anything but a same-host JSON POST', async () => {
+    const page = startLoginPage();
+    try {
+      void page.askUsername();
+
+      // A GET would put the username in browser history and every log on the
+      // way; the page only ever POSTs.
+      expect((await postInput(page.url, 'x', { method: 'GET' })).status).toBe(405);
+
+      // Not a CORS-safelisted content type, so a cross-origin page cannot send
+      // it without a preflight this server never answers — and a plain
+      // cross-origin <form> cannot send it at all.
+      expect(
+        (
+          await postInput(page.url, 'x', {
+            headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          })
+        ).status,
+      ).toBe(415);
+
+      // DNS rebinding: an attacker's domain pointed at 127.0.0.1 is
+      // same-origin to the browser, but it cannot forge the Host header.
+      expect((await postInput(page.url, 'x', { headers: { host: 'aula.example' } })).status).toBe(
+        403,
+      );
+
+      // The body is read into a string before anything is decided about it.
+      expect((await postInput(page.url, 'x', { body: 'x'.repeat(4096) })).status).toBe(413);
+    } finally {
+      page.close();
+    }
+  });
+
+  test('the identity picker round-trips a 1-based index', async () => {
+    const page = startLoginPage({ kind: 'starting' });
+    try {
+      const options = ['Alma Eksempelsen — forælder', 'Viggo Eksempelsen — forælder'];
+      const asked = page.askIdentity(options);
+      expect(await fetchState(page.url)).toMatchObject({ kind: 'ask-identity', options });
+
+      // 1-based, because that is what `IdentityOption.index` and the vendored
+      // `selectIdentity` callback are matched on — an off-by-one here logs in
+      // as the wrong person rather than failing.
+      expect((await postInput(page.url, '2')).status).toBe(200);
+      expect(await asked).toBe(2);
+    } finally {
+      page.close();
+    }
+  });
+
+  test('an out-of-range identity is answered inline and leaves the ask armed', async () => {
+    const page = startLoginPage({ kind: 'starting' });
+    try {
+      const asked = page.askIdentity(['Alma Eksempelsen — forælder']);
+
+      for (const value of ['0', '2', '1.5', 'first', '']) {
+        const rejected = await postInput(page.url, value);
+        expect(rejected.status).toBe(200);
+        expect(await rejected.json()).toMatchObject({ ok: false });
+      }
+
+      expect((await postInput(page.url, '1')).status).toBe(200);
+      expect(await asked).toBe(1);
+    } finally {
+      page.close();
+    }
   });
 });

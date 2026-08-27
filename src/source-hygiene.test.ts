@@ -2,8 +2,9 @@
  * Bytes that should never be in the source.
  *
  * This repo has shipped invisible characters twice: a raw NUL used as a cache
- * key delimiter, and raw ETX/DEL in the raw-mode stdin switch. Both were
- * legitimate values written the wrong way — `'\x03'` says the same thing to the
+ * key delimiter, and raw ETX/DEL in the raw-mode stdin switch of a password
+ * prompt that has since been deleted. Both were legitimate values written the
+ * wrong way — `'\x03'` says the same thing to the
  * compiler and something quite different to a reviewer. Git also treats a file
  * containing a NUL as binary, which silently costs you diffs, blame and merges.
  *

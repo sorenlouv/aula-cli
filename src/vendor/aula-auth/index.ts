@@ -14,7 +14,7 @@ export { AulaCookieJar } from './cookies.ts';
 export { AulaAuthFlowError } from './errors.ts';
 export { AulaHttpClient } from './http.ts';
 export { type Logger, silentLogger, stderrLogger } from './logger.ts';
-export { MitidParallelSessionError } from './mitid-client.ts';
+export { MitidIdentityNotFoundError, MitidParallelSessionError } from './mitid-client.ts';
 export {
   EncryptedFileTokenStore,
   type StoredTokenRecord,

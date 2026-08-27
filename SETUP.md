@@ -6,10 +6,10 @@ claude.ai address they can bookmark — it refreshes itself every weekday
 morning, so they never have to open Claude Code again to read it.
 
 Work steps 0–8 in order, then offer the optional extras. In a normal run the
-user is needed three times: their MitID username (step 2), their phone
-approval (step 2), and the optional extras at the end. Everything else,
-run without asking. When something fails, follow its section — a failure can
-add a stop, such as a login the user has to run themselves.
+user is needed twice: the login page (step 2), where they type their MitID
+username and approve on their phone, and the optional extras at the end.
+Everything else, run without asking. When something fails, follow its section
+— a failure can add a stop, such as a login the user has to run themselves.
 
 Say in one sentence what you are about to do before each step, and report the
 outcome after it. Speak plainly — the reader is a parent, not an engineer.
@@ -94,36 +94,46 @@ full `~/.local/bin/aula`.
 
 ## 2. Log in with MitID
 
-Login needs a MitID username, and there is no terminal here to ask in — so ask
-in the chat. This is one of the three expected stops.
+The whole login happens on one page in the user's own browser. This is the
+expected stop, and your only job is to hand over the link and wait.
 
-1. Ask the user for their **MitID username** — what they type into MitID, not
-   their name in Aula.
-2. Run in the background, with a 10-minute timeout:
-   `aula login --username "<username>"`
-3. It prints a `http://127.0.0.1:…` link and opens it. Give the user the link
-   as well, and tell them to leave the page open: it shows the MitID challenge,
-   which they approve in the MitID app on their phone.
-4. Watch for `Login successful`, or for a failure with its reason.
+1. Run in the background, with a 10-minute timeout: `aula login`
+2. It prints a `http://127.0.0.1:…` link and opens it. Give the user the link
+   as well, and tell them to leave the page open until it says they are logged
+   in. The page asks for their MitID username, then shows the challenge they
+   approve in the MitID app on their phone.
+3. Watch for `Login successful`, or for a failure with its reason.
+
+**Do not ask for the MitID username in the chat.** The page asks for it, and
+nothing is sent to MitID until it arrives. That order is the whole point: a
+login started before the user has found the link sits and ages while they go
+looking for it, and an aged login is what causes the parallel-session error
+below.
+
+**Never ask for their MitID password, and never type one.** This login never
+uses one — approving is a tap in the MitID app.
+
+If the user has more than one MitID identity — common when they also have one
+for work — the page asks which to use. Nothing is needed from you.
 
 The login refreshes itself from then on.
 
-**Never ask for their MitID password, and never type one.** The default login
-does not use one. `--method CODE_TOKEN` (kodeviser) does, which is why you must
-not use it: it stops at a password prompt that no agent can answer. If the user
-only has a kodeviser, hand them the command and let them run it themselves in
-their own terminal.
+Two failures need a person:
 
-Two failures need a person, because the login asks a question mid-flight and
-there is no flag for the answer:
+- **`Could not start the local login page`.** Both the username and the
+  approval are collected there, so there is nothing to fall back to: this
+  machine has to be able to open a page on itself. Ask the user to run
+  `aula login` in their own terminal on this machine, and continue once they
+  say it succeeded.
+- **The identity question was never answered.** If the page asks which MitID
+  identity to use and nobody picks one within two minutes, the command gives
+  up — by then MitID's own session is expiring, and an answer arriving after it
+  dies is worse than none. Nothing is broken and nothing was left behind; run
+  `aula login` again when the user is ready to sit with it.
 
-- **More than one MitID identity** (common if the user also has a work
-  identity). The login stops at a numbered list after the phone approval.
-- Anything else that ends in `stdin is empty`.
-
-In both cases, ask the user to open a terminal, run
-`aula login --username "<name>"` themselves, and answer the question it asks.
-Continue once they say it succeeded.
+There is no such limit on the username: the page will wait for it as long as
+the user needs, because nothing has been started on MitID's side yet. The
+10-minute timeout on the command is the only clock running.
 
 A **parallel session** error (CAP008) means an earlier attempt is still live on
 MitID's side: reject any pending approval in the app, close aula.dk tabs, wait
@@ -263,10 +273,12 @@ time — it is not tied to setup.
   (step 2).
 - **Exit code 2 from `login` itself** — that attempt failed. Read the message
   and fix its cause; retrying blindly risks CAP008.
-- **`stdin is empty`** — the login needed an answer to a question. Only the
-  username has a flag (`--username`); a password prompt, kodeviser digits or
-  an identity choice all need the user to run the login themselves in a
-  terminal.
+- **`Could not start the local login page`** — `login` has no other surface:
+  the username is typed there and the approval is shown there. The user has to
+  run `aula login` themselves on that machine (step 2).
+- **The login gave up waiting** — nobody answered the page in time. Nothing
+  reached MitID, so there is no session left over: run `aula login` again once
+  the user is ready.
 - **Sensitive threads missing** — `aula refresh-stepup`.
 - **A weekly plan says COULD NOT BE READ** — the school's vendor failed; it is
   not an empty week. The warning names the vendor.

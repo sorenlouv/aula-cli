@@ -1066,3 +1066,83 @@ test('Aula being down does not send the user off to redo MitID', () => {
   assert.match(flat, /Aula is having trouble/i);
   assert.doesNotMatch(flat, /bun run login/, 'logging in again cannot fix an outage');
 });
+
+/**
+ * The invariant the whole login page rests on: the page is up, and MitID has
+ * not been touched.
+ *
+ * `login` used to take the username as an argument, which meant an agent asked
+ * for it in the chat and the MitID session started on the same command line.
+ * Now the page is asked first and MitID second, and the gap between them is
+ * unbounded — the user can go and find a username they have not typed in a
+ * year. That is only safe while nothing has been started on MitID's side, so
+ * this asserts the ordering rather than trusting it: the page answers, and the
+ * request log is empty.
+ *
+ * `--no-open` exists for this test as much as for headless machines. Without
+ * it, `openLoginPage` spawns a browser, and running the suite would open a
+ * window on whoever is running it.
+ */
+test('login serves the username page without contacting MitID', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'aula-cli-login-test-'));
+  sandboxes.push(dir);
+  const log = join(dir, 'requests.log');
+  writeFileSync(log, '');
+
+  // Deliberately not seeded with tokens: this is the state a first-time setup
+  // is actually in, and `login` is the one command that must work from it.
+  const proc = Bun.spawn({
+    cmd: ['bun', '--preload', PRELOAD, ENTRY, 'login', '--no-open'],
+    env: { ...process.env, AULA_DIR: dir, FAKE_AULA_LOG: log, NO_COLOR: '1' },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  try {
+    const stderr = await readUntilUrl(proc.stderr);
+    const url = stderr.match(/http:\/\/127\.0\.0\.1:\d+\/[0-9a-f-]{36}/)?.[0];
+    assert.ok(url, `login printed no page URL:\n${stderr}`);
+
+    // The line that keeps an agent from reverting to the old habit. It is
+    // instruction, not decoration, so it is worth a test.
+    assert.match(stderr, /do not ask for the username in the chat/i);
+    // The failure the old terminal prompt produced when an agent drove it.
+    assert.doesNotMatch(stderr, /stdin/i);
+
+    const state = (await (await fetch(`${url}/state`)).json()) as { kind: string };
+    assert.equal(state.kind, 'ask-username', 'the page is armed and waiting for the username');
+
+    // The point of the whole ordering: nothing has gone out yet. `fake-aula.ts`
+    // replaces `globalThis.fetch` and logs every call, and the vendored HTTP
+    // client goes through that same global — so an empty log is proof, not an
+    // absence of evidence.
+    assert.deepEqual(
+      readFileSync(log, 'utf8').split('\n').filter(Boolean),
+      [],
+      'MitID must not be contacted before the username arrives',
+    );
+  } finally {
+    proc.kill();
+  }
+});
+
+/** Reads stderr until the login page announces its address, or gives up. */
+async function readUntilUrl(stream: ReadableStream<Uint8Array>): Promise<string> {
+  const decoder = new TextDecoder();
+  const reader = stream.getReader();
+  let seen = '';
+  const collect = (async () => {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      seen += decoder.decode(value, { stream: true });
+      if (/http:\/\/127\.0\.0\.1:\d+\/[0-9a-f-]{36}/.test(seen)) return;
+    }
+  })();
+  // The URL is printed as soon as the port binds, so this ceiling is only ever
+  // reached when the command died on the way there — in which case `seen` holds
+  // whatever it managed to say, which is what the assertion above will show.
+  await Promise.race([collect, Bun.sleep(20_000)]);
+  reader.releaseLock();
+  return seen;
+}

@@ -1,13 +1,12 @@
 /**
  * QR codes as SVG, for the login page.
  *
- * The terminal renderer in `qr.ts` draws with half-block characters, which only
- * works where a character cell is a known rectangle of pixels. A browser is not
- * that, so the same payload has to be drawn as geometry — and the module matrix
- * is the one thing qrcode-terminal's public API does not hand out. Its vendored
- * encoder does, so this reaches past `generate()` into `vendor/QRCode`: same
- * dependency, same encoder, same bytes on screen as the terminal path, and no
- * second QR library to keep in step with the first.
+ * A QR symbol has to be drawn as geometry here, and the module matrix is the
+ * one thing qrcode-terminal's public API does not hand out — `generate()` draws
+ * half-block characters to a stream and keeps the grid to itself. Its vendored
+ * encoder does hand it out, so this reaches past `generate()` into
+ * `vendor/QRCode`: same dependency, same encoder, and no second QR library to
+ * keep in step with the first.
  *
  * Black on white in both themes, deliberately. Plenty of scanners refuse an
  * inverted code, and a dark-mode QR that will not scan is worse than no page.

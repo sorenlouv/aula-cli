@@ -178,10 +178,9 @@ type them:
   bypasses the cache, so it accepts neither --no-cache nor --cache-ttl.
 
 Login options:
-  --username <name>            MitID username
-  --method <APP|CODE_TOKEN>    App approval (default) or kodeviser
   --debug                      Write a sanitised wire transcript during login
-  --no-browser                 Never open the approval page; stay in this terminal
+  --no-open                    Print the login page's address without opening a
+                               browser (the page is still where you log in)
 
 Examples:
   aula new
@@ -300,12 +299,7 @@ async function main(): Promise<number> {
     return runSchedule({ remove: values.remove === true, ...(values.at ? { at: values.at } : {}) });
   }
   if (command === 'login') {
-    return runLogin({
-      ...(values.username ? { username: values.username } : {}),
-      method: parseAuthMethod(values.method),
-      debug: values.debug === true,
-      noBrowser: values['no-browser'] === true,
-    });
+    return runLogin({ debug: values.debug === true, noOpen: values['no-open'] === true });
   }
   if (command === 'logout') return runLogout();
   if (command === 'status') return runStatus(asText);
@@ -1616,13 +1610,6 @@ function renderCommonFiles(files: NormalCommonFile[]): string {
       );
     })
     .join('\n');
-}
-
-/** `APP` is the MitID app; `CODE_TOKEN` is the physical kodeviser. */
-function parseAuthMethod(raw: string | undefined): 'APP' | 'CODE_TOKEN' {
-  const value = (raw ?? 'APP').toUpperCase();
-  if (value === 'APP' || value === 'CODE_TOKEN') return value;
-  throw new UsageError(`Unknown --method "${raw}". Use APP (default) or CODE_TOKEN.`);
 }
 
 // ----------------------------------------------------------------------- run

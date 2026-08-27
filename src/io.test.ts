@@ -1,10 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { openCommand } from './io.ts';
-
-const CLI = join(import.meta.dir, 'cli.ts');
 
 /** Runs `fn` as if on another platform. */
 function asPlatform<T>(platform: NodeJS.Platform, fn: () => T): T {
@@ -33,27 +28,4 @@ describe('openCommand', () => {
       expect(asPlatform(platform, () => openCommand(url)).at(-1)).toBe(url);
     }
   });
-});
-
-describe('prompting with nothing attached', () => {
-  // The regression this exists for: `readline.question()` on a stdin already at
-  // EOF never settles. `login` then sat there until whatever was driving it
-  // gave up — two silent minutes in an agent, and no clue what went wrong.
-  test('fails immediately instead of waiting for an answer that cannot come', async () => {
-    const proc = Bun.spawn(['bun', CLI, 'login'], {
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env: { ...process.env, AULA_DIR: mkdtempSync(join(tmpdir(), 'aula-io-')) },
-    });
-
-    const kill = setTimeout(() => proc.kill(), 10_000);
-    const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
-    clearTimeout(kill);
-
-    expect(exitCode).not.toBe(0);
-    expect(stderr).toContain('stdin is empty');
-    // The whole value of failing here is saying what to do instead.
-    expect(stderr).toContain('--username');
-  }, 15_000);
 });

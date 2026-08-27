@@ -78,8 +78,10 @@ export interface SrpStage3Args {
   srpSaltHex: string;
   /** Server-supplied B as a hex string. */
   randomBHex: string;
-  /** Password material — already a hex string (e.g. PBKDF2 output) for the
-   * PASSWORD/CODE_TOKEN flows; the client passes whatever the spec dictates. */
+  /** Password material as a hex string. On the APP path this is the channel
+   * binding value; the removed kodeviser and password flows hex-encoded the
+   * flow key and a PBKDF2 digest respectively. The client passes whatever the
+   * spec dictates for the authenticator in play. */
   passwordHex: string;
   /** MitID authenticationSessionId — included in the M1 transcript. */
   authSessionId: string;

@@ -6,8 +6,16 @@
  * for scalar fields like `randomA`. We replicate that.
  */
 
-/** Aula's three "human" authenticator names. CODE_TOKEN is what Aula calls
- *  "kodeviser" in Danish — the physical hardware code generator. */
+/**
+ * Aula's three "human" authenticator names. CODE_TOKEN is what Aula calls
+ * "kodeviser" in Danish — the physical hardware code generator.
+ *
+ * This CLI drives only APP: a kodeviser login ends in a password prompt and a
+ * six-digit code nobody is at the terminal to type. CODE_TOKEN and PASSWORD
+ * stay in the union anyway, because this is a *wire* type — MitID nominates
+ * whichever authenticator the account defaults to, so both names still arrive
+ * on the very first `/next` for accounts we then refuse.
+ */
 export type MitidAuthenticatorType = 'APP' | 'CODE_TOKEN' | 'PASSWORD';
 
 /**
@@ -25,6 +33,9 @@ export const COMBINATION_ID_TO_AUTHENTICATOR: Readonly<Record<string, MitidAuthe
 
 export const AUTHENTICATOR_TO_COMBINATION_ID: Readonly<Record<MitidAuthenticatorType, string>> =
   Object.freeze({
+    // Only the APP row is ever looked up now; the other two are here because
+    // the record is keyed by the full wire union, and dropping them would say
+    // those authenticators do not exist rather than that we do not drive them.
     APP: 'S3',
     CODE_TOKEN: 'S1',
     PASSWORD: '', // reached implicitly after CODE_TOKEN
@@ -35,10 +46,11 @@ export const AUTHENTICATOR_TO_COMBINATION_ID: Readonly<Record<MitidAuthenticator
  *
  * The MitID backend labels the hardware code generator ("kodeviser") as
  * `TOKEN`, while we call it `CODE_TOKEN` everywhere (matching Aula's UI and
- * the combination-id table above). Without this, an account that logs in with
- * a physical kodeviser gets `currentAuthenticatorType = 'TOKEN'`, and the
- * `selectAuthenticator('CODE_TOKEN')` guard then throws because the strings
- * don't match.
+ * the combination-id table above). This still matters even though the
+ * kodeviser flow is gone: MitID nominates the account's default authenticator
+ * before anyone has chosen one, so `TOKEN` reaches this function for every
+ * kodeviser-first account. Refusing to name it here would turn "your MitID has
+ * no app" into an unexplained parse error one line earlier.
  *
  * `APP` and `PASSWORD` pass through unchanged. Unknown values fail here, at
  * the wire boundary, rather than entering the client under a false union type.
@@ -112,9 +124,8 @@ export interface AppPollResponse {
   } | null;
 }
 
-/** Common SRP init response (init / codetoken-init / password-init). */
+/** Common SRP init response (the APP authenticator's `init`). */
 export interface SrpInitResponse {
-  pbkdf2Salt?: { value: string } | null;
   srpSalt: { value: string };
   randomB: { value: string };
 }

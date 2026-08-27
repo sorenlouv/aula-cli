@@ -32,10 +32,7 @@ const OPTION_DEFINITIONS = {
   png: { type: 'boolean' },
   'no-cache': { type: 'boolean' },
   'cache-ttl': { type: 'string' },
-  username: { type: 'string' },
-  method: { type: 'string' },
   debug: { type: 'boolean' },
-  'no-browser': { type: 'boolean' },
 } as const;
 
 type OptionName = keyof typeof OPTION_DEFINITIONS;
@@ -54,7 +51,7 @@ const COMMAND_OPTIONS = {
   'scheduled-run': [],
   'install-skill': ['out'],
   version: [],
-  login: ['username', 'method', 'debug', 'no-browser'],
+  login: ['debug', 'no-open'],
   logout: [],
   status: [...TEXT],
   'refresh-stepup': [],

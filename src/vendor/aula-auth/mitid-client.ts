@@ -27,7 +27,7 @@ import {
   isRecord,
   isString,
 } from '../../validation.ts';
-import { pbkdf2Sha256, sha256 } from './crypto.ts';
+import { sha256 } from './crypto.ts';
 import { AulaAuthFlowError } from './errors.ts';
 import type { AulaHttpClient } from './http.ts';
 import type { Logger } from './logger.ts';
@@ -435,128 +435,6 @@ export class MitidClient {
     }
   }
 
-  // ============ CODE_TOKEN + PASSWORD authenticators =========================
-
-  async authenticateWithToken(digits: string): Promise<void> {
-    await this.selectAuthenticator('CODE_TOKEN');
-    if (!this.currentAuthenticatorSessionId || !this.currentAuthenticatorSessionFlowKey) {
-      throw new MitidError('CODE_TOKEN: missing session id / flow key');
-    }
-
-    const srp = new CustomSrp();
-    const aHex = srp.stage1();
-
-    const initRes = await this.postJson(
-      mitidUrls.codeTokenInit(this.currentAuthenticatorSessionId),
-      { randomA: { value: aHex } },
-    );
-    if (initRes.status !== 200) {
-      throw new MitidError(`codeTokenInit failed (status ${initRes.status})`);
-    }
-    const init = parseSrpInitResponse(initRes.body);
-
-    // The SRP password for CODE_TOKEN is the flow key bytes hex-encoded.
-    const passwordHex = Buffer.from(this.currentAuthenticatorSessionFlowKey, 'utf8').toString(
-      'hex',
-    );
-
-    const { m1Hex, K } = srp.stage3({
-      srpSaltHex: init.srpSalt.value,
-      randomBHex: init.randomB.value,
-      passwordHex,
-      authSessionId: this.currentAuthenticatorSessionId,
-    });
-
-    const flowProofMessage = buildFlowProofMessage(this.flowProofContext());
-    const flowValueProof = signFlowValueProof(flowProofMessage, K, `OTP${digits}`);
-
-    const proveRes = await this.postJson(
-      mitidUrls.codeTokenProve(this.currentAuthenticatorSessionId),
-      {
-        m1: { value: m1Hex },
-        flowValueProof: { value: flowValueProof },
-        frontEndProcessingTime: 100,
-      },
-    );
-    if (proveRes.status !== 204) {
-      throw new MitidError(`codeTokenProve failed (status ${proveRes.status})`);
-    }
-
-    const next = await this.postNext('');
-    this.assertNoFatalErrors(next);
-
-    if (next.errors?.[0]?.errorCode === 'TOTP_INVALID') {
-      throw new MitidError(`CODE_TOKEN rejected: ${next.errors[0].message ?? 'invalid token'}`);
-    }
-    if (next.nextAuthenticator?.authenticatorType !== 'PASSWORD') {
-      throw new MitidError('CODE_TOKEN succeeded but next authenticator is not PASSWORD');
-    }
-    this.applyNextAuthenticator(next.nextAuthenticator);
-  }
-
-  async authenticateWithPassword(password: string): Promise<void> {
-    if (this.currentAuthenticatorType !== 'PASSWORD') {
-      throw new MitidError(
-        `authenticateWithPassword requires PASSWORD step (current: ${this.currentAuthenticatorType ?? 'none'})`,
-      );
-    }
-    if (!this.currentAuthenticatorSessionId) {
-      throw new MitidError('PASSWORD: missing session id');
-    }
-
-    const srp = new CustomSrp();
-    const aHex = srp.stage1();
-
-    const initRes = await this.postJson(
-      mitidUrls.passwordInit(this.currentAuthenticatorSessionId),
-      { randomA: { value: aHex } },
-    );
-    if (initRes.status !== 200) {
-      throw new MitidError(`passwordInit failed (status ${initRes.status})`);
-    }
-    const init = parseSrpInitResponse(initRes.body);
-    if (!init.pbkdf2Salt) {
-      throw new MitidError('passwordInit response missing pbkdf2Salt');
-    }
-
-    const pbkdfSaltBytes = Buffer.from(init.pbkdf2Salt.value, 'hex');
-    const passwordHex = pbkdf2Sha256(password, pbkdfSaltBytes, 20_000, 32).toString('hex');
-
-    const { m1Hex, K } = srp.stage3({
-      srpSaltHex: init.srpSalt.value,
-      randomBHex: init.randomB.value,
-      passwordHex,
-      authSessionId: this.currentAuthenticatorSessionId,
-    });
-
-    const flowProofMessage = buildFlowProofMessage(this.flowProofContext());
-    const flowValueProof = signFlowValueProof(flowProofMessage, K, 'flowValues');
-
-    const proveRes = await this.postJson(
-      mitidUrls.passwordProve(this.currentAuthenticatorSessionId),
-      {
-        m1: { value: m1Hex },
-        flowValueProof: { value: flowValueProof },
-        frontEndProcessingTime: 100,
-      },
-    );
-    if (proveRes.status !== 204) {
-      throw new MitidError(`passwordProve failed (status ${proveRes.status})`);
-    }
-
-    const next = await this.postNext('');
-    this.assertNoFatalErrors(next);
-    if (next.errors?.length) {
-      const msg = next.errors[0]?.message ?? 'password rejected';
-      throw new MitidError(`PASSWORD rejected: ${msg}`);
-    }
-    if (!next.nextSessionId) {
-      throw new MitidError('PASSWORD prove succeeded but nextSessionId missing');
-    }
-    this.finalizationSessionId = next.nextSessionId;
-    this.logger.info('mitid.password_authenticated');
-  }
-
   // ============ Finalization =================================================
 
   async finalize(): Promise<string> {
@@ -613,6 +491,10 @@ export class MitidClient {
   private applyNextAuthenticator(next: NextAuthenticator): void {
     // The server may use a different label than our human type — notably it
     // returns `TOKEN` for the hardware kodeviser, which we call `CODE_TOKEN`.
+    // This CLI never drives that authenticator, but MitID still nominates it:
+    // on an account whose default is the kodeviser, `TOKEN` arrives here on the
+    // very first `/next`. Normalising it is what turns that into "APP is not
+    // available for this account" instead of a parse failure.
     let human: MitidAuthenticatorType;
     try {
       human = normalizeAuthenticatorType(next.authenticatorType);
@@ -776,12 +658,7 @@ function isStringValue(value: unknown): value is StringValue {
 }
 
 function isSrpInitResponse(value: unknown): value is SrpInitResponse {
-  return (
-    isRecord(value) &&
-    isOptional(value.pbkdf2Salt, isStringValue) &&
-    isStringValue(value.srpSalt) &&
-    isStringValue(value.randomB)
-  );
+  return isRecord(value) && isStringValue(value.srpSalt) && isStringValue(value.randomB);
 }
 
 export function parseSrpInitResponse(body: string): SrpInitResponse {

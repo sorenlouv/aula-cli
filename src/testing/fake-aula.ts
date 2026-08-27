@@ -241,10 +241,20 @@ function record(what: string): void {
   if (log) appendFileSync(log, `${what}\n`);
 }
 
+/** The hosts this stub knows how to answer. Anything else is worth recording. */
+const KNOWN_HOSTS = new Set(['www.aula.dk', 'app.meebook.com', 'api.minuddannelse.net']);
+
 async function handle(input: string | Request | URL, init?: RequestInit): Promise<Response> {
   const url = new URL(
     typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
   );
+
+  // A host nobody wired up used to fall through to the Aula switch and answer
+  // `envelope(null)` silently, which made "the request log is empty" a claim
+  // about the log rather than about the process. `login`'s test asserts MitID is
+  // not contacted before the username arrives, and that assertion is only worth
+  // anything if a call to nemlog-in.mitid.dk actually leaves a mark.
+  if (!KNOWN_HOSTS.has(url.host)) record(`unexpected ${url.host}`);
 
   if (url.host === 'app.meebook.com') {
     record(`meebook ${url.searchParams.getAll('childFilter[]').join(',')}`);

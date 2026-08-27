@@ -51,7 +51,11 @@ describe('signFlowValueProof', () => {
   // Vectors computed via:
   //   node -e "const c=require('crypto');const K=Buffer.alloc(32,0x11);const k=c.createHash('sha256').update('<prefix>'+K.toString('hex')).digest();console.log(c.createHmac('sha256',k).update('msg').digest('hex'))"
 
-  test('CODE_TOKEN produces hex with prefix "OTP" + digits', () => {
+  // The `OTP` + digits prefix belonged to the kodeviser flow, which this CLI no
+  // longer drives. The vector stays because it is the only case that proves the
+  // prefix reaches the key derivation at all: with a single live prefix, a bug
+  // that ignored the argument entirely would still produce the expected hex.
+  test('a non-default prefix changes the derived key', () => {
     const proof = signFlowValueProof(message, K, 'OTP123456');
     expect(proof).toBe('17a8239ce89070cc37816cf7af3197fbd0ad0ef4fa742932954a500f30e18e39');
   });

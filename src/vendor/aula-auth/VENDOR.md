@@ -48,6 +48,31 @@ readable as intentional-vs-drift.
   override; the `defaultHeaders`/`noDefaultHeaders`/`maxHops` HTTP options;
   the base64 arm of `signFlowValueProof` (only the removed `/complete` path
   used it); and the `CookieJar` back-compat constructor branch.
+- **Removed the kodeviser (CODE_TOKEN) and PASSWORD authenticators**
+  (2026-08-27). A kodeviser login ends in a MitID password and six digits read
+  off a physical code generator, both typed at the terminal — and the terminal
+  is no longer a login surface at all: `aula login` now asks everything on the
+  loopback page, which has no password field and never will. Keeping the flow
+  meant carrying a second SRP path that nothing could reach. Removed:
+  `MitidClient.authenticateWithToken` and `authenticateWithPassword`; the
+  `codeTokenInit`/`codeTokenProve`/`passwordInit`/`passwordProve` URL builders;
+  `pbkdf2Sha256` and its tests (the PASSWORD derivation was its only caller —
+  the token store uses AES-GCM); `SrpInitResponse.pbkdf2Salt` and its validator
+  arm; and, on the client, `AulaAuthMethod`, `AulaLoginCredentials`, the
+  `method`/`password`/`promptForCodeToken` options and the branch they fed, so
+  `assertMethodAvailable` becomes `assertAppAvailable`.
+
+  Kept **on purpose**, and the reason a future vendor diff should not "finish
+  the job": `MitidAuthenticatorType` still carries `'CODE_TOKEN'` and
+  `'PASSWORD'`, `normalizeAuthenticatorType` still maps the server's raw
+  `'TOKEN'` onto the first of them, and both still have rows in the combination
+  tables. That union is a *wire* type, not a menu — MitID nominates whatever
+  authenticator the account defaults to, so on a kodeviser-first account
+  `'TOKEN'` arrives on the very first `/next`, before anything has been chosen.
+  Narrowing the union to `'APP'` would turn "your MitID has no app" into
+  `Unknown MitID authenticator type: TOKEN` thrown from a JSON validator.
+  `MitidAuthenticatorUnavailableError` stays too: two of its three throw sites
+  are on the APP path.
 - **Renamed the base error `AulaAuthError` → `AulaAuthFlowError`.** The main
   codebase has its own `AulaAuthError` in `client.ts` ("credentials expired"),
   and two unrelated classes sharing a name meant vendor errors missed the

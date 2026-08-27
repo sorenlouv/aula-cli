@@ -130,7 +130,6 @@ describe('MitID wire response parsers', () => {
         JSON.stringify({
           srpSalt: { value: 'salt' },
           randomB: { value: 'random' },
-          pbkdf2Salt: { value: 'pbkdf' },
         }),
       ).randomB.value,
     ).toBe('random');

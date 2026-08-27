@@ -82,16 +82,23 @@ fallback sources.
 - `family.ts` resolves the id sets endpoints want once
   (`postInstitutionProfileIds`, `childInstitutionProfileIds`,
   `institutionCodes`); re-deriving at a call site is how wrong-id failures start.
-- **An agent cannot drive the terminal login.** `readline`'s `question()` on a
-  stdin already at EOF never settles, so a captured shell gets silence and a
-  killed process. `prompt()` in `io.ts` aborts when the stream closes (not on
-  `isTTY`, which would break legitimate piping) and names the flag that avoids
-  it. Any prompt added to the login path needs the same.
+- **The page starts before any MitID contact.** `aula login` takes no
+  arguments: it binds the loopback page (`login-page.ts`), prints the URL, and
+  only once a username has been typed there does the first MitID request go
+  out. That ordering is the invariant to protect. Collect the username first
+  and the session ages through every minute the user spends finding the link
+  and typing, and an aged, abandoned session is exactly what the CAP008
+  parallel-session detector looks for. It also makes the page load-bearing: a
+  loopback port that will not bind ends `login` rather than falling back, and
+  `io.ts` no longer reads stdin at all — there is no terminal prompt left to
+  fall back to, and adding one back would reopen both problems.
 - **The MitID QR pair cannot be relayed through a chat** — it rotates every few
-  seconds and is a picture either way. Off a TTY the approval is served as a
-  loopback page (`login-page.ts`) and the terminal renderer is skipped, because
-  it appends rather than redraws there and would push a fresh QR block into the
-  driving agent's context on every rotation.
+  seconds and is a picture either way. So the page draws it, and since the user
+  is already sitting in front of the page, the page takes the answers too:
+  `askUsername` and `askIdentity` arm one question at a time and resolve when
+  the browser POSTs to it. `login.ts` caps both waits, with deliberately
+  different ceilings — before the username there is no MitID session to lose,
+  so waiting is nearly free; after it, one is expiring on their side.
 
 ## Formatting
 
@@ -115,9 +122,25 @@ by hand rather than holding a live MitID session open; it builds its payloads
 with the production `buildQrPayloads`:
 
 ```bash
-bun scripts/login-page-demo.ts        # the rotating QR pair
-bun scripts/login-page-demo.ts otp    # code comparison
+bun scripts/login-page-demo.ts           # the rotating QR pair
+bun scripts/login-page-demo.ts otp       # code comparison
+bun scripts/login-page-demo.ts username  # the username form
+bun scripts/login-page-demo.ts identity  # the identity picker
 ```
+
+The two ask modes call the real `askUsername` / `askIdentity` and reject the
+first answer on purpose: the inline error is the part easiest to get subtly
+wrong and impossible to see from a test.
+
+What *is* tested is the ordering the whole design rests on: `cli.test.ts` spawns
+`aula login --no-open`, reads the page's address off stderr and asserts the page
+answers while the request log is still empty — the page is up, MitID has not
+been touched. That flag exists for this; without it `login` spawns a browser and
+the suite opens a window on whoever runs it. The assertion only means something
+because `fake-aula.ts` records requests to hosts it does not know: before it
+did, an unwired host fell through to the Aula switch and answered `null`
+silently, and "the log is empty" was a fact about the log rather than about the
+process.
 
 ## Releasing
 

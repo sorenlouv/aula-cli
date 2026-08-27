@@ -11,7 +11,6 @@ import {
   createHash,
   createHmac,
   randomBytes as nodeRandomBytes,
-  pbkdf2Sync,
 } from 'node:crypto';
 import { base64url } from './encoding.ts';
 
@@ -31,15 +30,6 @@ export function sha256(input: Buffer | string): Buffer {
 
 export function hmacSha256(key: Buffer | string, data: Buffer | string): Buffer {
   return createHmac('sha256', key).update(data).digest();
-}
-
-export function pbkdf2Sha256(
-  password: Buffer | string,
-  salt: Buffer | string,
-  iterations: number,
-  keyLengthBytes: number,
-): Buffer {
-  return pbkdf2Sync(password, salt, iterations, keyLengthBytes, 'sha256');
 }
 
 export interface AesGcmCiphertext {

@@ -40,26 +40,6 @@ export const mitidUrls = {
     return `${MITID_HOST}/mitid-code-app-auth/v1/authenticator-sessions/web/${encodeURIComponent(authenticatorSessionId)}/verify`;
   },
 
-  // --- CODE_TOKEN authenticator --------------------------------------------
-
-  codeTokenInit(authenticatorSessionId: string): string {
-    return `${MITID_HOST}/mitid-code-token-auth/v1/authenticator-sessions/${encodeURIComponent(authenticatorSessionId)}/codetoken-init`;
-  },
-
-  codeTokenProve(authenticatorSessionId: string): string {
-    return `${MITID_HOST}/mitid-code-token-auth/v1/authenticator-sessions/${encodeURIComponent(authenticatorSessionId)}/codetoken-prove`;
-  },
-
-  // --- PASSWORD authenticator ----------------------------------------------
-
-  passwordInit(authenticatorSessionId: string): string {
-    return `${MITID_HOST}/mitid-password-auth/v1/authenticator-sessions/${encodeURIComponent(authenticatorSessionId)}/init`;
-  },
-
-  passwordProve(authenticatorSessionId: string): string {
-    return `${MITID_HOST}/mitid-password-auth/v1/authenticator-sessions/${encodeURIComponent(authenticatorSessionId)}/password-prove`;
-  },
-
   // --- nemlog-in (the SAML wrapper around MitID) ---------------------------
 
   loginMitid: `${NEMLOGIN_HOST}/login/mitid`,
