@@ -21,6 +21,7 @@ import type {
 import { localDayDifference } from './integrations/types.ts';
 import { remoteReadSignal } from './transport.ts';
 import { isRecord, parseInteger } from './validation.ts';
+import { cmd } from './runtime.ts';
 
 const FALLBACK_API_VERSION = 24;
 /**
@@ -195,7 +196,7 @@ function withLogin(problem: Remedy): Remedy {
   return {
     ...problem,
     action: problem.action ?? 'Log in again with MitID:',
-    commands: ['bun run login'],
+    commands: [cmd('login')],
   };
 }
 
@@ -573,8 +574,7 @@ export class AulaClient {
           `aula command running at the same time — which retires the token in hand ` +
           `immediately, whatever its expiry says.`,
         action: 'Run the command again; the next run picks up the current token.',
-        fallback:
-          'If it keeps happening on every run, the stored login is genuinely stale: `bun run login`.',
+        fallback: `If it keeps happening on every run, the stored login is genuinely stale: \`${cmd('login')}\`.`,
       });
     }
 
@@ -601,7 +601,7 @@ export class AulaClient {
             `a profile, or the call named an institution-profile id this login cannot ` +
             `access — one wrong id fails the whole call, it is not filtered out.`,
           action: 'Check which ids this login actually has:',
-          commands: ['bun run aula whoami'],
+          commands: [cmd('whoami')],
           fallback: 'API.md, "Id spaces", explains which id belongs where.',
         });
       }
@@ -624,7 +624,7 @@ export class AulaClient {
           `institution-profile id is *not* this — that comes back as code ` +
           `${STATUS_VERSION_OR_ACCESS}.`,
         action: 'Check which ids and institutions this login actually has:',
-        commands: ['bun run aula whoami'],
+        commands: [cmd('whoami')],
         fallback: 'API.md, "Id spaces", explains which id belongs where.',
       });
     }
@@ -645,7 +645,7 @@ export class AulaClient {
         ? `Aula said: ${envelope.status.message}`
         : 'Aula sent no message with it, and this is not a status code aula-cli knows about.',
       action: 'See which endpoints are working:',
-      commands: ['bun run aula doctor --text'],
+      commands: [cmd('doctor --text')],
       fallback: "If this is reproducible, API.md's status-code table needs a new row.",
     });
   }
@@ -694,7 +694,7 @@ export class AulaClient {
             'down or your login has been rejected, so this may be either — or simply ' +
             'no network. Aula reports both as a server error.',
           action: 'Try, in order:',
-          commands: ['bun run aula doctor --text', 'bun run login'],
+          commands: [cmd('doctor --text'), cmd('login')],
         });
     }
   }
@@ -765,7 +765,7 @@ export class AulaClient {
         `Versions ${ceiling} down to 15 all answered "retired". ` +
         `Aula has moved further than this client expects, so aula-cli needs updating.`,
       action: 'If you know the live version, point this run at it:',
-      commands: ['AULA_API_VERSION=<version> bun run aula whoami'],
+      commands: [`AULA_API_VERSION=<version> ${cmd('whoami')}`],
     });
   }
 
@@ -1303,7 +1303,7 @@ function payloadError(method: string, expected: string, value: unknown): AulaApi
 function unexpectedPayloadAdvice(method: string): Pick<Remedy, 'action' | 'commands' | 'fallback'> {
   return {
     action: 'See exactly what Aula sent:',
-    commands: [`bun run aula raw ${method} --no-cache`],
+    commands: [cmd(`raw ${method} --no-cache`)],
     fallback:
       'If what that prints looks nothing like it used to, Aula has changed their ' +
       'API and aula-cli needs updating.',

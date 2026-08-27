@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+
+/**
+ * The remedy commands are built from how this CLI was invoked, so the tests
+ * assert on that same spelling rather than a frozen literal — a binary user
+ * must never be told to run `bun`, and pinning the old string here is what let
+ * that drift in the first place.
+ */
+const escapeRe = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 import { listAttachments, safeFilename } from './attachments.ts';
 import {
   AulaApiError,
@@ -12,6 +20,7 @@ import {
   formatAulaDate,
 } from './client.ts';
 import { htmlToText, preview } from './html.ts';
+import { cmd } from './runtime.ts';
 import { addLocalDays, localIsoDate } from './integrations/types.ts';
 import {
   normaliseCommonFile,
@@ -369,7 +378,7 @@ test('a response with no status envelope fails explicitly instead of becoming ty
           // The method, and a way to see what Aula actually sent — the two
           // things that make this reportable rather than just annoying.
           assert.match(err.message, /presence\.getDailyOverview/);
-          assert.match(err.message, /aula raw presence\.getDailyOverview/);
+          assert.match(err.message, new RegExp(escapeRe(cmd('raw presence.getDailyOverview'))));
           return true;
         },
       );
@@ -391,7 +400,7 @@ test('an expired credential points at the MitID login', async () => {
       await assert.rejects(
         () => client.getProfiles(),
         (err: unknown) => {
-          assert.match((err as Error).message, /bun run login/);
+          assert.match((err as Error).message, new RegExp(escapeRe(cmd('login'))));
           return true;
         },
       );
@@ -1478,7 +1487,7 @@ test('a 500 with a success envelope is reported as a rejected login, not a shape
             'a token Aula will not accept is an auth problem',
           );
           assert.match(err.message, /rejected your login/i);
-          assert.match(err.message, /bun run login/);
+          assert.match(err.message, new RegExp(escapeRe(cmd('login'))));
           assert.doesNotMatch(err.message, /malformed|payload/i, 'the old, misleading complaint');
           return true;
         },
@@ -1508,7 +1517,7 @@ test('a 500 that Aula gives everyone is reported as an outage, not as a login pr
           assert.match(err.message, /having trouble/i);
           // Sending someone through a MitID round-trip on their phone to fix an
           // outage is the specific waste this distinction buys.
-          assert.doesNotMatch(err.message, /bun run login/);
+          assert.doesNotMatch(err.message, new RegExp(escapeRe(cmd('login'))));
           return true;
         },
       );
@@ -1537,7 +1546,11 @@ test('a success envelope of the wrong shape says what arrived and how to look at
           const flat = (err as Error).message.replace(/\s+/g, ' ');
           assert.match(flat, /does not understand/i);
           assert.match(flat, /a string \("intern fejl"\)/, 'name what actually arrived');
-          assert.match(flat, /aula raw profiles\.getProfilesByLogin/, 'and how to go and see it');
+          assert.match(
+            flat,
+            new RegExp(escapeRe(cmd('raw profiles.getProfilesByLogin'))),
+            'and how to go and see it',
+          );
           return true;
         },
       );

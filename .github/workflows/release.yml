@@ -58,18 +58,33 @@ jobs:
       # longer cover the whole file and codesign calls it "modified" — while
       # the kernel loads it happily, which is the only thing that matters here.
       # Running the binary is the real check, so that is what this does.
+      #
+      # Each job smoke-tests only what it can execute: an arm64 macOS runner
+      # cannot run the x64 build without Rosetta, and neither runner can run
+      # the Windows one. Everything else gets the architecture assertion below,
+      # which is what actually catches a --target typo.
       - name: Smoke-test the native binary
-        if: runner.os == 'macOS'
-        run: ./dist/aula-darwin-arm64 version
-
-      # The other darwin build cannot run on an arm64 runner without Rosetta,
-      # so assert it is at least the architecture it claims to be — a
-      # --target typo would otherwise ship silently.
-      - name: Check the cross-built architectures
-        if: runner.os == 'macOS'
         run: |
-          file dist/aula-darwin-x64 | grep -q 'x86_64'
-          file dist/aula-darwin-arm64 | grep -q 'arm64'
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            ./dist/aula-darwin-arm64 version
+          else
+            chmod +x dist/aula-linux-x64
+            ./dist/aula-linux-x64 version
+          fi
+
+      # Runs on BOTH jobs. It used to be macOS-only, which meant the Linux and
+      # Windows binaries were published with no verification of any kind.
+      - name: Check the built architectures
+        run: |
+          for binary in dist/aula-*; do
+            case "$binary" in
+              *darwin-arm64) file "$binary" | grep -q 'arm64' ;;
+              *darwin-x64)   file "$binary" | grep -q 'x86_64' ;;
+              *linux-x64)    file "$binary" | grep -q 'ELF 64-bit.*x86-64' ;;
+              *windows-x64*) file "$binary" | grep -qi 'PE32+\|MS Windows' ;;
+            esac
+            echo "ok: $(file "$binary")"
+          done
 
       - uses: actions/upload-artifact@v4
         with:

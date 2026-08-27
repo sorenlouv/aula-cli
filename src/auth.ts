@@ -19,6 +19,7 @@ import {
   EncryptedFileTokenStore,
 } from './vendor/aula-auth/index.ts';
 import type { StoredTokenRecord } from './vendor/aula-auth/index.ts';
+import { cmd } from './runtime.ts';
 import {
   DEFAULT_OAUTH_CONFIG,
   TokenStoreError,
@@ -79,13 +80,10 @@ export function tokenStore(): EncryptedFileTokenStore {
   });
 }
 
-const HOW_TO_LOGIN = `
-Run a MitID login:
-  bun run login
-`.trim();
-
 export function loginInstructions(): string {
-  return HOW_TO_LOGIN;
+  // Built per call, not hoisted to a constant: the spelling depends on how this
+  // installation is invoked, and a module-level constant would freeze it.
+  return `Run a MitID login:\n  ${cmd('login')}`;
 }
 
 /** The stored MitID login, refreshed if need be — or a clear "not logged in". */
@@ -93,7 +91,7 @@ export async function resolveAuth(): Promise<Auth> {
   const record = await loadFreshTokens();
   if (!record) {
     throw new AulaSessionError(
-      `Not logged in — no MitID tokens in ${TOKEN_PATH}.\n\n${HOW_TO_LOGIN}`,
+      `Not logged in — no MitID tokens in ${TOKEN_PATH}.\n\n${loginInstructions()}`,
     );
   }
   const cookie = await loadCookieHeader();
@@ -125,7 +123,7 @@ export async function loadFreshTokens(): Promise<StoredTokenRecord | undefined> 
       throw new AulaSessionError(
         `${TOKEN_PATH} exists but could not be read: ${err.message}\n\n` +
           `If $${KEY_ENV} is set it must be the same value the tokens were written with. ` +
-          `Otherwise delete the file and run \`bun run login\` again.`,
+          `Otherwise delete the file and run \`${cmd('login')}\` again.`,
       );
     }
     throw err;

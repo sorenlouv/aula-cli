@@ -63,3 +63,15 @@ export function cliInvocation(): string[] {
 export function commandPrefix(): string {
   return isCompiled() ? process.execPath : 'bun src/cli.ts';
 }
+
+/**
+ * One command, spelled the way *this* installation can actually run it.
+ *
+ * Every "run this to fix it" string has to go through here. A binary user has
+ * no `bun` and no checkout, so telling them to `bun run login` when their
+ * session expires leaves them holding an instruction they cannot carry out —
+ * and that is precisely the moment they most need a working one.
+ */
+export function cmd(args: string): string {
+  return `${commandPrefix()} ${args}`;
+}

@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { cmd } from './runtime.ts';
 import { installFakeClaude } from './testing/fake-claude.ts';
 
 // Bun's test runner otherwise defaults to UTC while the child CLI process uses
@@ -1045,7 +1046,9 @@ test('a login Aula will not accept is reported in plain language, with the fix',
 
   const flat = result.stderr.replace(/\s+/g, ' ');
   assert.match(flat, /Aula rejected your login/i);
-  assert.match(flat, /bun run login/, 'the fix travels with the failure');
+  // The spelling follows how the CLI was invoked — a binary user has no `bun`,
+  // so a hardcoded `bun run login` here would be an instruction they cannot run.
+  assert.match(flat, new RegExp(cmd('login').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.doesNotMatch(flat, /Malformed|payload|envelope/i, 'no shape complaints');
   assert.doesNotMatch(flat, /Aula API error/, 'the prefix that labelled without saying anything');
 

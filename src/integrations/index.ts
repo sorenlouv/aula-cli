@@ -16,6 +16,7 @@ import * as meebook from './meebook.ts';
 import * as minUddannelse from './min-uddannelse.ts';
 import * as systematic from './systematic.ts';
 import type { IntegrationContext, WeekPlan } from './types.ts';
+import { cmd } from '../runtime.ts';
 
 type Fetcher = (
   ctx: IntegrationContext,
@@ -218,7 +219,7 @@ function withSessionWarning(widgetId: string, ctx: IntegrationContext, plan: Wee
   if (!info?.needsMitidUsername || !ctx.sessionIdIsFallback) return plan;
   const warning =
     `No MitID username on the stored login; ${info.name} may reject the fallback ` +
-    'session id. Log in again with `bun run login`.';
+    `session id. Log in again with \`${cmd('login')}\`.`;
   return { ...plan, warnings: [...(plan.warnings ?? []), warning] };
 }
 

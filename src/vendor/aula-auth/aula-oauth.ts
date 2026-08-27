@@ -180,8 +180,10 @@ function refreshFailure(status: number, body: string): OAuthError {
           'is revoked, ages out, or was replaced. Renewing it is not possible; only a ' +
           'fresh MitID login is.'
         : `The token endpoint answered with HTTP ${status}: ${body.slice(0, 200)}`,
-      action: 'Log in again with MitID:',
-      commands: ['bun run login'],
+      // No `commands` here on purpose: this is vendored code and does not
+      // know how the host CLI is invoked. The caller fills the remedy in —
+      // see `withLogin` in client.ts.
+      action: 'Log in again with MitID.',
     }),
   );
 }

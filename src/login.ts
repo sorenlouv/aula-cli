@@ -44,6 +44,7 @@ import {
   stderrLogger,
 } from './vendor/aula-auth/index.ts';
 import type { IdentityOption, Logger, StoredTokenRecord } from './vendor/aula-auth/index.ts';
+import { cmd } from './runtime.ts';
 
 export type LoginArgs = {
   username?: string;
@@ -291,7 +292,7 @@ export async function runStatus(asText: boolean): Promise<number> {
     info(`  Access token valid for ${mins} min, then refreshed automatically.`);
   } else {
     warn('Not logged in with MitID.');
-    info(`  Run ${fmt.dim('bun run login')}.`);
+    info(`  Run ${fmt.dim(cmd('login'))}.`);
   }
   info(
     `  Token store:     ${status.tokenStore}${status.tokenKeyFromEnv ? ` (key from $${KEY_ENV})` : ''}`,
@@ -310,7 +311,7 @@ export async function runStatus(asText: boolean): Promise<number> {
 export async function runRefreshStepUp(): Promise<number> {
   const store = tokenStore();
   const existing = await store.load();
-  if (!existing) throw new UsageError('Not logged in. Run `bun run login` first.');
+  if (!existing) throw new UsageError(`Not logged in. Run \`${cmd('login')}\` first.`);
 
   const http = new AulaHttpClient({ logger: silentLogger });
   const client = new AulaLoginClient({ http, logger: silentLogger });
@@ -328,7 +329,7 @@ export async function runRefreshStepUp(): Promise<number> {
   } catch (err) {
     if (err instanceof AulaSilentSsoFailedError) {
       warn('The broker session has expired, so a silent refresh is not possible.');
-      info(`  Run ${fmt.dim('bun run login')} to step up again.`);
+      info(`  Run ${fmt.dim(cmd('login'))} to step up again.`);
       return 2;
     }
     throw err;

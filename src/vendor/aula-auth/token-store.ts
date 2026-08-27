@@ -310,7 +310,7 @@ export async function withFreshTokens(args: {
 }): Promise<StoredTokenRecord> {
   const record = await args.store.load();
   if (!record) {
-    throw new TokenStoreError('No tokens on disk. Run `bun run login` first.');
+    throw new TokenStoreError('No tokens on disk; a MitID login is needed.');
   }
   if (!isTokenExpired(record.tokens, 60)) {
     return record;
