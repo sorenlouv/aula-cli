@@ -74,7 +74,15 @@ async function build(target: Target, version: string): Promise<number> {
   return Bun.file(outfile).size;
 }
 
-const version = pkg.version;
+/**
+ * The tag wins when there is one.
+ *
+ * CI sets this from the pushed tag so the binary and the release it is
+ * attached to can never disagree — `aula version` reporting 0.1.0 from a
+ * release called v0.2.0 is the kind of thing that costs an hour of confusion
+ * in a bug report. A local `bun run build` has no tag and uses package.json.
+ */
+const version = process.env.AULA_BUILD_VERSION?.replace(/^v/, '') || pkg.version;
 const targets = parseTargets(process.argv.slice(2));
 
 // A stale binary from a previous run is worse than no binary: it looks like a
