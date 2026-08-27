@@ -47,7 +47,7 @@ function copyFor(state: ViewState): Copy {
         title: 'Log ind med MitID',
         // Says where the secret part happens, on a page that could otherwise
         // look exactly like the phishing it is not: nothing is approved here.
-        lede: 'Skriv dit MitID-brugernavn. Selve godkendelsen sker i MitID-appen på din telefon.',
+        lede: 'Indtast dit MitID-brugernavn og godkend derefter med MitID-appen.',
         tone: 'neutral',
       };
     case 'ask-identity':
@@ -80,7 +80,7 @@ function copyFor(state: ViewState): Copy {
     case 'verified':
       return {
         title: 'QR kode scannet',
-        lede: 'Godkend nu dit login i MitID-appen.',
+        lede: 'Swipe "Godkend" i MitID-appen for at logge ind.',
         tone: 'neutral',
       };
     case 'done':

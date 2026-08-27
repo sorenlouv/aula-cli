@@ -161,12 +161,12 @@ describe('login client, in a DOM', () => {
     reply = {
       kind: 'done',
       ok: true,
-      message: 'Du kan lukke fanen. Resten sker i terminalen.',
+      message: 'Du kan lukke vinduet.',
       rev: 5,
     };
     await settle();
 
-    expect(doc.getElementById('root')?.textContent).toContain('Du kan lukke fanen');
+    expect(doc.getElementById('root')?.textContent).toContain('Du kan lukke vinduet.');
     expect(doc.querySelector('.card')).toBeNull();
 
     // The latch: a page that keeps polling a dead port is how the old code

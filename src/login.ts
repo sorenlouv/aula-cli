@@ -251,7 +251,7 @@ export async function runLogin(args: LoginArgs): Promise<number> {
         );
         // Not "Du er logget ind" — the page already says that as the heading,
         // and this string is the line under it.
-        await page.finish({ ok: true, message: 'Du kan lukke fanen. Resten sker i terminalen.' });
+        await page.finish({ ok: true, message: 'Du kan lukke vinduet' });
         return 0;
       } catch (err) {
         // The only retryable error, and narrow on purpose. `identity_not_found`
