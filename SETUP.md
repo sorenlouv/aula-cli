@@ -1,46 +1,120 @@
 # Setting up aula-cli
 
-Perform steps 1–4 without stopping. Then offer the optional steps.
-`aula new` reads 60 days of posts and messages: give it a 10-minute timeout;
-everything else should answer in seconds.
+You are setting this up for someone who is not a developer. When you are done
+they have a daily overview of their children's school and daycare at a
+claude.ai address they can bookmark — it refreshes itself every weekday
+morning, so they never have to open Claude Code again to read it.
 
-Needs git, the MitID app on the user's phone, and `claude` CLI on PATH.
+Work steps 0–8 in order, then offer the optional extras. In a normal run the
+user is needed three times: their MitID username (step 2), their phone
+approval (step 2), and the optional extras at the end. Everything else,
+run without asking. When something fails, follow its section — a failure can
+add a stop, such as a login the user has to run themselves.
 
-## 1. Code and runtime
+Say in one sentence what you are about to do before each step, and report the
+outcome after it. Speak plainly — the reader is a parent, not an engineer.
+Do not delegate any of this to subagents; it is a linear install.
+
+Most commands answer in seconds. Two take minutes — the login (step 2) and
+the first overview (step 5) — and each says so where it is used.
+
+## 0. Prerequisites
+
+Check all three first, so the user installs everything in one go rather than
+being interrupted later.
+
+```bash
+git --version && bun --version && claude --version
+```
+
+Install whatever is missing, then **re-run the check as a separate command**.
+Installers edit the shell profile, and only a new shell sees it — re-running
+in the same command still fails.
+
+**bun** (needs ≥ 1.3):
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+```
+
+**claude** — the command-line Claude, which the overview runs as a subprocess:
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+```
+
+On Windows PowerShell that is `irm https://claude.ai/install.ps1 | iex`.
+
+Three things go wrong here, all of them silently:
+
+- **The Claude desktop app is not this.** The user may be talking to you
+  through the desktop app right now and still have no `claude` command — it is
+  a separate install.
+- It lands in `~/.local/bin`, which macOS leaves off `PATH`. If
+  `claude --version` still fails after installing, add it:
+  `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc`, then check again
+  in a new command.
+- **Claude Code needs a paid plan** — Pro, Max, Team or Enterprise. The free
+  claude.ai plan does not include it. If the user is on the free plan, stop
+  here and tell them: steps 5–7 cannot work, and the rest is not worth doing
+  on its own.
+
+`claude` also has to be logged in. If it is not, step 5 is where you find out;
+see Debugging.
+
+## 1. Get the code
 
 ```bash
 git clone https://github.com/sorenlouv/aula-cli.git ~/aula-cli && cd ~/aula-cli
-bun --version || curl -fsSL https://bun.sh/install | bash   # Bun ≥ 1.3; `exec $SHELL` if still not found
 bun install
 ```
 
-If already cloned elsewhere, stay there. Everything runs as `bun src/cli.ts <command>` from that folder, including the
-steps that bake its path into a file.
+If it is already cloned somewhere else, stay there. Everything below runs as
+`bun src/cli.ts <command>` from that folder, including the steps that bake its
+path into a file.
 
 ## 2. Log in with MitID
 
-`bun run login` cannot be driven by an agent — it has no terminal to ask in, and
-fails saying so. Instead:
+Login needs a MitID username, and there is no terminal here to ask in — so ask
+in the chat. This is one of the three expected stops.
 
-1. Ask the user for their MitID username in the chat (what they type into
-   MitID, not their Aula name).
-2. Run in the background with a 10-minute timeout:
+1. Ask the user for their **MitID username** — what they type into MitID, not
+   their name in Aula.
+2. Run in the background, with a 10-minute timeout:
    `bun src/cli.ts login --username "<username>"`
 3. It prints a `http://127.0.0.1:…` link and opens it. Give the user the link
-   too and tell them to keep the page open: it the MitID QR code challenge which the user must handle and they approve on their phone.
-4. Watch for `Login successful`, or a failure with its reason.
+   as well, and tell them to leave the page open: it shows the MitID challenge,
+   which they approve in the MitID app on their phone.
+4. Watch for `Login successful`, or for a failure with its reason.
 
-`--no-browser` keeps it in the terminal for a machine with no desktop;
-`--method CODE_TOKEN` uses a numeric code instead of a QR code; `--debug` writes
-a redacted, owner-only diagnostic trace to `~/.aula/login-trace.jsonl`. Never
-ask for or type their MitID password; the default method has none. The login
-refreshes automatically.
+The login refreshes itself from then on.
 
-A _parallel session_ error (CAP008) means an earlier attempt is still live on
-MitID's side: reject any pending approval in the app, close aula.dk tabs, wait a
-minute, retry. The CLI says this when it happens.
+**Never ask for their MitID password, and never type one.** The default login
+does not use one. `--method CODE_TOKEN` (kodeviser) does, which is why you must
+not use it: it stops at a password prompt that no agent can answer. If the user
+only has a kodeviser, hand them the command and let them run it themselves in
+their own terminal.
 
-Verify: `bun src/cli.ts status --text`.
+Two failures need a person, because the login asks a question mid-flight and
+there is no flag for the answer:
+
+- **More than one MitID identity** (common if the user also has a work
+  identity). The login stops at a numbered list after the phone approval.
+- Anything else that ends in `stdin is empty`.
+
+In both cases, ask the user to open a terminal, `cd` to the folder from step 1,
+run `bun src/cli.ts login --username "<name>"` themselves, and answer the
+question it asks. Continue once they say it succeeded.
+
+A **parallel session** error (CAP008) means an earlier attempt is still live on
+MitID's side: reject any pending approval in the app, close aula.dk tabs, wait
+a minute, then retry. The CLI explains this when it happens.
+
+A failed login exits 2. Read what it says and fix that — do not simply retry,
+because each abandoned attempt leaves another pending approval and makes
+CAP008 more likely.
+
+Verify with `bun src/cli.ts status --text`.
 
 ## 3. Health check
 
@@ -48,12 +122,19 @@ Verify: `bun src/cli.ts status --text`.
 bun src/cli.ts doctor --text
 ```
 
-Read every `WARN` or `FAIL` line. Fix it when the output gives a command;
-otherwise report it before continuing.
+Every endpoint gets called for real. Lines are `PASS`, `WARN`, `SKIP` or
+`FAIL`. `SKIP` is normal — it means a school does not expose that widget.
+`WARN` means the call worked but returned something ambiguous, usually an
+empty feed; those are explained in API.md. The command exits 0 even with
+warnings, and 1 only on a `FAIL`.
+
+Act on `WARN` and `FAIL` lines: run the command if the line gives you one,
+otherwise tell the user what it said before moving on.
 
 ## 4. Install the skill
 
-Install the skill for the user's agent of choice. Re-running overwrites it; open a new session afterwards.
+This is what lets the user ask about Aula in plain language later. Re-running
+overwrites it; the user needs a new session before it loads.
 
 Claude:
 
@@ -69,123 +150,146 @@ mkdir -p ~/.agents/skills/aula
 sed "s|{{AULA_CLI_DIR}}|$(pwd)|" .claude/skills/aula/SKILL.md > ~/.agents/skills/aula/SKILL.md
 ```
 
-Do not read `AGENTS.md`. It is only for maintainers (code contributors), not end users of the CLI.
+Do not read `AGENTS.md`. It is for people working on this code, not for
+setting it up.
 
-## Optional steps
+## 5. The first overview
 
-Say what each does and let the user choose. Each writes outside this repository, so deleting the cloned repo folder does not undo it.
+```bash
+bun src/cli.ts new
+```
 
-**A. `aula` from anywhere.** Needs `~/.local/bin` on PATH, which macOS does not have by default.
+**Give this a 10-minute timeout.** It reads 60 days of posts and messages and
+calls `claude` to write the overview, then opens the page. This is the step
+that fails if `claude` is missing or logged out — see Debugging.
+
+## 6. Put it online
+
+```bash
+bun src/cli.ts publish
+```
+
+This is the whole point of the setup: it publishes the overview as an artifact
+on claude.ai and prints the URL on the last line of output. **Keep that URL —
+step 8 needs it.**
+
+The page is private to the user's own claude.ai account. Every later run,
+including every scheduled one, redeploys to that same address, so a bookmark
+never goes stale.
+
+## 7. Have it run every morning
+
+```bash
+bun src/cli.ts schedule
+```
+
+Weekdays at 06:30; `--at HH:MM` to change it, `--remove` to stop. On macOS
+this installs a launchd agent, on Windows a Scheduled Task; on Linux it prints
+cron lines to install by hand. A laptop asleep at 06:30 is the normal case, so
+the job waits for a real wake and retries through the morning — the user does
+not have to leave the machine on.
+
+The schedule bakes in the `PATH` and the `AULA_BRIEF_MODEL`,
+`AULA_BRIEF_EFFORT`, `AULA_TOOL_MODEL`, `AULA_TOOL_EFFORT`,
+`AULA_BRIEF_REPAIR_MODEL`, `AULA_BRIEF_REPAIR_EFFORT` and `AULA_CACHE_TTL`
+values from the shell it ran in. Re-run it if any of those change — and also
+after a node version change, because `claude`'s plugin hooks shell out to
+node, and a moved node costs the scheduled run its exit status.
+
+## 8. Hand over
+
+Lead with the address. Say something like this, in the language the user has
+been speaking:
+
+> Your overview is at **[the URL from step 6]**. Bookmark it — on your phone
+> too. It updates itself every weekday morning at 06:30, so it is always
+> current, and you never need to open Claude Code to read it. You will need to
+> be signed in to claude.ai to see it; it is private to your account.
+
+Then mention, briefly, that they can also ask about Aula in plain language in
+a new session, and that the overview can be taught what matters to them:
+
+```bash
+bun src/cli.ts remember "vis altid beskeder fra Johns far"
+```
+
+## Optional extras
+
+Offer these now. Each writes outside the repository, so deleting the cloned
+folder does not undo it.
+
+**A. Run `aula` from anywhere.** Saves typing `bun src/cli.ts` every time.
+Needs `~/.local/bin` on `PATH`, which macOS does not do by default.
 
 ```bash
 mkdir -p ~/.local/bin && printf '#!/bin/sh\nexec bun "%s/src/cli.ts" "$@"\n' "$(pwd)" > ~/.local/bin/aula && chmod +x ~/.local/bin/aula
 command -v aula || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc   # next terminal picks it up
 ```
 
-**B. The overview, every morning.** Generate one first so they see what they
-are scheduling.
+**B. Their own calendar.** Personal appointments then appear among the Aula
+cards in the overview, ordered by day, each with its own summary and a reason
+it is there.
 
 ```bash
-bun src/cli.ts new          # writes ~/.aula/brief and opens it; 10-minute timeout, calls `claude`
-bun src/cli.ts schedule     # weekdays 06:30; --at HH:MM to change, --remove to stop
-```
-
-`schedule` installs a launchd agent (macOS) or Scheduled Task (Windows); on
-Linux it prints cron lines. On macOS a lightweight coordinator waits through
-battery DarkWake and starts the brief after a full wake or AC connection; the
-calendar retries remain as crash recovery. Every generation uses `--catch-up`,
-and the schedule bakes in PATH plus
-`AULA_BRIEF_MODEL`, `AULA_BRIEF_EFFORT`, `AULA_TOOL_MODEL`,
-`AULA_TOOL_EFFORT`, `AULA_BRIEF_REPAIR_MODEL`, `AULA_BRIEF_REPAIR_EFFORT` and
-`AULA_CACHE_TTL` from the shell it ran in — re-run it after changing node
-version or those variables. Extraction uses the configured brief model; a
-source-bounded date repair and deterministic calendar/publishing tool calls
-default to Haiku at low effort to avoid paying extraction-model prices for
-transport. In Claude Code Desktop the Preview button (`.claude/launch.json`,
-port 4317, local only) shows the newest overview.
-
-**C. A hosted copy, readable on a phone.**
-
-```bash
-bun src/cli.ts publish      # URL kept in ~/.aula/config.json; --off to stop
-```
-
-Every later run redeploys to the same URL; `open --web` opens it.
-
-### D. Their own calendar
-
-Integrate the user's personal calendars into the Aula overview. Appointments
-appear as compact, individually collapsed cards directly among the Aula cards
-under *Kommende*. Both shapes are ordered by day, and known calendar times are
-ordered within the day. Opening a personal card shows its model-written summary
-and relevance reason, location, calendar and link.
-
-```bash
-bun src/cli.ts calendars                 # every calendar Claude can see; the ones being read are marked
+bun src/cli.ts calendars                         # every calendar, with the ones being read marked
 bun src/cli.ts calendars set "Familie" "Privat"  # read exactly these two, and no others
-bun src/cli.ts calendars set none        # read none of them
+bun src/cli.ts calendars set none                # read none of them
 ```
 
-Needs Google Calendar connected in Claude. That is the only supported route —
-there is no API key or calendar-link alternative, and `calendars` prints the few
-clicks when the connector is missing.
+Needs Google Calendar connected in Claude; there is no API key or
+calendar-link alternative, and `calendars` prints the few clicks when the
+connector is missing.
 
-**Show the list and let the user pick.** Pass exact displayed names (or the id
-shown when two calendars have the same name), never a list position that may
-refer to something else on a later connector read. Never guess which calendars
-matter and never set one unasked: this writes to `~/.aula/config.json`, outside
-the repository. `set` states the whole answer — it reads exactly what you name
-and stops reading the rest — so pass every calendar that should be read, not
-only a new one. It reports how many appointments each newly set calendar holds
-in the next fortnight; pass that back, and say so if one comes back empty when
-they expected otherwise.
+Show the list and let the user pick. Set exactly the calendars they name, and
+only when they name one — this writes to `~/.aula/config.json`, outside the
+repository. Pass the exact displayed names (or the id shown when two
+calendars share a name), never a list position, which may point at something
+else on a later read. `set` states the whole answer: it reads what you name
+and stops reading everything else, so pass every calendar that should be read,
+not only a new one.
+
+It reports how many appointments each newly added calendar holds in the
+window the overview reads. Pass that back to the user, and say so if one comes
+back empty when they expected otherwise.
 
 Nothing is read until a calendar is named here, and this can be done at any
-time, not only during setup.
-
-The model-enabled daily overview reads a fixed next-fortnight window, sends
-every appointment through the same model pass as every Aula source, with one
-explicit relevance, summary and reason verdict per appointment. Irrelevant
-appointments stay in the muted hidden count; relevant ones remain visually
-quieter than Aula cards and never consume the full-card cap. A model or
-connector failure appears in _Datastatus_. The overview never computes clashes
-or claims that a quiet-looking day has none; it puts the appointment beside the
-school's day and lets the reader see it.
-
-Personal appointments require positive evidence of child, school/day-care,
-playdate, pickup/drop-off or child-activity context. Cryptic and adult-only
-appointments default to hidden; their time or possible indirect effect on the
-parents' availability does not make them relevant.
-
-## 5. Hand over
-
-Tell the user it is ready: they can now interact with Aula in natural language.
-The user may want to tune which events are relevant to them specifically. You
-can call `aula remember` to store their preferences, for example "Always show
-events from other parents".
+time — it is not tied to setup.
 
 ## Debugging
 
-- **Exit code 2** — login expired. Log in again (step 2).
-- **`stdin is empty`** — the login was started with nothing to answer its
-  prompt. Pass `--username` (step 2).
+- **`Executable not found in $PATH: "claude"`** — the command-line Claude is
+  missing (step 0). Install it, then re-run `schedule` so the new path is
+  baked in.
+- **Exit code 2 from a read command** — the login expired. Log in again
+  (step 2).
+- **Exit code 2 from `login` itself** — that attempt failed. Read the message
+  and fix its cause; retrying blindly risks CAP008.
+- **`stdin is empty`** — the login needed an answer to a question. Only the
+  username has a flag (`--username`); a password prompt, kodeviser digits or
+  an identity choice all need the user to run the login themselves in a
+  terminal.
 - **Sensitive threads missing** — `bun src/cli.ts refresh-stepup`.
-- **A weekly plan says COULD NOT BE READ** — the school's vendor failed; not an
-  empty week. The warning names the vendor.
-- **Scheduled brief misbehaves** — read `~/.aula/brief/launchd.log`. `timed
-out`: the Mac slept mid-run; the retries redo the morning. `Not logged in`:
-  `claude` has no credentials outside a terminal — run `claude` once and log in.
-  `command not found`: a plugin hook off launchd's bare PATH — re-run `schedule`.
-- **A brief was slow or incomplete** — inspect the owner-only lifecycle log:
-  `tail -n 20 ~/.aula/logs/brief.jsonl | jq '{at,event,revision,details}'`.
-  It records phase times and model attempts, never the prompt or source payload.
-- **Hosted link stale** — the same log's `Artifact blev ikke opdateret:` line
-  says why; `publish` redeploys now.
+- **A weekly plan says COULD NOT BE READ** — the school's vendor failed; it is
+  not an empty week. The warning names the vendor.
+- **Scheduled overview misbehaves** — read `~/.aula/brief/launchd.log`.
+  `timed out`: the Mac slept mid-run, and the retries redo the morning.
+  `Not logged in`: `claude` has no credentials outside a terminal — run
+  `claude` once, log in, and try again. `command not found`: something is off
+  launchd's bare PATH — re-run `schedule`.
+- **An overview was slow or incomplete** — inspect the owner-only lifecycle
+  log: `tail -n 20 ~/.aula/logs/brief.jsonl | jq '{at,event,revision,details}'`.
+  It records phase times and model attempts, never the prompt or the source
+  text.
+- **The online copy is stale** — the same log's line beginning
+  `Artifact blev ikke opdateret:` says why; `bun src/cli.ts publish`
+  redeploys immediately.
 
 ## Uninstall
 
 ```bash
-bun src/cli.ts schedule --remove && rm -rf ~/.claude/skills/aula ~/.agents/skills/aula ~/.local/bin/aula ~/.aula
+bun src/cli.ts publish --off
+bun src/cli.ts schedule --remove
+rm -rf ~/.claude/skills/aula ~/.agents/skills/aula ~/.local/bin/aula ~/.aula
 ```
 
 Then delete the folder. `~/.aula` holds everything the tool ever stored.

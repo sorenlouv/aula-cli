@@ -8,7 +8,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import type { AulaClient } from './client.ts';
-import { runDoctor } from './doctor.ts';
+import { claudeCliCheck, runDoctor } from './doctor.ts';
 
 /** Just enough client for the two identity checks and the report header. */
 function stubClient(over: Partial<Record<'getProfiles' | 'getProfileContext', () => unknown>>) {
@@ -69,5 +69,37 @@ describe('runDoctor', () => {
     expect(profiles.status).toBe('fail');
     expect(got.ok).toBe(false);
     expect(code).toBe(1);
+  });
+});
+
+describe('claudeCliCheck', () => {
+  test('passes with the resolved path when claude is on PATH', () => {
+    const outcome = claudeCliCheck(() => '/Users/x/.local/bin/claude');
+
+    expect(outcome.status).toBeUndefined(); // defaults to ok
+    expect(outcome.detail).toBe('/Users/x/.local/bin/claude');
+    expect(outcome.note).toBeUndefined();
+  });
+
+  test('warns — not fails — when claude is missing, and says how to install it', () => {
+    // A warn keeps `report.ok` true: every Aula read still works without
+    // `claude`, and only the overview breaks. Failing the run would overstate
+    // it, but staying silent is what let a doomed schedule get installed.
+    const outcome = claudeCliCheck(() => null);
+
+    expect(outcome.status).toBe('warn');
+    expect(outcome.detail).toBe('not on PATH');
+    expect(outcome.note).toContain('claude.ai/install.sh');
+  });
+
+  test('a missing claude does not fail the run', async () => {
+    const { code, report: got } = await report(stubClient({}));
+    const claude = got.checks.find((c: { name: string }) => c.name === 'claude CLI');
+
+    // Whichever way this machine answers, the check is present and never the
+    // reason doctor exits non-zero.
+    expect(claude).toBeDefined();
+    expect(claude.status === 'ok' || claude.status === 'warn').toBe(true);
+    expect(code).toBe(0);
   });
 });
