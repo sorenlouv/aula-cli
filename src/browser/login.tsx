@@ -73,13 +73,13 @@ function copyFor(state: ViewState): Copy {
       };
     case 'qr':
       return {
-        title: 'Scan begge koder med MitID-appen',
-        lede: 'Hold telefonen op mod koderne. De skifter hvert par sekunder — sådan skal det være.',
+        title: 'Scan en af QR koderne med MitID-appen',
+        lede: '',
         tone: 'neutral',
       };
     case 'verified':
       return {
-        title: 'MitID har fundet din telefon',
+        title: 'QR kode scannet',
         lede: 'Godkend nu dit login i MitID-appen.',
         tone: 'neutral',
       };
@@ -138,9 +138,9 @@ function announcementFor(state: ViewState): string {
       // Deliberately carries nothing from `updateCount`. A sentence that
       // changed with the rotation would talk over the reader every two seconds
       // for as long as the login takes.
-      return 'Scan begge koder med MitID-appen. Hold telefonen op mod skærmen.';
+      return 'Scan en af QR koderne med MitID-appen. Hold telefonen op mod skærmen.';
     case 'verified':
-      return 'MitID har fundet din telefon. Godkend nu dit login i MitID-appen.';
+      return 'QR kode scannet. Godkend nu dit login i MitID-appen.';
     case 'done':
       return `${state.ok ? 'Du er logget ind.' : 'Login mislykkedes.'} ${state.message}`;
     case 'session-ended':
