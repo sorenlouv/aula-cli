@@ -14,7 +14,8 @@
  * the way an argv0 or an execPath check could.
  */
 
-import { join } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { basename, join } from 'node:path';
 
 /**
  * Set by `--define` at compile time, absent everywhere else. Declared rather
@@ -82,5 +83,42 @@ export function commandPrefix(): string {
  * absolute on both sides.
  */
 export function cmd(args: string): string {
-  return `${cliInvocation().join(' ')} ${args}`;
+  const [executable = process.execPath, ...rest] = cliInvocation();
+  return [shortestSpelling(executable), ...rest, args].join(' ');
+}
+
+/**
+ * The shortest spelling of `executable` that still runs — its bare name when
+ * PATH resolves that name back to this very file, and the absolute path
+ * otherwise.
+ *
+ * SETUP.md installs the binary as `aula` and puts its directory on PATH, so
+ * `aula login` is both what the user was taught to type and what they will
+ * recognise. Handing them `/Users/x/.local/bin/aula login` instead is correct
+ * but reads like a different program.
+ *
+ * The resolution has to compare files, not names. If some other `aula` sits
+ * earlier on PATH, printing the bare name would point the user at a program
+ * this process is not — so that case falls back to the unambiguous path.
+ * `realpath` on both sides because an installed CLI is very often a symlink
+ * into a versioned directory.
+ *
+ * `deps` is injected so both branches are testable without a PATH to arrange.
+ */
+export function shortestSpelling(
+  executable: string,
+  deps: {
+    which: (name: string) => string | null;
+    realpath: (path: string) => string;
+  } = { which: (name) => Bun.which(name), realpath: realpathSync },
+): string {
+  const name = basename(executable);
+  const found = deps.which(name);
+  if (!found) return executable;
+  try {
+    return deps.realpath(found) === deps.realpath(executable) ? name : executable;
+  } catch {
+    // A path that cannot be resolved is a path we should not be shortening.
+    return executable;
+  }
 }
