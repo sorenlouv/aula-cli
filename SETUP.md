@@ -5,16 +5,18 @@ they have a daily overview of their children's school and daycare at a
 claude.ai address they can bookmark — it refreshes itself every weekday
 morning, so they never have to open Claude Code again to read it.
 
-Work steps 0–8 in order, then offer the optional extras. Three things need the
-user, and nothing else does: their MitID username (step 2), their phone
-approval (step 2), and the optional extras at the end. Do not stop anywhere
-else to ask permission.
+Work steps 0–8 in order, then offer the optional extras. In a normal run the
+user is needed three times: their MitID username (step 2), their phone
+approval (step 2), and the optional extras at the end. Everything else,
+run without asking. When something fails, follow its section — a failure can
+add a stop, such as a login the user has to run themselves.
 
 Say in one sentence what you are about to do before each step, and report the
 outcome after it. Speak plainly — the reader is a parent, not an engineer.
 Do not delegate any of this to subagents; it is a linear install.
 
-Most commands answer in seconds. The two that do not say so at their step.
+Most commands answer in seconds. Two take minutes — the login (step 2) and
+the first overview (step 5) — and each says so where it is used.
 
 ## 0. Prerequisites
 
@@ -196,7 +198,8 @@ node, and a moved node costs the scheduled run its exit status.
 
 ## 8. Hand over
 
-Lead with the address. Tell the user, in their own words:
+Lead with the address. Say something like this, in the language the user has
+been speaking:
 
 > Your overview is at **[the URL from step 6]**. Bookmark it — on your phone
 > too. It updates itself every weekday morning at 06:30, so it is always
