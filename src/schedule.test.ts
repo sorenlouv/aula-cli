@@ -46,7 +46,7 @@ describe('scheduleTimes', () => {
 describe('buildPlist', () => {
   const plist = buildPlist({
     at: { hour: 6, minute: 30 },
-    program: ['/opt/homebrew/bin/bun', '/repo/src/scheduled-brief.ts'],
+    program: ['/opt/homebrew/bin/bun', '/repo/src/cli.ts', 'scheduled-run'],
     workdir: '/repo',
     path: '/opt/homebrew/bin:/usr/bin',
     logPath: '/tmp/launchd.log',
@@ -54,7 +54,8 @@ describe('buildPlist', () => {
 
   test('runs the wake-aware coordinator through bun, weekdays only', () => {
     expect(plist).toContain('<string>/opt/homebrew/bin/bun</string>');
-    expect(plist).toContain('/src/scheduled-brief.ts</string>');
+    expect(plist).toContain('<string>scheduled-run</string>');
+    // The coordinator holds no sleep assertion; only the child it starts does.
     expect(plist).not.toContain('<string>/usr/bin/caffeinate</string>');
     // Weekdays 1-5, one calendar entry per weekday per time — weekends stay quiet.
     const times = scheduleTimes({ hour: 6, minute: 30 }).length;
@@ -72,7 +73,7 @@ describe('buildPlist', () => {
   test('bakes brief knobs into the agent, XML-escaped', () => {
     const withEnv = buildPlist({
       at: { hour: 6, minute: 30 },
-      program: ['/opt/homebrew/bin/bun', '/repo/src/scheduled-brief.ts'],
+      program: ['/opt/homebrew/bin/bun', '/repo/src/cli.ts', 'scheduled-run'],
       path: '/usr/bin',
       logPath: '/tmp/launchd.log',
       env: {
@@ -195,12 +196,22 @@ describe('programs', () => {
     expect(workdir).toBeUndefined();
   });
 
-  test('a checkout runs the coordinator file through its own interpreter', () => {
+  test('a checkout runs the same subcommand through its own interpreter', () => {
     const { coordinator, direct, workdir } = programs(source);
-    expect(coordinator[0]).toBe('/opt/homebrew/bin/bun');
-    expect(coordinator[1]).toContain('scheduled-brief.ts');
+    expect(coordinator).toEqual(['/opt/homebrew/bin/bun', '/repo/src/cli.ts', 'scheduled-run']);
     expect(direct.slice(0, 2)).toEqual(['/opt/homebrew/bin/bun', '/repo/src/cli.ts']);
     expect(workdir).toBeTruthy();
+  });
+
+  // The whole point of the collapse: one spelling of the coordinator, and the
+  // working directory as the single remaining difference between the modes.
+  test('the working directory is the only thing that differs by mode', () => {
+    const binary = programs(compiled);
+    const checkout = programs(source);
+    expect(binary.coordinator.at(-1)).toBe('scheduled-run');
+    expect(checkout.coordinator.at(-1)).toBe('scheduled-run');
+    expect(binary.workdir).toBeUndefined();
+    expect(checkout.workdir).toBeTruthy();
   });
 
   // Whatever the shape, the scheduled run must stay idempotent: --catch-up is

@@ -40,7 +40,6 @@ import { cliInvocation, isCompiled } from './runtime.ts';
 const LABEL = 'com.aula-cli.brief';
 const TASK_NAME = 'aula-cli-brief';
 const REPO = join(import.meta.dir, '..');
-const SCHEDULED_ENTRY = join(REPO, 'src', 'scheduled-brief.ts');
 
 /** The scheduled command. `--catch-up` is what makes the retries below free. */
 const RUN_ARGS = ['new', '--text', '--catch-up'];
@@ -48,14 +47,15 @@ const RUN_ARGS = ['new', '--text', '--catch-up'];
 /**
  * What the scheduler should run, and from where.
  *
- * A binary is one argv entry and needs no working directory: everything it
- * reads or writes lives under `~/.aula`. A source checkout needs the
- * interpreter, the entry file, and `cwd` set to the repo so relative imports
- * resolve. `coordinator` is the sleep-aware wrapper (macOS only); `direct` is
- * the brief itself, for schedulers that have no wrapper.
+ * Both shapes are the CLI invoking one of its own subcommands: `coordinator`
+ * is the sleep-aware wrapper (macOS only), `direct` is the brief itself, for
+ * schedulers that have no wrapper. Whether this process is a binary or a
+ * checkout is already answered by `cliInvocation()`, so the only thing left
+ * that differs by mode is the working directory — a checkout needs one for
+ * relative imports, a binary reads and writes only `~/.aula`.
  *
  * `runtime` is injected by the tests: from a source checkout the compiled
- * branch is otherwise unreachable, and it is the branch every end user gets.
+ * shape is otherwise unreachable, and it is the shape every end user gets.
  */
 export function programs(runtime?: { compiled: boolean; invocation: string[] }): {
   coordinator: string[];
@@ -66,13 +66,12 @@ export function programs(runtime?: { compiled: boolean; invocation: string[] }):
     compiled: isCompiled(),
     invocation: cliInvocation(),
   };
-  if (compiled) {
-    return { coordinator: [...invocation, 'scheduled-run'], direct: [...invocation, ...RUN_ARGS] };
-  }
   return {
-    coordinator: [...invocation.slice(0, 1), SCHEDULED_ENTRY],
+    coordinator: [...invocation, 'scheduled-run'],
     direct: [...invocation, ...RUN_ARGS],
-    workdir: REPO,
+    // Spread rather than assigned: `exactOptionalPropertyTypes` makes an
+    // explicit `undefined` a different thing from an absent key.
+    ...(compiled ? {} : { workdir: REPO }),
   };
 }
 

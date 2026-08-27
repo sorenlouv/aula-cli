@@ -127,10 +127,3 @@ export async function coordinateScheduledBrief(
     await deps.wait(INCOMPLETE_RETRY_MS);
   }
 }
-
-if (import.meta.main) {
-  coordinateScheduledBrief().catch((error) => {
-    console.error(`Scheduled brief coordinator failed: ${errorMessage(error)}`);
-    process.exitCode = 1;
-  });
-}
