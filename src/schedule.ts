@@ -239,6 +239,24 @@ function retryNote(at: At): string {
   return `retrying every ${RETRY_EVERY_MINUTES} min until ${clock(last)} while the day's overview is incomplete`;
 }
 
+/**
+ * Refuses a schedule that could only ever fail.
+ *
+ * Every scheduled run writes the brief with `claude`, so installing the job
+ * without it buys the user a 06:30 alarm that dies on ENOENT and reports it
+ * only to a log file nobody reads. The old code was quieter than that: it
+ * dropped `claude` from the baked PATH and installed anyway, which looks
+ * exactly like success. Better to refuse now, while somebody is watching.
+ */
+function claudeMissing(): boolean {
+  if (Bun.which('claude')) return false;
+  console.error('Could not find `claude` on PATH, and the daily overview is written with it.');
+  console.error('  Install it, then run `aula schedule` again:');
+  console.error('    curl -fsSL https://claude.ai/install.sh | bash');
+  console.error('  The Claude desktop app does not provide this command (SETUP.md step 0).');
+  return true;
+}
+
 function installDarwin(at: At): number {
   const bun = Bun.which('bun');
   const claude = Bun.which('claude');
@@ -248,6 +266,7 @@ function installDarwin(at: At): number {
     console.error(bun ? 'Could not determine the user id.' : 'Could not find bun on PATH.');
     return 1;
   }
+  if (claudeMissing()) return 1;
   const plist = plistPath();
   const logPath = join(BRIEF_DIR, 'launchd.log');
   const env = Object.fromEntries(
@@ -317,6 +336,9 @@ function installWindows(at: At): number {
     console.error('Could not find bun on PATH.');
     return 1;
   }
+  // Windows tasks inherit PATH from the registry, so `claude` does not need
+  // baking — but a `claude` that is not installed at all still fails at 06:30.
+  if (claudeMissing()) return 1;
   const created = sh(['schtasks', ...schtasksCreateArgs({ at, bun })]);
   if (!created.ok) {
     console.error(`schtasks failed: ${created.err}`);

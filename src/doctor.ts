@@ -50,12 +50,49 @@ type DoctorReport = {
   checks: Check[];
 };
 
+/**
+ * Is the `claude` CLI reachable?
+ *
+ * Everything the daily overview does that is not a plain Aula read — writing
+ * the brief, reading the user's own calendars, deploying the artifact — spawns
+ * `claude` (see llm/claude.ts). Nothing else in this tool looks for it, so
+ * without this check a machine with no `claude` passes doctor, accepts
+ * `aula schedule`, and then dies at 06:30 with a bare ENOENT in launchd.log.
+ * That is the whole failure and it is invisible until the first morning.
+ *
+ * It warns rather than fails: every read command in this CLI still works
+ * without it, and failing the run would overstate the damage.
+ *
+ * `which` is a parameter so the check is testable — the real call passes
+ * `Bun.which`, which resolves against the PATH doctor is actually running on.
+ */
+export function claudeCliCheck(
+  which: (command: string) => string | null,
+): CheckOutcome<string | null> {
+  const found = which('claude');
+  return found
+    ? { value: found, detail: found }
+    : {
+        value: null,
+        detail: 'not on PATH',
+        status: 'warn',
+        note:
+          'the AI overview shells out to it — install with ' +
+          '`curl -fsSL https://claude.ai/install.sh | bash`, then re-run ' +
+          '`schedule` (SETUP.md step 0). The Claude desktop app does not provide it.',
+      };
+}
+
 export async function runDoctor(
   client: AulaClient,
   opts: { asText: boolean; days: number },
 ): Promise<number> {
   const checks: Check[] = [];
   const run = runner(checks);
+
+  // ---------------------------------------------------------- local tooling
+
+  await run('claude CLI', async () => claudeCliCheck(Bun.which));
 
   // --------------------------------------------------------------- identity
 
