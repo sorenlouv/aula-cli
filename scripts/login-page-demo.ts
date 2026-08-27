@@ -112,6 +112,6 @@ await page.finish(
           'MitID afviste login, fordi der allerede er en åben MitID-session. Åbn MitID-appen, ' +
           'afvis en eventuel ventende anmodning, luk faner med aula.dk, og prøv igen om et par minutter.',
       }
-    : { ok: true, message: 'Du er logget ind. Aula er klar til at læse med.' },
+    : { ok: true, message: 'Du er logget ind. Aula er klart til at blive analyseret.' },
 );
 process.stderr.write(`  done (${shouldFail ? 'failed' : 'ok'})\n`);

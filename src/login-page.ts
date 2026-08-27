@@ -482,7 +482,7 @@ const SHELL = (token: string) => `<!doctype html>
   <h1 id="headline">Log ind med MitID</h1>
   <p id="lede">Et øjeblik…</p>
   <div class="card" id="card"><p><span class="dot"></span>Henter</p></div>
-  <p class="meta" id="meta">Siden vises af login-kommandoen på denne maskine. Den lukker sig selv, når login er færdigt.</p>
+  <p class="meta" id="meta"></p>
 </main>
 <script>
 (function () {
@@ -491,7 +491,6 @@ const SHELL = (token: string) => `<!doctype html>
   var card = document.getElementById('card');
   var meta = document.getElementById('meta');
 
-  var META = 'Siden vises af login-kommandoen på denne maskine. Den lukker sig selv, når login er færdigt.';
 
   var rev = 0;
   var timer = null;
@@ -558,13 +557,11 @@ const SHELL = (token: string) => `<!doctype html>
   }
 
   function renderUsername(state) {
-    say('Log ind med MitID', 'Skriv dit MitID-brugernavn, så henter vi godkendelsen frem her på siden.');
+    say('Log ind med MitID', 'Du skal bruge MitID til at logge ind på Aula.');
     clear(card);
 
     var field = make('label', 'field');
     field.appendChild(make('span', 'label', 'MitID-brugernavn'));
-    field.appendChild(make('span', 'hint',
-      'Det er brugernavnet, du skriver i MitID-appen, når du logger ind — ikke dit navn i Aula.'));
     var input = document.createElement('input');
     input.type = 'text';
     input.name = 'username';
@@ -626,16 +623,16 @@ const SHELL = (token: string) => `<!doctype html>
   }
 
   function render(state) {
-    // The QR state writes its own meta line; everything else gets the standing
-    // one back, so a rotation counter does not outlive the codes.
-    if (state.kind !== 'qr') text(meta, META);
+    // Only the QR state writes a meta line; clearing it everywhere else keeps
+    // a rotation counter from outliving the codes.
+    if (state.kind !== 'qr') text(meta, '');
 
     if (state.kind === 'ask-username') {
       renderUsername(state);
     } else if (state.kind === 'ask-identity') {
       renderIdentity(state);
     } else if (state.kind === 'starting') {
-      say('Kontakter MitID…', 'Hav din telefon klar.');
+      say('Kontakter MitID…', 'Åbn MitID på din telefon.');
       card.innerHTML = '<p><span class="dot"></span>Venter på MitID</p>';
     } else if (state.kind === 'otp') {
       say('Godkend denne kode i MitID-appen', 'Åbn MitID på din telefon, og tjek at den viser det samme tal.');

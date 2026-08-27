@@ -249,7 +249,7 @@ export async function runLogin(args: LoginArgs): Promise<number> {
         info(
           `Access token valid for ${Math.round(secondsLeft / 60)} min; it refreshes itself after that.`,
         );
-        await page.finish({ ok: true, message: 'Du er logget ind. Aula er klar til at læse med.' });
+        await page.finish({ ok: true, message: 'Du er logget ind.' });
         return 0;
       } catch (err) {
         // The only retryable error, and narrow on purpose. `identity_not_found`
@@ -266,7 +266,7 @@ export async function runLogin(args: LoginArgs): Promise<number> {
         }
         warn(`MitID has no user called "${username}". Asking again on the login page.`);
         username = await askUsername({
-          error: 'MitID kender ikke det brugernavn. Tjek det, og skriv det igen.',
+          error: 'Ugyldigt MitID brugernavn. Prøv igen',
         });
       }
     }
