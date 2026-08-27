@@ -15,35 +15,32 @@ Say in one sentence what you are about to do before each step, and report the
 outcome after it. Speak plainly — the reader is a parent, not an engineer.
 Do not delegate any of this to subagents; it is a linear install.
 
+This document is the whole of the setup. `AGENTS.md` is for people changing
+the code and has nothing you need here; the "From source" section at the end
+is likewise not part of a normal install.
+
 Most commands answer in seconds. Two take minutes — the login (step 2) and
 the first overview (step 5) — and each says so where it is used.
 
-## 0. Prerequisites
+## 0. The one prerequisite
 
-Check all three first, so the user installs everything in one go rather than
-being interrupted later.
-
-```bash
-git --version && bun --version && claude --version
-```
-
-Install whatever is missing, then **re-run the check as a separate command**.
-Installers edit the shell profile, and only a new shell sees it — re-running
-in the same command still fails.
-
-**bun** (needs ≥ 1.3):
+aula-cli itself is a single downloaded program — no git, no runtime, nothing to
+build. It does need the command-line Claude, which it runs to write the
+overview:
 
 ```bash
-curl -fsSL https://bun.sh/install | bash
+claude --version
 ```
 
-**claude** — the command-line Claude, which the overview runs as a subprocess:
+If that prints a version, go to step 1. Otherwise install it:
 
 ```bash
 curl -fsSL https://claude.ai/install.sh | bash
 ```
 
-On Windows PowerShell that is `irm https://claude.ai/install.ps1 | iex`.
+On Windows PowerShell that is `irm https://claude.ai/install.ps1 | iex`. Then
+**check the version again as a separate command** — the installer edits the
+shell profile, and only a new shell sees it.
 
 Three things go wrong here, all of them silently:
 
@@ -62,16 +59,38 @@ Three things go wrong here, all of them silently:
 `claude` also has to be logged in. If it is not, step 5 is where you find out;
 see Debugging.
 
-## 1. Get the code
+## 1. Install aula
+
+Pick the file for this machine — `uname -sm` says which:
+
+| `uname -sm`          | file                   |
+| -------------------- | ---------------------- |
+| `Darwin arm64`       | `aula-darwin-arm64`    |
+| `Darwin x86_64`      | `aula-darwin-x64`      |
+| `Linux x86_64`       | `aula-linux-x64`       |
+| Windows              | `aula-windows-x64.exe` |
 
 ```bash
-git clone https://github.com/sorenlouv/aula-cli.git ~/aula-cli && cd ~/aula-cli
-bun install
+mkdir -p ~/.local/bin
+curl -fsSL https://github.com/sorenlouv/aula-cli/releases/latest/download/aula-darwin-arm64 -o ~/.local/bin/aula
+chmod +x ~/.local/bin/aula
 ```
 
-If it is already cloned somewhere else, stay there. Everything below runs as
-`bun src/cli.ts <command>` from that folder, including the steps that bake its
-path into a file.
+Then confirm it runs, in a separate command:
+
+```bash
+~/.local/bin/aula version
+```
+
+`~/.local/bin` is not on `PATH` on a fresh Mac. Put it there so the rest of
+this document — and the user, later — can just say `aula`:
+
+```bash
+command -v aula || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+```
+
+That takes effect in the next command, not this one. Until it does, use the
+full `~/.local/bin/aula`.
 
 ## 2. Log in with MitID
 
@@ -81,7 +100,7 @@ in the chat. This is one of the three expected stops.
 1. Ask the user for their **MitID username** — what they type into MitID, not
    their name in Aula.
 2. Run in the background, with a 10-minute timeout:
-   `bun src/cli.ts login --username "<username>"`
+   `aula login --username "<username>"`
 3. It prints a `http://127.0.0.1:…` link and opens it. Give the user the link
    as well, and tell them to leave the page open: it shows the MitID challenge,
    which they approve in the MitID app on their phone.
@@ -102,9 +121,9 @@ there is no flag for the answer:
   identity). The login stops at a numbered list after the phone approval.
 - Anything else that ends in `stdin is empty`.
 
-In both cases, ask the user to open a terminal, `cd` to the folder from step 1,
-run `bun src/cli.ts login --username "<name>"` themselves, and answer the
-question it asks. Continue once they say it succeeded.
+In both cases, ask the user to open a terminal, run
+`aula login --username "<name>"` themselves, and answer the question it asks.
+Continue once they say it succeeded.
 
 A **parallel session** error (CAP008) means an earlier attempt is still live on
 MitID's side: reject any pending approval in the app, close aula.dk tabs, wait
@@ -114,12 +133,12 @@ A failed login exits 2. Read what it says and fix that — do not simply retry,
 because each abandoned attempt leaves another pending approval and makes
 CAP008 more likely.
 
-Verify with `bun src/cli.ts status --text`.
+Verify with `aula status --text`.
 
 ## 3. Health check
 
 ```bash
-bun src/cli.ts doctor --text
+aula doctor --text
 ```
 
 Every endpoint gets called for real. Lines are `PASS`, `WARN`, `SKIP` or
@@ -136,27 +155,16 @@ otherwise tell the user what it said before moving on.
 This is what lets the user ask about Aula in plain language later. Re-running
 overwrites it; the user needs a new session before it loads.
 
-Claude:
-
 ```bash
-mkdir -p ~/.claude/skills/aula
-sed "s|{{AULA_CLI_DIR}}|$(pwd)|" .claude/skills/aula/SKILL.md > ~/.claude/skills/aula/SKILL.md
+aula install-skill
 ```
 
-Codex:
-
-```bash
-mkdir -p ~/.agents/skills/aula
-sed "s|{{AULA_CLI_DIR}}|$(pwd)|" .claude/skills/aula/SKILL.md > ~/.agents/skills/aula/SKILL.md
-```
-
-Do not read `AGENTS.md`. It is for people working on this code, not for
-setting it up.
+For Codex instead of Claude, `aula install-skill codex`.
 
 ## 5. The first overview
 
 ```bash
-bun src/cli.ts new
+aula new
 ```
 
 **Give this a 10-minute timeout.** It reads 60 days of posts and messages and
@@ -166,7 +174,7 @@ that fails if `claude` is missing or logged out — see Debugging.
 ## 6. Put it online
 
 ```bash
-bun src/cli.ts publish
+aula publish
 ```
 
 This is the whole point of the setup: it publishes the overview as an artifact
@@ -180,7 +188,7 @@ never goes stale.
 ## 7. Have it run every morning
 
 ```bash
-bun src/cli.ts schedule
+aula schedule
 ```
 
 Weekdays at 06:30; `--at HH:MM` to change it, `--remove` to stop. On macOS
@@ -210,30 +218,21 @@ Then mention, briefly, that they can also ask about Aula in plain language in
 a new session, and that the overview can be taught what matters to them:
 
 ```bash
-bun src/cli.ts remember "vis altid beskeder fra Johns far"
+aula remember "vis altid beskeder fra Johns far"
 ```
 
-## Optional extras
+## Optional extra
 
-Offer these now. Each writes outside the repository, so deleting the cloned
-folder does not undo it.
+Offer this now.
 
-**A. Run `aula` from anywhere.** Saves typing `bun src/cli.ts` every time.
-Needs `~/.local/bin` on `PATH`, which macOS does not do by default.
-
-```bash
-mkdir -p ~/.local/bin && printf '#!/bin/sh\nexec bun "%s/src/cli.ts" "$@"\n' "$(pwd)" > ~/.local/bin/aula && chmod +x ~/.local/bin/aula
-command -v aula || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc   # next terminal picks it up
-```
-
-**B. Their own calendar.** Personal appointments then appear among the Aula
+**Their own calendar.** Personal appointments then appear among the Aula
 cards in the overview, ordered by day, each with its own summary and a reason
 it is there.
 
 ```bash
-bun src/cli.ts calendars                         # every calendar, with the ones being read marked
-bun src/cli.ts calendars set "Familie" "Privat"  # read exactly these two, and no others
-bun src/cli.ts calendars set none                # read none of them
+aula calendars                         # every calendar, with the ones being read marked
+aula calendars set "Familie" "Privat"  # read exactly these two, and no others
+aula calendars set none                # read none of them
 ```
 
 Needs Google Calendar connected in Claude; there is no API key or
@@ -268,7 +267,7 @@ time — it is not tied to setup.
   username has a flag (`--username`); a password prompt, kodeviser digits or
   an identity choice all need the user to run the login themselves in a
   terminal.
-- **Sensitive threads missing** — `bun src/cli.ts refresh-stepup`.
+- **Sensitive threads missing** — `aula refresh-stepup`.
 - **A weekly plan says COULD NOT BE READ** — the school's vendor failed; it is
   not an empty week. The warning names the vendor.
 - **Scheduled overview misbehaves** — read `~/.aula/brief/launchd.log`.
@@ -281,15 +280,39 @@ time — it is not tied to setup.
   It records phase times and model attempts, never the prompt or the source
   text.
 - **The online copy is stale** — the same log's line beginning
-  `Artifact blev ikke opdateret:` says why; `bun src/cli.ts publish`
+  `Artifact blev ikke opdateret:` says why; `aula publish`
   redeploys immediately.
+- **`aula: command not found` after installing** — `~/.local/bin` is not on
+  `PATH` in this shell yet (step 1). Use the full `~/.local/bin/aula`, or open
+  a new terminal.
+
+## Updating
+
+Re-run the curl from step 1; it overwrites the binary in place. Nothing else
+changes — the login, preferences and hosted URL all live in `~/.aula`.
 
 ## Uninstall
 
 ```bash
-bun src/cli.ts publish --off
-bun src/cli.ts schedule --remove
+aula publish --off
+aula schedule --remove
 rm -rf ~/.claude/skills/aula ~/.agents/skills/aula ~/.local/bin/aula ~/.aula
 ```
 
-Then delete the folder. `~/.aula` holds everything the tool ever stored.
+That is everything: the binary, the skill, and `~/.aula`, which holds all the
+tool ever stored.
+
+## From source
+
+Only for working on aula-cli itself — an end user never needs this. Requires
+git and Bun ≥ 1.3:
+
+```bash
+git clone https://github.com/sorenlouv/aula-cli.git && cd aula-cli
+bun install
+bun src/cli.ts --help
+```
+
+Every `aula X` above is `bun src/cli.ts X` from that folder, and
+`bun run build` compiles the release binaries into `dist/`. Contributors
+should read `AGENTS.md`; nobody setting the tool up needs to.
