@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { optionsFor, parseCommandLine, usageFor } from './cli-options.ts';
+import { cmd } from './runtime.ts';
 
 describe('command-line contracts', () => {
   test('keeps the values typed by node:util', () => {
@@ -46,19 +47,21 @@ describe('command-line contracts', () => {
   });
 
   test('checks positional arity before command code runs', () => {
-    expect(() => parseCommandLine('thread', [])).toThrow('Usage: aula thread <threadId>');
-    expect(() => parseCommandLine('thread', ['12', '13'])).toThrow('Usage: aula thread <threadId>');
-    expect(() => parseCommandLine('new', ['surprise'])).toThrow('Usage: aula new');
+    expect(() => parseCommandLine('thread', [])).toThrow(`Usage: ${cmd('thread <threadId>')}`);
+    expect(() => parseCommandLine('thread', ['12', '13'])).toThrow(
+      `Usage: ${cmd('thread <threadId>')}`,
+    );
+    expect(() => parseCommandLine('new', ['surprise'])).toThrow(`Usage: ${cmd('new')}`);
   });
 
   test('the attachment index is optional and defaults to the first one', () => {
     expect(parseCommandLine('attachment', ['5001']).positionals).toEqual(['5001']);
     expect(parseCommandLine('attachment', ['5001', '2']).positionals).toEqual(['5001', '2']);
     expect(() => parseCommandLine('attachment', [])).toThrow(
-      'Usage: aula attachment <threadId> [index]',
+      `Usage: ${cmd('attachment <threadId> [index]')}`,
     );
     expect(() => parseCommandLine('attachment', ['5001', '2', '3'])).toThrow(
-      'Usage: aula attachment',
+      `Usage: ${cmd('attachment')}`,
     );
   });
 

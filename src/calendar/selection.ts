@@ -9,6 +9,7 @@
 
 import type { ConnectorCalendar } from './connector.ts';
 import type { CalendarRef } from './types.ts';
+import { cmd } from '../runtime.ts';
 
 export type CalendarChoice = CalendarRef & {
   selected: boolean;
@@ -56,7 +57,7 @@ export function resolveCalendarSelection(
     const matches = choices.filter((calendar) => calendar.id === ref || calendar.name === ref);
     if (matches.length === 0) {
       throw new CalendarSelectionError(
-        `No calendar named "${ref}". Run \`aula calendars\` and use an exact displayed name.`,
+        `No calendar named "${ref}". Run \`${cmd('calendars')}\` and use an exact displayed name.`,
       );
     }
     if (matches.length > 1) {

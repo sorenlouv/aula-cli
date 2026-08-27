@@ -6,6 +6,8 @@
  * request path.
  */
 
+import { formatRemedy, type Remedy } from '../errors.ts';
+import { cmd } from '../runtime.ts';
 import { isRecord } from '../validation.ts';
 
 type ModelPurpose = 'brief' | 'repair' | 'transport';
@@ -78,6 +80,42 @@ export class ClaudeRunError extends Error {
   }
 }
 
+/** The one install line, so the three places that offer it cannot drift. */
+export const CLAUDE_INSTALL_COMMAND = 'curl -fsSL https://claude.ai/install.sh | bash';
+
+/**
+ * What to say when `claude` is not there.
+ *
+ * It is the only program aula-cli needs besides itself, so this is the one
+ * dependency failure a user can actually hit — and the one worth naming
+ * precisely. `retry` is the command that failed, so the remedy ends with the
+ * thing the reader was already trying to do.
+ */
+export function claudeMissingRemedy(retry: string): Remedy {
+  return {
+    headline: '`claude` is not installed, and the overview is written with it.',
+    detail: 'It is the only program aula-cli needs besides itself.',
+    action: 'Install it, then try again:',
+    commands: [CLAUDE_INSTALL_COMMAND, retry],
+    fallback: 'The Claude desktop app does not provide this command (SETUP.md step 0).',
+  };
+}
+
+/**
+ * `claude` was not on PATH when we went to run it.
+ *
+ * Distinct from {@link ClaudeRunError} because the two want opposite advice: a
+ * run that failed is worth retrying and the morning schedule will do exactly
+ * that, while a missing program will still be missing tomorrow. Callers branch
+ * on this to stop promising a retry that cannot help.
+ */
+export class ClaudeMissingError extends Error {
+  constructor(retry: string) {
+    super(formatRemedy(claudeMissingRemedy(retry)));
+    this.name = 'ClaudeMissingError';
+  }
+}
+
 const DIAGNOSTIC_LIMIT = 32_768;
 
 function diagnosticExit(exit: ClaudeExit): ClaudeExitDiagnostic {
@@ -110,13 +148,27 @@ export async function spawnClaude(
   },
 ): Promise<ClaudeExit> {
   const startedAt = performance.now();
-  const proc = Bun.spawn(['claude', ...args], {
-    stdin: opts.stdin === undefined ? 'ignore' : new TextEncoder().encode(opts.stdin),
-    stdout: 'pipe',
-    stderr: 'pipe',
-    // Always explicit: tests change PATH after startup to install a fake CLI.
-    env: { ...process.env, ...(opts.env ?? {}) },
-  });
+  // A thunk rather than an inline call so the `'pipe'` literals survive
+  // inference — `ReturnType<typeof Bun.spawn>` widens them and loses the readers.
+  const spawn = () =>
+    Bun.spawn(['claude', ...args], {
+      stdin: opts.stdin === undefined ? 'ignore' : new TextEncoder().encode(opts.stdin),
+      stdout: 'pipe',
+      stderr: 'pipe',
+      // Always explicit: tests change PATH after startup to install a fake CLI.
+      env: { ...process.env, ...(opts.env ?? {}) },
+    });
+  let proc: ReturnType<typeof spawn>;
+  try {
+    proc = spawn();
+  } catch (err) {
+    // Bun raises this synchronously, and its message is `Executable not found
+    // in $PATH: "claude"` — true, but it reads as an internal fault and names
+    // no way out. Translate it once, here, rather than letting it surface raw
+    // through three different commands.
+    if (isRecord(err) && err.code === 'ENOENT') throw new ClaudeMissingError(cmd('new'));
+    throw err;
+  }
 
   let timedOut = false;
   let stoppedAfterOutput = false;

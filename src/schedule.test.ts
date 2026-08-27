@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { cliInvocation } from './runtime.ts';
 import {
   agentPath,
   buildPlist,
@@ -47,7 +50,6 @@ describe('buildPlist', () => {
   const plist = buildPlist({
     at: { hour: 6, minute: 30 },
     program: ['/opt/homebrew/bin/bun', '/repo/src/cli.ts', 'scheduled-run'],
-    workdir: '/repo',
     path: '/opt/homebrew/bin:/usr/bin',
     logPath: '/tmp/launchd.log',
   });
@@ -99,16 +101,16 @@ describe('buildPlist', () => {
     expect(plist).toContain('com.aula-cli.brief');
   });
 
-  test('a source checkout gets a working directory', () => {
-    expect(plist).toContain('<key>WorkingDirectory</key><string>/repo</string>');
-  });
-
   /**
-   * The compiled shape: one argv entry and a subcommand. Omitting
-   * WorkingDirectory is deliberate rather than an oversight — a binary reads
-   * and writes only ~/.aula, and naming a directory that may since have been
+   * Never, in either mode. Nothing the run touches resolves against the
+   * working directory, and naming one that may since have been moved or
    * deleted is how a launchd job fails before it starts.
    */
+  test('sets no working directory', () => {
+    expect(plist).not.toContain('WorkingDirectory');
+  });
+
+  /** The compiled shape: one argv entry and a subcommand. */
   test('a binary runs itself, with no working directory and no interpreter', () => {
     const compiled = buildPlist({
       at: { hour: 6, minute: 30 },
@@ -124,30 +126,36 @@ describe('buildPlist', () => {
 });
 
 describe('agentPath', () => {
-  test('leads with the tools the run needs, deduplicated', () => {
-    const path = agentPath({
-      bun: '/opt/homebrew/bin/bun',
-      claude: '/Users/x/.local/bin/claude',
-      node: '/Users/x/.nvm/versions/node/v22.0.0/bin/node',
-    });
-    const dirs = path.split(':');
-    expect(dirs[0]).toBe('/Users/x/.local/bin');
-    expect(dirs[1]).toBe('/Users/x/.nvm/versions/node/v22.0.0/bin');
-    expect(dirs).toContain('/opt/homebrew/bin');
-    // .local/bin appears once even though claude lives there and it is also a default.
-    expect(dirs.filter((d) => d === '/Users/x/.local/bin')).toHaveLength(1);
+  test('leads with the directory claude was found in', () => {
+    const dirs = agentPath('/somewhere/unusual/bin/claude').split(':');
+    expect(dirs[0]).toBe('/somewhere/unusual/bin');
+    expect(dirs).toContain('/usr/bin');
   });
 
-  test('tolerates a machine without claude or node on PATH', () => {
-    const path = agentPath({ bun: '/usr/local/bin/bun' });
-    expect(path.startsWith('/usr/local/bin')).toBe(true);
+  test('names the usual install location once, not twice', () => {
+    const local = join(homedir(), '.local', 'bin');
+    const dirs = agentPath(join(local, 'claude')).split(':');
+    expect(dirs[0]).toBe(local);
+    expect(dirs.filter((dir) => dir === local)).toHaveLength(1);
   });
 
-  // A binary has no interpreter to locate, so nothing bun-shaped is baked.
-  test('needs no bun directory at all', () => {
-    const path = agentPath({ claude: '/Users/x/.local/bin/claude' });
-    expect(path.split(':')[0]).toBe('/Users/x/.local/bin');
-    expect(path).toContain('/usr/bin');
+  /**
+   * The regression this whole shape exists to prevent. `aula schedule` runs
+   * under a developer's PATH, which carries version managers, package manager
+   * shims and toolchain directories the 06:30 run has no use for. None of them
+   * may reach the agent: the scheduled run needs `claude`, and the CLI starts
+   * by absolute path, so the result is fully determined by where claude is.
+   */
+  test('bakes claude and the standard trail, and nothing else', () => {
+    expect(agentPath('/Users/x/.local/bin/claude').split(':')).toEqual([
+      '/Users/x/.local/bin',
+      join(homedir(), '.local', 'bin'),
+      '/opt/homebrew/bin',
+      '/usr/bin',
+      '/bin',
+      '/usr/sbin',
+      '/sbin',
+    ]);
   });
 });
 
@@ -181,54 +189,56 @@ describe('schtasksCreateArgs', () => {
 });
 
 /**
- * The runtime is injected so both branches are reachable from a source
- * checkout. Without that, the compiled shape — the one every end user gets —
- * would be the one shape the suite could never assert on.
+ * Nothing here varies by install mode any more: the whole difference lives in
+ * `cliInvocation()`, which has its own tests, and the working directory that
+ * used to be the second difference turned out never to have been needed.
  */
 describe('programs', () => {
-  const compiled = { compiled: true, invocation: ['/Users/x/.local/bin/aula'] };
-  const source = { compiled: false, invocation: ['/opt/homebrew/bin/bun', '/repo/src/cli.ts'] };
-
-  test('a binary runs its own subcommand and needs no working directory', () => {
-    const { coordinator, direct, workdir } = programs(compiled);
-    expect(coordinator).toEqual(['/Users/x/.local/bin/aula', 'scheduled-run']);
-    expect(direct).toEqual(['/Users/x/.local/bin/aula', 'new', '--text', '--catch-up']);
-    expect(workdir).toBeUndefined();
+  test('both shapes are this CLI running one of its own subcommands', () => {
+    const { coordinator, direct } = programs();
+    const invocation = cliInvocation();
+    expect(coordinator).toEqual([...invocation, 'scheduled-run']);
+    expect(direct.slice(0, invocation.length)).toEqual(invocation);
   });
 
-  test('a checkout runs the same subcommand through its own interpreter', () => {
-    const { coordinator, direct, workdir } = programs(source);
-    expect(coordinator).toEqual(['/opt/homebrew/bin/bun', '/repo/src/cli.ts', 'scheduled-run']);
-    expect(direct.slice(0, 2)).toEqual(['/opt/homebrew/bin/bun', '/repo/src/cli.ts']);
-    expect(workdir).toBeTruthy();
-  });
-
-  // The whole point of the collapse: one spelling of the coordinator, and the
-  // working directory as the single remaining difference between the modes.
-  test('the working directory is the only thing that differs by mode', () => {
-    const binary = programs(compiled);
-    const checkout = programs(source);
-    expect(binary.coordinator.at(-1)).toBe('scheduled-run');
-    expect(checkout.coordinator.at(-1)).toBe('scheduled-run');
-    expect(binary.workdir).toBeUndefined();
-    expect(checkout.workdir).toBeTruthy();
-  });
-
-  // Whatever the shape, the scheduled run must stay idempotent: --catch-up is
-  // what makes the retry lines free once the morning has already succeeded.
+  // The scheduled run must stay idempotent: --catch-up is what makes the retry
+  // lines free once the morning has already succeeded.
   test('every scheduled invocation passes --catch-up', () => {
-    for (const runtime of [compiled, source]) {
-      expect(programs(runtime).direct).toContain('--catch-up');
+    expect(programs().direct).toContain('--catch-up');
+  });
+
+  /**
+   * launchd and cron both start jobs from a directory the user never chose, so
+   * anything the run resolves relatively would break there. Nothing does — the
+   * entry point is absolute, and every path the brief touches is under
+   * `~/.aula` — which is why no working directory is set at all.
+   */
+  test('names its entry point absolutely, so no working directory is needed', () => {
+    for (const arg of programs().coordinator.slice(0, -1)) {
+      expect(arg.startsWith('/')).toBe(true);
     }
   });
 });
 
 describe('cronLines', () => {
+  const CLAUDE = '/Users/x/.local/bin/claude';
+
   test('the run, then quarter-hour retries for three hours, weekdays only, all with --catch-up', () => {
-    const lines = cronLines({ hour: 6, minute: 30 });
-    expect(lines).toHaveLength(2);
-    expect(lines[0]).toMatch(/^30 6 \* \* 1-5 .* new --text --catch-up$/);
-    expect(lines[1]).toMatch(/^\*\/15 7-9 \* \* 1-5 .* --catch-up$/);
+    const lines = cronLines({ hour: 6, minute: 30 }, CLAUDE);
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toMatch(/^30 6 \* \* 1-5 .* new --text --catch-up$/);
+    expect(lines[2]).toMatch(/^\*\/15 7-9 \* \* 1-5 .* --catch-up$/);
+  });
+
+  /**
+   * cron's own PATH is roughly `/usr/bin:/bin`, and the brief is written by
+   * spawning `claude` by name. Without this line the job runs every weekday
+   * and fails every weekday, reporting it only to the local mail spool.
+   */
+  test('leads with a PATH assignment that can find claude', () => {
+    const [path = ''] = cronLines({ hour: 6, minute: 30 }, CLAUDE);
+    expect(path.startsWith('PATH=')).toBe(true);
+    expect(path).toContain('/Users/x/.local/bin');
   });
 
   /**
@@ -237,13 +247,14 @@ describe('cronLines', () => {
    * and the entry point are absolute for that reason.
    */
   test('names its interpreter and entry point absolutely', () => {
-    const [run = ''] = cronLines({ hour: 6, minute: 30 });
+    const [, run = ''] = cronLines({ hour: 6, minute: 30 }, CLAUDE);
     const command = run.replace(/^\S+ \S+ \S+ \S+ \S+ /, '');
     expect(command.startsWith('/') || command.startsWith('cd /')).toBe(true);
     expect(command).not.toMatch(/(^| )bun /);
   });
 
   test('no retry line when the run is in the last hour of the day', () => {
-    expect(cronLines({ hour: 23, minute: 30 })).toHaveLength(1);
+    // PATH plus the single run.
+    expect(cronLines({ hour: 23, minute: 30 }, CLAUDE)).toHaveLength(2);
   });
 });

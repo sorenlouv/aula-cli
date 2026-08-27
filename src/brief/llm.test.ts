@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ClaudeRunError } from '../llm/claude.ts';
+import { ClaudeMissingError, ClaudeRunError } from '../llm/claude.ts';
 import { briefInput, sourceItem } from '../testing/brief-fixtures.ts';
 import { installFakeClaude } from '../testing/fake-claude.ts';
 import {
@@ -574,6 +574,28 @@ describe('the claude subprocess', () => {
       expect(run.code).toBe(0);
       expect(run.timedOut).toBe(false);
       expect(parseClaudeJson(run.stdout)?.text).toBe('svar');
+    });
+
+    /**
+     * The only runtime dependency aula-cli has. Bun reports its absence as
+     * `Executable not found in $PATH: "claude"`, which reads as an internal
+     * fault and names no way out — and the brief used to pair it with "try
+     * again later", advice that can never work for a program that is not
+     * installed.
+     */
+    test('a missing claude is named, with the command that installs it', async () => {
+      const realPath = process.env.PATH;
+      process.env.PATH = '/nonexistent-for-this-test';
+      try {
+        const attempt = spawnClaude(['-p', 'x'], { timeoutMs: 5_000 });
+        await expect(attempt).rejects.toThrow(ClaudeMissingError);
+        await expect(attempt).rejects.toThrow(/claude` is not installed/);
+        await expect(attempt).rejects.toThrow(/claude\.ai\/install\.sh/);
+        // The raw Bun wording must not survive to the user.
+        await expect(attempt).rejects.not.toThrow(/Executable not found/);
+      } finally {
+        process.env.PATH = realPath;
+      }
     });
 
     test('passes stdin through to the process', async () => {

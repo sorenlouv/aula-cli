@@ -12,6 +12,7 @@ import { spawnSync } from 'node:child_process';
 import { appendFileSync, chmodSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { AULA_DIR } from '../auth.ts';
+import { buildVersion, isCompiled } from '../runtime.ts';
 import { errorMessage } from '../validation.ts';
 
 export const BRIEF_LOG_PATH = join(AULA_DIR, 'logs', 'brief.jsonl');
@@ -20,6 +21,8 @@ const SOURCE_ROOT = join(import.meta.dir, '..', '..');
 export type SourceRevision = {
   commit: string | null;
   dirty: boolean | null;
+  /** The compiled release, for a binary — where `commit` cannot be answered. */
+  release: string | null;
 };
 
 export type BriefLogEvent = {
@@ -41,20 +44,36 @@ export type BriefLogEvent = {
 export type BriefLogResult =
   { ok: true; path: string } | { ok: false; path: string; error: string };
 
-/** Identify the checked-out source without making diagnostics depend on Git. */
+/**
+ * Identify the source this brief was generated from.
+ *
+ * A release binary answers from the version compiled into it and stops there.
+ * Its `import.meta.dir` is a virtual path inside the bundle, so there is no
+ * working tree to interrogate and the commands below could only ever fail —
+ * an end user would be paying for a subprocess on every run to learn nothing,
+ * and paying it to a tool the install does not otherwise require. A checkout
+ * is the only place the questions have answers, so it is the only place they
+ * are asked.
+ */
 export function sourceRevision(root: string = SOURCE_ROOT): SourceRevision {
+  if (isCompiled()) return { commit: null, dirty: null, release: buildVersion() };
+
   const run = (args: string[]) =>
     spawnSync('git', args, { cwd: root, encoding: 'utf8', timeout: 2_000 });
 
   try {
     const revision = run(['rev-parse', '--verify', 'HEAD']);
     const commit = revision.status === 0 ? revision.stdout.trim() : '';
-    if (!/^[0-9a-f]{40,64}$/i.test(commit)) return { commit: null, dirty: null };
+    if (!/^[0-9a-f]{40,64}$/i.test(commit)) return { commit: null, dirty: null, release: null };
 
     const status = run(['status', '--porcelain', '--untracked-files=normal']);
-    return { commit, dirty: status.status === 0 ? status.stdout.length > 0 : null };
+    return {
+      commit,
+      dirty: status.status === 0 ? status.stdout.length > 0 : null,
+      release: null,
+    };
   } catch {
-    return { commit: null, dirty: null };
+    return { commit: null, dirty: null, release: null };
   }
 }
 

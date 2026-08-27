@@ -154,7 +154,7 @@ aula doctor --text
 Every endpoint gets called for real. Lines are `PASS`, `WARN`, `SKIP` or
 `FAIL`. `SKIP` is normal — it means a school does not expose that widget.
 `WARN` means the call worked but returned something ambiguous, usually an
-empty feed; those are explained in API.md. The command exits 0 even with
+empty feed — the line itself says which. The command exits 0 even with
 warnings, and 1 only on a `FAIL`.
 
 Act on `WARN` and `FAIL` lines: run the command if the line gives you one,
@@ -207,12 +207,14 @@ cron lines to install by hand. A laptop asleep at 06:30 is the normal case, so
 the job waits for a real wake and retries through the morning — the user does
 not have to leave the machine on.
 
-The schedule bakes in the `PATH` and the `AULA_BRIEF_MODEL`,
-`AULA_BRIEF_EFFORT`, `AULA_TOOL_MODEL`, `AULA_TOOL_EFFORT`,
-`AULA_BRIEF_REPAIR_MODEL`, `AULA_BRIEF_REPAIR_EFFORT` and `AULA_CACHE_TTL`
-values from the shell it ran in. Re-run it if any of those change — and also
-after a node version change, because `claude`'s plugin hooks shell out to
-node, and a moved node costs the scheduled run its exit status.
+On macOS the agent runs with a fixed `PATH` — launchd hands it no copy of
+your shell's — so the schedule bakes in where `claude` lives, and whichever of
+`AULA_BRIEF_MODEL`, `AULA_BRIEF_EFFORT`, `AULA_TOOL_MODEL`, `AULA_TOOL_EFFORT`,
+`AULA_BRIEF_REPAIR_MODEL`, `AULA_BRIEF_REPAIR_EFFORT` and `AULA_CACHE_TTL` are
+set when it runs. Re-run it if any of those change. The Windows task inherits
+your user `PATH` and environment instead, and the printed cron lines carry a
+`PATH` of their own — on both, set the `AULA_*` values where the job will see
+them.
 
 ## 8. Hand over
 
@@ -250,8 +252,8 @@ calendar-link alternative, and `calendars` prints the few clicks when the
 connector is missing.
 
 Show the list and let the user pick. Set exactly the calendars they name, and
-only when they name one — this writes to `~/.aula/config.json`, outside the
-repository. Pass the exact displayed names (or the id shown when two
+only when they name one — this writes to `~/.aula/config.json`. Pass the
+exact displayed names (or the id shown when two
 calendars share a name), never a list position, which may point at something
 else on a later read. `set` states the whole answer: it reads what you name
 and stops reading everything else, so pass every calendar that should be read,
@@ -286,14 +288,14 @@ time — it is not tied to setup.
   `timed out`: the Mac slept mid-run, and the retries redo the morning.
   `Not logged in`: `claude` has no credentials outside a terminal — run
   `claude` once, log in, and try again. `command not found`: something is off
-  launchd's bare PATH — re-run `schedule`.
+  launchd's bare PATH — re-run `aula schedule`.
 - **An overview was slow or incomplete** — inspect the owner-only lifecycle
-  log: `tail -n 20 ~/.aula/logs/brief.jsonl | jq '{at,event,revision,details}'`.
+  log: `tail -n 20 ~/.aula/logs/brief.jsonl | jq '{at,event,details}'`.
   It records phase times and model attempts, never the prompt or the source
   text.
-- **The online copy is stale** — the same log's line beginning
-  `Artifact blev ikke opdateret:` says why; `aula publish`
-  redeploys immediately.
+- **The online copy is stale** — the `Artifact blev ikke opdateret:` line in
+  `~/.aula/brief/launchd.log` says why; `aula publish` redeploys immediately.
+  (`brief.jsonl` records only whether the deploy succeeded, not why it did not.)
 - **`aula: command not found` after installing** — `~/.local/bin` is not on
   `PATH` in this shell yet (step 1). Use the full `~/.local/bin/aula`, or open
   a new terminal.

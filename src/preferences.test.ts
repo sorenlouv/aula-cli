@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { cmd } from './runtime.ts';
 import {
   addPreference,
   DEFAULT_PREFERENCES,
@@ -81,7 +82,7 @@ describe('preferences.md', () => {
 
   test('an empty wish is a usage error, not an empty line in the file', () => {
     const path = prefsPath();
-    expect(() => addPreference('   ', path)).toThrow(/aula remember/);
+    expect(() => addPreference('   ', path)).toThrow(cmd('remember'));
     expect(readPreferences(path)).toEqual([]);
   });
 
@@ -91,7 +92,7 @@ describe('preferences.md', () => {
       Array.from({ length: MAX_PREFERENCES }, (_, i) => `ønske nummer ${i + 1}`),
       path,
     );
-    expect(() => addPreference('én til', path)).toThrow(/aula forget/);
+    expect(() => addPreference('én til', path)).toThrow(cmd('forget <nr>'));
   });
 
   test('forget takes the number the listing shows', () => {

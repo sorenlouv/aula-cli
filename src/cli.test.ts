@@ -162,7 +162,7 @@ test('a long digest keeps its history range without exceeding Aula calendar limi
 test('a command prints only the options it accepts', () => {
   const help = runWithoutLogin('doctor', '--help');
   assert.equal(help.code, 0);
-  assert.match(help.stdout, /Usage: aula doctor/);
+  assert.ok(help.stdout.includes(`Usage: ${cmd('doctor')}`), help.stdout);
   assert.match(help.stdout, /--text --days/);
   assert.doesNotMatch(help.stdout, /--no-cache/);
   assert.deepEqual(help.requests, []);
@@ -336,7 +336,7 @@ test('an expired widget token is still recoverable with the cache on', () => {
 test('open without a generated overview fails with a pointer, not a blank page', () => {
   const result = sandbox().run('open');
   assert.notEqual(result.code, 0);
-  assert.match(result.stderr, /aula new/);
+  assert.ok(result.stderr.includes(cmd('new')), result.stderr);
 });
 
 test('schedule refuses a malformed --at before touching the system', () => {
@@ -348,7 +348,7 @@ test('schedule refuses a malformed --at before touching the system', () => {
 test('open --web without a configured hosted copy says how to get one', () => {
   const result = sandbox().run('open', '--web');
   assert.notEqual(result.code, 0);
-  assert.match(result.stderr, /aula publish/);
+  assert.ok(result.stderr.includes(cmd('publish')), result.stderr);
 });
 
 // The reported bug this guards against: SkolePortal answered HTTP 500 for the
@@ -659,7 +659,7 @@ test('publish with no overview yet says what to do first', () => {
   const box = sandboxWithClaude('ok', ARTIFACT);
   const result = box.run('publish');
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /aula new/);
+  assert.ok(result.stderr.includes(cmd('new')), result.stderr);
 });
 
 test('a failed publish leaves no url behind', () => {
@@ -911,7 +911,7 @@ test('remember, preferences, forget — the curation round trip', () => {
 
   const bad = box.run('forget', 'den om John');
   assert.notEqual(bad.code, 0);
-  assert.match(bad.stderr, /aula preferences/);
+  assert.ok(bad.stderr.includes(cmd('preferences')), bad.stderr);
 });
 
 test('a remembered wish reaches the model that writes the overview', () => {

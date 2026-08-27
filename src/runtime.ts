@@ -55,22 +55,6 @@ export function cliInvocation(): string[] {
 }
 
 /**
- * How the installed skill spells a command.
- *
- * Deliberately the short, relative `bun src/cli.ts` for a checkout: the skill
- * states the directory on the line above and tells the agent to run from
- * there, so the relative form is both correct and readable in that context.
- * The binary form is an absolute path rather than a bare name, because nothing
- * guarantees the reader's PATH includes wherever it was installed.
- *
- * For anything the user reads *outside* that context — an error, a remedy —
- * use {@link cmd}, which does not assume a working directory.
- */
-export function commandPrefix(): string {
-  return isCompiled() ? process.execPath : 'bun src/cli.ts';
-}
-
-/**
  * One command, runnable as printed, from wherever the reader happens to be.
  *
  * Every "run this to fix it" string has to go through here, and the bar is

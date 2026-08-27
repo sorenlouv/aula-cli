@@ -45,6 +45,7 @@ import { type AppAuthCallbacks, MitidClient, parseAuxResponse } from './mitid-cl
 import type { AvailableAuthenticators } from './mitid-types.ts';
 import { mitidUrls } from './mitid-urls.ts';
 import { generatePkce } from './pkce.ts';
+import { cmd } from '../../runtime.ts';
 
 export type IdentitySelector = (options: IdentityOption[]) => Promise<number>;
 
@@ -230,12 +231,12 @@ export class AulaLoginClient {
         const url = new URL(currentUrl);
         if (url.host === 'nemlog-in.mitid.dk' || url.host === 'www.mitid.dk') {
           throw new AulaSilentSsoFailedError(
-            'Broker session lapsed; silent re-authorize landed on MitID. Run `aula login` to re-authenticate.',
+            `Broker session lapsed; silent re-authorize landed on MitID. Run \`${cmd('login')}\` to re-authenticate.`,
           );
         }
         if (url.host === 'broker.unilogin.dk') {
           throw new AulaSilentSsoFailedError(
-            'Silent re-authorize hit the broker IdP-selection page; broker session is gone. Run `aula login`.',
+            `Silent re-authorize hit the broker IdP-selection page; broker session is gone. Run \`${cmd('login')}\`.`,
           );
         }
         const metaUrl = extractMetaRefreshUrl(res.body);

@@ -588,9 +588,11 @@ export class AulaClient {
           detail:
             `The name is wrong, not the parameters — Aula answers an unknown method ` +
             `with HTTP 404 and status code ${code}.`,
-          fallback:
-            'AGENTS.md, "Finding an unwrapped endpoint", reads the real method names ' +
-            "out of Aula's own frontend bundle rather than guessing them.",
+          // The remedy here is maintainer work — reading the real method names
+          // out of Aula's own frontend bundle (AGENTS.md, "Finding an unwrapped
+          // endpoint"). That is a note for whoever is extending this client, not
+          // something to hand a parent mid-error, so it stays a comment.
+          fallback: 'This is a bug in aula-cli, not something you did.',
         });
       }
       if (res.status === 403) {
@@ -602,7 +604,7 @@ export class AulaClient {
             `access — one wrong id fails the whole call, it is not filtered out.`,
           action: 'Check which ids this login actually has:',
           commands: [cmd('whoami')],
-          fallback: 'API.md, "Id spaces", explains which id belongs where.',
+          fallback: `The ids differ per institution — ${cmd('whoami --text')} lists the real ones.`,
         });
       }
       // HTTP 410 — every method answers this once a version retires. The probe in
@@ -625,7 +627,7 @@ export class AulaClient {
           `${STATUS_VERSION_OR_ACCESS}.`,
         action: 'Check which ids and institutions this login actually has:',
         commands: [cmd('whoami')],
-        fallback: 'API.md, "Id spaces", explains which id belongs where.',
+        fallback: `The ids differ per institution — ${cmd('whoami --text')} lists the real ones.`,
       });
     }
     if (code === STATUS_BAD_PARAMETERS) {
@@ -646,7 +648,9 @@ export class AulaClient {
         : 'Aula sent no message with it, and this is not a status code aula-cli knows about.',
       action: 'See which endpoints are working:',
       commands: [cmd('doctor --text')],
-      fallback: "If this is reproducible, API.md's status-code table needs a new row.",
+      // A reproducible unknown code means aula-cli's status-code table needs a
+      // new row — again maintainer work, and not the user's to act on.
+      fallback: 'If this keeps happening it is a gap in aula-cli, not your login.',
     });
   }
 

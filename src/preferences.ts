@@ -28,6 +28,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { dirname, join } from 'node:path';
 import { AULA_DIR } from './auth.ts';
 import { UsageError } from './errors.ts';
+import { cmd } from './runtime.ts';
 
 export const PREFERENCES_PATH = join(AULA_DIR, 'preferences.md');
 
@@ -145,7 +146,7 @@ export function addPreference(text: string, path = PREFERENCES_PATH): RememberRe
   const line = normalise(text);
   if (!line) {
     throw new UsageError(
-      'Usage: aula remember "det du vil huskes på" — fx "beskeder fra John (Hjaltes far) er altid vigtige".',
+      `Usage: ${cmd('remember "det du vil huskes på"')} — fx "beskeder fra John (Hjaltes far) er altid vigtige".`,
     );
   }
   const preferences = loadPreferences(path);
@@ -154,7 +155,7 @@ export function addPreference(text: string, path = PREFERENCES_PATH): RememberRe
   if (preferences.length >= MAX_PREFERENCES) {
     throw new UsageError(
       `There are already ${preferences.length} preferences, which is the limit.\n` +
-        'Run `aula preferences` to see them and `aula forget <nr>` to drop one first.',
+        `Run \`${cmd('preferences')}\` to see them and \`${cmd('forget <nr>')}\` to drop one first.`,
     );
   }
   const next = [...preferences, line];
@@ -192,8 +193,8 @@ export function removePreference(
   if (removed === undefined) {
     throw new UsageError(
       preferences.length === 0
-        ? 'Nothing is remembered yet — `aula remember "…"` records the first one.'
-        : `There is no preference ${index}. Run \`aula preferences\` to see the numbers (1–${preferences.length}).`,
+        ? `Nothing is remembered yet — \`${cmd('remember "…"')}\` records the first one.`
+        : `There is no preference ${index}. Run \`${cmd('preferences')}\` to see the numbers (1–${preferences.length}).`,
     );
   }
   const next = preferences.filter((_, i) => i !== index - 1);

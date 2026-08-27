@@ -11,7 +11,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { isAbsolute } from 'node:path';
-import { cliInvocation, cmd, commandPrefix, isCompiled, shortestSpelling } from './runtime.ts';
+import { cliInvocation, cmd, shortestSpelling } from './runtime.ts';
 
 describe('cmd', () => {
   test('no token is a path that depends on the current directory', () => {
@@ -102,16 +102,5 @@ describe('shortestSpelling', () => {
       },
     };
     expect(shortestSpelling(exe, throwing)).toBe(exe);
-  });
-});
-
-describe('commandPrefix', () => {
-  /**
-   * Not a duplicate of `cmd`. The skill states the directory and tells the
-   * agent to work from it, so the short relative spelling is correct there —
-   * and it is what keeps sixteen command examples readable.
-   */
-  test('stays short for the skill, which supplies the directory', () => {
-    expect(commandPrefix()).toBe(isCompiled() ? process.execPath : 'bun src/cli.ts');
   });
 });

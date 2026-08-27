@@ -23,6 +23,8 @@
 
 import { AulaClient } from './client.ts';
 import { startOfDay } from './cli-helpers.ts';
+import { CLAUDE_INSTALL_COMMAND } from './llm/claude.ts';
+import { cmd } from './runtime.ts';
 import { buildFamily, integrationContext, type Family } from './family.ts';
 import { readWidget, SUPPORTED_WIDGET_IDS } from './integrations/index.ts';
 import { addLocalDays, isoDate, isoWeekString } from './integrations/types.ts';
@@ -78,8 +80,8 @@ export function claudeCliCheck(
         status: 'warn',
         note:
           'the AI overview shells out to it — install with ' +
-          '`curl -fsSL https://claude.ai/install.sh | bash`, then re-run ' +
-          '`schedule` (SETUP.md step 0). The Claude desktop app does not provide it.',
+          `\`${CLAUDE_INSTALL_COMMAND}\`, then re-run ` +
+          `\`${cmd('schedule')}\` (SETUP.md step 0). The Claude desktop app does not provide it.`,
       };
 }
 
@@ -138,7 +140,7 @@ export async function runDoctor(
       ? {}
       : {
           status: 'warn' as const,
-          note: 'sensitive threads read as empty rather than erroring — run `refresh-stepup`',
+          note: `sensitive threads read as empty rather than erroring — run \`${cmd('refresh-stepup')}\``,
         }),
   }));
 
@@ -439,7 +441,7 @@ function renderDoctor(report: DoctorReport): string {
   ];
   if (report.summary.warned > 0) {
     lines.push(
-      fmt.dim('Warnings are successful calls that returned a known symptom — see API.md.'),
+      fmt.dim('Warnings are successful calls that returned a known symptom, not failures.'),
     );
   }
   return lines.join('\n');

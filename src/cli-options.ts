@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util';
 import { UsageError } from './errors.ts';
+import { cmd } from './runtime.ts';
 
 const OPTION_DEFINITIONS = {
   text: { type: 'boolean' },
@@ -172,7 +173,7 @@ export function parseCommandLine(command: CliCommand, args: string[]) {
       positional.max === 0 && parsed.positionals.length > 0
         ? `"${command}" takes no arguments. `
         : '';
-    throw new UsageError(`${reason}Usage: aula ${positional.usage}`);
+    throw new UsageError(`${reason}Usage: ${cmd(positional.usage)}`);
   }
 
   return parsed;

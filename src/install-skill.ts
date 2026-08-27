@@ -1,11 +1,19 @@
 /**
  * `install-skill` — write the agent skill into the user's agent directory.
  *
- * The skill file is a template, and the thing it templates is how to invoke
- * this CLI. That differs per installation: a binary is one absolute path, a
- * checkout is `bun src/cli.ts` run from the repo. Both spellings have to be
- * correct in the copy the agent reads, because the agent will paste them into
- * a shell verbatim.
+ * The template spells every command `aula`, literally, because that is what
+ * the command is: SETUP.md installs the binary as `aula` and puts its
+ * directory on PATH precisely so the user — and this skill — can just say
+ * `aula`. Writing it out beats templating it. The agent pastes these lines
+ * into a shell verbatim, and a literal is the one form that cannot render
+ * wrong, drift out of sync with SETUP.md, or disagree with the `aula …` every
+ * error message already prints.
+ *
+ * That leaves exactly one thing that genuinely differs per installation —
+ * where the CLI lives — so exactly one placeholder survives. A checkout has no
+ * `aula` on PATH, so its paragraph says to read `aula` as `bun src/cli.ts`:
+ * one sentence for the maintainer, instead of a substitution every end user's
+ * file has to come through correctly.
  *
  * The template ships *inside* the binary via an embedded import, which is what
  * lets `install-skill` work for someone who never cloned the repository. The
@@ -19,10 +27,8 @@ import { dirname, join } from 'node:path';
 import template from '../.claude/skills/aula/SKILL.md' with { type: 'text' };
 import { UsageError } from './errors.ts';
 import { fmt, ok } from './io.ts';
-import { commandPrefix, isCompiled } from './runtime.ts';
+import { isCompiled } from './runtime.ts';
 
-/** The literal the template uses wherever a command has to be spelled out. */
-const SOURCE_PREFIX = 'bun src/cli.ts';
 /** Stands in for the paragraph that says where the CLI is and how to run it. */
 const LOCATION_PLACEHOLDER = '{{AULA_CLI_LOCATION}}';
 
@@ -43,33 +49,33 @@ export function parseSkillTarget(value: string | undefined): SkillTarget {
 /**
  * Fills the template for this installation.
  *
- * `prefix` and `compiled` are parameters rather than reads of the live runtime
- * so the compiled spelling can be tested from a source checkout — otherwise
- * the branch that matters most to end users would be the one branch the suite
- * could never reach.
+ * `executable` and `compiled` are parameters rather than reads of the live
+ * runtime so the compiled shape can be tested from a source checkout —
+ * otherwise the branch that matters most to end users would be the one branch
+ * the suite could never reach.
  */
 export function renderSkill(
   source: string,
-  opts: { prefix: string; compiled: boolean; repoDir: string },
+  opts: { executable: string; compiled: boolean; repoDir: string },
 ): string {
   const location = opts.compiled
-    ? `**Where the CLI lives:** \`${opts.prefix}\` — an installed program, so it\n` +
-      'runs from any directory and needs no checkout:'
+    ? `**Where the CLI lives:** \`${opts.executable}\`, on your PATH as \`aula\` —\n` +
+      'an installed program, so it runs from any directory and needs no checkout:'
     : `**Where the CLI lives:** ${opts.repoDir}. Run every command from that\n` +
       'directory. (If you are already working inside the aula-cli repository, that\n' +
-      'is the directory.) No build step — Bun runs the TypeScript directly:';
+      'is the directory.) No build step — it runs from source directly, so read\n' +
+      '`aula` below as `bun src/cli.ts`:';
 
-  return source.replaceAll(LOCATION_PLACEHOLDER, location).replaceAll(SOURCE_PREFIX, opts.prefix);
+  return source.replaceAll(LOCATION_PLACEHOLDER, location);
 }
 
 export function runInstallSkill(target: SkillTarget, outDir: string | undefined): number {
   const compiled = isCompiled();
-  const prefix = commandPrefix();
   // `import.meta.dir` is src/ from a checkout, and a virtual path when
   // compiled — where it is never used, because the template is embedded.
   const repoDir = join(import.meta.dir, '..');
 
-  const rendered = renderSkill(template, { prefix, compiled, repoDir });
+  const rendered = renderSkill(template, { executable: process.execPath, compiled, repoDir });
   // A skill that still says `{{…}}` would send the agent to a directory that
   // does not exist, and it would look like a working install while doing it.
   if (rendered.includes('{{')) {

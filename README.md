@@ -2,7 +2,7 @@
 
 Aula er et kaos af informationer og beskeder. Med Aula CLI kan din AI agent (f.eks Claude Code) give dig et dagligt overblik over de informationer, der er vigtige for netop DIG. 
 
-Hver dag klokken 6 vågner agenten op og danner dit Aula overblik. Du kan tilpasse overblikket, så bestemte informationer altid bliver fremhævet - og andre nedtonet. 
+Hver hverdag klokken 6.30 vågner agenten op og danner dit Aula overblik. Du kan tilpasse overblikket, så bestemte informationer altid bliver fremhævet - og andre nedtonet. 
 
 ### Kom godt i gang
 

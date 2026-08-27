@@ -14,6 +14,7 @@ import { loadPreferences } from './../preferences.ts';
 import { errorMessage } from './../validation.ts';
 import { intervalLabel, overviewWindow } from './dates.ts';
 import type { Audience, BriefInput, HealthNote, PresenceRow, SourceItem } from './types.ts';
+import { cmd } from '../runtime.ts';
 
 const AULA_PORTAL = 'https://www.aula.dk/portal/#';
 
@@ -307,8 +308,7 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
   if (!family.isSteppedUp) {
     health.push({
       level: 'warn',
-      message:
-        'Sessionen er ikke step-up-godkendt, så følsomme beskeder mangler. Kør `aula refresh-stepup`.',
+      message: `Sessionen er ikke step-up-godkendt, så følsomme beskeder mangler. Kør \`${cmd('refresh-stepup')}\`.`,
       retryable: false,
     });
   }
@@ -473,7 +473,7 @@ async function collectPersonal(now: Date): Promise<{ items: SourceItem[]; health
   }));
   if (loaded.notConnected) {
     const warning = health[0];
-    if (warning) warning.message += ' Kør `aula calendars` for at komme videre.';
+    if (warning) warning.message += ` Kør \`${cmd('calendars')}\` for at komme videre.`;
   } else if (loaded.warnings.length === 0) {
     // What was read, in the footer that already says what was fetched — about
     // the fetch, like every other line there, and never about the week.

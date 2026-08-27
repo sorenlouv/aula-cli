@@ -28,7 +28,7 @@ test('appends private JSONL diagnostics outside the overview', () => {
       details: { message: 'overloaded' },
     },
     path,
-    { commit: '0123456789abcdef0123456789abcdef01234567', dirty: false },
+    { commit: '0123456789abcdef0123456789abcdef01234567', dirty: false, release: null },
   );
 
   expect(result).toEqual({ ok: true, path });

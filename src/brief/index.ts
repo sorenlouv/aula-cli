@@ -11,6 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AulaClient } from '../client.ts';
 import { isoWeekString, localIsoDate } from '../integrations/types.ts';
+import { CLAUDE_INSTALL_COMMAND, ClaudeMissingError } from '../llm/claude.ts';
 import { collect, HISTORY_DAYS } from './collect.ts';
 import { deployArtifact, type DeployResult } from './deploy.ts';
 import { appendBriefLog, errorForBriefLog, sourceRevision } from './log.ts';
@@ -56,6 +57,16 @@ export type BriefRun = {
    * The scheduler stops at the first complete run — see `--catch-up` in cli.ts.
    */
   complete: boolean;
+  /**
+   * Whether running again could plausibly do better.
+   *
+   * False when the run was stopped by something a retry cannot change — today
+   * only a missing `claude`. The morning schedule retries every 15 minutes for
+   * three hours, so an incomplete run normally *is* worth repeating and the
+   * output says so; saying it when the cause is a program that is not
+   * installed sends the reader off to wait for a fix that will never arrive.
+   */
+  retryable: boolean;
 };
 
 /**
@@ -150,6 +161,8 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   let extractionStatus: string | null = null;
   let overviewWarning: string | null = null;
   let extractionTelemetry: unknown = null;
+  /** Set when the run failed on something a later attempt cannot fix. */
+  let dependencyMissing = false;
 
   if (opts.useModel !== false) {
     const extractStartedAt = performance.now();
@@ -185,11 +198,23 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
       }
     } catch (err) {
       phase('extract', extractStartedAt, { error: errorForBriefLog(err) });
-      overviewWarning =
-        'Modellen kunne ikke prioritere indholdet. Oversigten er derfor kun bygget med ' +
-        'simple regler og kan mangle vigtige punkter eller have en mindre nyttig rækkefølge. ' +
-        'Prøv at generere den igen senere.';
-      notes.push(`Modellen kunne ikke køre (${errorMessage(err)}) — kun reglerne blev brugt.`);
+      // A missing `claude` is not a transient model failure: it will still be
+      // missing tomorrow morning, so "try again later" is the one piece of
+      // advice guaranteed not to help. Name the dependency instead.
+      const missing = err instanceof ClaudeMissingError;
+      dependencyMissing ||= missing;
+      overviewWarning = missing
+        ? 'Claude er ikke installeret, og oversigten skrives med den. Oversigten er ' +
+          'derfor kun bygget med simple regler og kan mangle vigtige punkter. ' +
+          'Installér Claude, og dan oversigten igen.'
+        : 'Modellen kunne ikke prioritere indholdet. Oversigten er derfor kun bygget med ' +
+          'simple regler og kan mangle vigtige punkter eller have en mindre nyttig rækkefølge. ' +
+          'Prøv at generere den igen senere.';
+      notes.push(
+        missing
+          ? `Claude mangler — installér med: ${CLAUDE_INSTALL_COMMAND}`
+          : `Modellen kunne ikke køre (${errorMessage(err)}) — kun reglerne blev brugt.`,
+      );
       const logged = log('brief.model.failed', errorForBriefLog(err));
       notes.push(
         logged.ok
@@ -299,5 +324,14 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
     deployment: { status: deployment.status },
   });
 
-  return { brief, topline, origin, published, deployment, notes, complete };
+  return {
+    brief,
+    topline,
+    origin,
+    published,
+    deployment,
+    notes,
+    complete,
+    retryable: !dependencyMissing,
+  };
 }

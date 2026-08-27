@@ -70,6 +70,8 @@ import { BRIEF_TITLE, runBrief } from './brief/index.ts';
 import { overviewWindow } from './brief/dates.ts';
 import { deployArtifact, readTarget, setTarget } from './brief/deploy.ts';
 import { explain } from './brief/rank.ts';
+import { cmd } from './runtime.ts';
+import { ClaudeMissingError } from './llm/claude.ts';
 import { BRIEF_DIR, loadState, recordDeploy, saveState, todayIsComplete } from './brief/state.ts';
 import { runDoctor } from './doctor.ts';
 import { AulaSessionError, UsageError } from './errors.ts';
@@ -100,7 +102,7 @@ const MAX_HISTORY_DAYS = 365;
 const USAGE = `
 aula — your kids' school and daycare, read from Aula (aula.dk)
 
-Usage: aula <command> [options]        (or: bun src/cli.ts <command>)
+Usage: aula <command> [options]
 
 Everyday:
   new                          Generate today's AI overview — the local page and,
@@ -215,7 +217,7 @@ async function main(): Promise<number> {
     return 0;
   }
   if (!isCliCommand(command))
-    throw new UsageError(`Unknown command "${command}". Run \`aula --help\`.`);
+    throw new UsageError(`Unknown command "${command}". Run \`${cmd('--help')}\`.`);
   if (wantsHelp) {
     console.log(commandHelp(command));
     return 0;
@@ -225,7 +227,9 @@ async function main(): Promise<number> {
   try {
     parsed = parseCommandLine(command, argv.slice(1));
   } catch (err) {
-    throw new UsageError(`${errorMessage(err)}\nRun \`aula --help\` for the commands and options.`);
+    throw new UsageError(
+      `${errorMessage(err)}\nRun \`${cmd('--help')}\` for the commands and options.`,
+    );
   }
   const { values, positionals } = parsed;
 
@@ -665,6 +669,7 @@ async function main(): Promise<number> {
           layout: run.origin,
           deployed: run.deployment.status === 'ok' ? run.deployment.url : null,
           complete: run.complete,
+          retryable: run.retryable,
           topline: run.topline,
           cards: run.brief.cards.length,
           hidden: run.brief.hidden.length,
@@ -690,10 +695,10 @@ async function main(): Promise<number> {
 function commandHelp(command: CliCommand): string {
   const options = optionsFor(command);
   return [
-    `Usage: aula ${usageFor(command)}`,
+    `Usage: ${cmd(usageFor(command))}`,
     options.length > 0 ? `Options: ${options.join(' ')}` : 'Takes no options.',
     '',
-    'Run `aula --help` for every command.',
+    `Run \`${cmd('--help')}\` for every command.`,
   ].join('\n');
 }
 
@@ -725,7 +730,7 @@ function runOpen(web: boolean): number {
     const url = readTarget();
     if (!url) {
       console.error(
-        'No hosted copy is configured — `aula publish` sets one up. `aula open` shows the local page.',
+        `No hosted copy is configured — \`${cmd('publish')}\` sets one up. \`${cmd('open')}\` shows the local page.`,
       );
       return 1;
     }
@@ -733,7 +738,9 @@ function runOpen(web: boolean): number {
     // than let a day-old brief read as today's.
     const deploy = loadState().lastDeploy;
     if (deploy && deploy.url === url && deploy.day !== localIsoDate(new Date())) {
-      console.error(`The hosted copy was last updated ${deploy.day} — \`aula new\` refreshes it.`);
+      console.error(
+        `The hosted copy was last updated ${deploy.day} — \`${cmd('new')}\` refreshes it.`,
+      );
     }
     openInBrowser(url);
     console.log(url);
@@ -742,13 +749,13 @@ function runOpen(web: boolean): number {
 
   const path = join(BRIEF_DIR, 'latest.html');
   if (!existsSync(path)) {
-    console.error(`No overview found at ${path} — run \`aula new\` to generate one.`);
+    console.error(`No overview found at ${path} — run \`${cmd('new')}\` to generate one.`);
     return 1;
   }
   const day = localIsoDate(new Date(statSync(path).mtimeMs));
   const today = localIsoDate(new Date());
   if (day !== today) {
-    console.error(`The newest overview is from ${day} — \`aula new\` generates today's.`);
+    console.error(`The newest overview is from ${day} — \`${cmd('new')}\` generates today's.`);
   }
   openInBrowser(path);
   console.log(path);
@@ -778,7 +785,9 @@ async function runPublish(off: boolean): Promise<number> {
   }
   const artifactPath = join(BRIEF_DIR, 'artifact.html');
   if (!existsSync(artifactPath)) {
-    console.error('No overview to publish yet — run `aula new` first, then `aula publish`.');
+    console.error(
+      `No overview to publish yet — run \`${cmd('new')}\` first, then \`${cmd('publish')}\`.`,
+    );
     return 1;
   }
 
@@ -798,7 +807,7 @@ async function runPublish(off: boolean): Promise<number> {
   recordDeploy(state, result.url);
   saveState(state);
   console.error(
-    'Every `aula new` (and the schedule) keeps it current; `aula publish --off` stops it.',
+    `Every \`${cmd('new')}\` (and the schedule) keeps it current; \`${cmd('publish --off')}\` stops it.`,
   );
   console.log(result.url);
   return 0;
@@ -835,7 +844,7 @@ async function runCalendars(positionals: string[]): Promise<number> {
   const sub = positionals[0];
   const refs = positionals.slice(1);
   if (sub !== undefined && sub !== 'set') {
-    throw new UsageError(`Unknown subcommand "${sub}". Usage: aula ${usageFor('calendars')}`);
+    throw new UsageError(`Unknown subcommand "${sub}". Usage: ${cmd(usageFor('calendars'))}`);
   }
 
   try {
@@ -852,12 +861,18 @@ async function runCalendars(positionals: string[]): Promise<number> {
           '',
           '  Claude  →  Settings  →  Connectors  →  Google Calendar  →  Connect',
           '',
-          'Then run `aula calendars` again.',
+          `Then run \`${cmd('calendars')}\` again.`,
         ].join('\n'),
       );
       return 1;
     }
     if (err instanceof CalendarSelectionError) {
+      console.error(err.message);
+      return 1;
+    }
+    // Already a full remedy naming the dependency and how to install it —
+    // prefixing it would bury the headline `doctor` and the skill read first.
+    if (err instanceof ClaudeMissingError) {
       console.error(err.message);
       return 1;
     }
@@ -951,7 +966,7 @@ async function setCalendars(refs: string[]): Promise<number> {
   const configured = readConfig().calendars ?? [];
   if (refs.length === 0) {
     throw new UsageError(
-      'Usage: aula calendars set <name> [<name> ...] — exact names from `aula calendars`.\n' +
+      `Usage: ${cmd('calendars set <name> [<name> ...]')} — exact names from \`${cmd('calendars')}\`.\n` +
         'To stop reading all of them: aula calendars set none',
     );
   }
@@ -967,7 +982,7 @@ async function setCalendars(refs: string[]): Promise<number> {
     updateConfig({ calendars: undefined });
     console.log(
       `Stopped reading ${configured.map((c) => `"${c.name}"`).join(' and ')}. ` +
-        '`aula calendars` lists them again.',
+        `\`${cmd('calendars')}\` lists them again.`,
     );
     return 0;
   }
@@ -1031,7 +1046,7 @@ async function setCalendars(refs: string[]): Promise<number> {
             `  · ${event.date}${event.startTime ? ` ${event.startTime}` : ''}  ${event.title}`,
         ),
       '',
-      'The calendar events will be included next time you run `aula new`.',
+      `The calendar events will be included next time you run \`${cmd('new')}\`.`,
     ].join('\n'),
   );
   return 0;
@@ -1047,8 +1062,8 @@ function runRemember(positionals: string[]): number {
   }
   console.log(
     `Remembered: "${result.text}"\n` +
-      `It takes effect on the next \`aula new\`. ${result.preferences.length} preference(s) in total — ` +
-      '`aula preferences` lists them.',
+      `It takes effect on the next \`${cmd('new')}\`. ${result.preferences.length} preference(s) in total — ` +
+      `\`${cmd('preferences')}\` lists them.`,
   );
   return 0;
 }
@@ -1058,7 +1073,7 @@ function runPreferences(positionals: string[]): number {
   if (sub === 'reset') return runPreferencesReset();
   if (sub !== undefined) {
     throw new UsageError(
-      `Unknown subcommand "${sub}". Use \`aula preferences\` or \`aula preferences reset\`.`,
+      `Unknown subcommand "${sub}". Use \`${cmd('preferences')}\` or \`${cmd('preferences reset')}\`.`,
     );
   }
   // Seeds on first use: the tool's own opinions are the first thing this
@@ -1067,7 +1082,7 @@ function runPreferences(positionals: string[]): number {
   if (preferences.length === 0) {
     console.log(
       `The list is empty (${PREFERENCES_PATH}) — the overview is ranked on its own judgement alone.\n` +
-        '`aula remember "beskeder fra John (Hjaltes far) er altid vigtige"` puts something back.',
+        `\`${cmd('remember "beskeder fra John (Hjaltes far) er altid vigtige"')}\` puts something back.`,
     );
     return 0;
   }
@@ -1077,7 +1092,7 @@ function runPreferences(positionals: string[]): number {
       '',
       ...preferences.map((line, i) => `  ${i + 1}. ${line}`),
       '',
-      '`aula remember "…"` adds one, `aula forget <n>` drops one — including the ones this tool',
+      `\`${cmd('remember "…"')}\` adds one, \`${cmd('forget <n>')}\` drops one — including the ones this tool`,
       'started with. The file is one preference per line — editing it by hand works just as well.',
     ].join('\n'),
   );
@@ -1091,7 +1106,7 @@ function runPreferencesReset(): number {
     // Say what was destroyed, in full, so it can be typed back in.
     lines.push(
       '',
-      `Dropped ${dropped.length} of your own — \`aula remember\` puts any of them back:`,
+      `Dropped ${dropped.length} of your own — \`${cmd('remember')}\` puts any of them back:`,
       ...dropped.map((line) => `  · ${line}`),
     );
   }
@@ -1102,7 +1117,9 @@ function runPreferencesReset(): number {
 function runForget(raw: string | undefined): number {
   const index = Number(raw);
   if (raw === undefined || !Number.isInteger(index)) {
-    throw new UsageError('Usage: aula forget <n> — the number shown by `aula preferences`.');
+    throw new UsageError(
+      `Usage: ${cmd('forget <n>')} — the number shown by \`${cmd('preferences')}\`.`,
+    );
   }
   const { removed, preferences } = removePreference(index);
   console.log(`Forgotten: "${removed}"\n${preferences.length} preference(s) left.`);
@@ -1526,6 +1543,7 @@ function renderBrief(result: {
   layout: string;
   deployed: string | null;
   complete: boolean;
+  retryable: boolean;
   topline: string | null;
   cards: number;
   hidden: number;
@@ -1542,7 +1560,11 @@ function renderBrief(result: {
   if (result.deployed) lines.push(`Delt: ${result.deployed}`);
   if (result.notes.length) lines.push('', ...result.notes.map((n) => `! ${n}`));
   if (!result.complete)
-    lines.push('! Ufuldstændig kørsel — planlæggerens næste forsøg gør det om.');
+    lines.push(
+      result.retryable
+        ? '! Ufuldstændig kørsel — planlæggerens næste forsøg gør det om.'
+        : '! Ufuldstændig kørsel — den bliver ved, indtil ovenstående er løst.',
+    );
   return lines.join('\n');
 }
 

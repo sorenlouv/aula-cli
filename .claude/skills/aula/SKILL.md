@@ -5,13 +5,16 @@ description: Query Aula (aula.dk), the Danish school and daycare platform, to an
 
 # Aula
 
-Read-only CLI over Aula's internal API. Every command prints JSON by default;
-add `--text` for a human-readable rendering.
+Read-only CLI over Aula's internal API. The read commands print JSON by default;
+add `--text` for a human-readable rendering. The commands that manage the
+installation itself — `open`, `publish`, `calendars`, `remember`, `preferences`,
+`forget`, `schedule`, `login`, `logout`, `refresh-stepup` — already print text
+and reject `--text`.
 
 {{AULA_CLI_LOCATION}}
 
 ```bash
-bun src/cli.ts <command>
+aula <command>
 ```
 
 ## Hard rule: read-only
@@ -30,7 +33,7 @@ For almost any open question ("what have I missed?", "anything important?",
 "what's happening this week?") run one command:
 
 ```bash
-bun src/cli.ts digest --days 14
+aula digest --days 14
 ```
 
 `digest` returns threads (with full message bodies), posts, upcoming calendar
@@ -178,14 +181,14 @@ and the daily brief get their sense of what matters.
   local file, so this costs nothing:
 
   ```bash
-  bun src/cli.ts preferences
+  aula preferences
   ```
 
 - **Record one** the moment the user states a standing wish — "husk at…", "jeg
   vil altid gerne vide…", "du behøver ikke nævne…":
 
   ```bash
-  bun src/cli.ts remember "beskeder fra John (Hjaltes far) er altid vigtige"
+  aula remember "beskeder fra John (Hjaltes far) er altid vigtige"
   ```
 
   Keep their own words and their own language; you are recording what they
@@ -210,8 +213,8 @@ and the daily brief get their sense of what matters.
   pick:
 
   ```bash
-  bun src/cli.ts preferences        # find its number
-  bun src/cli.ts forget 5
+  aula preferences        # find its number
+  aula forget 5
   ```
 
 - `forget <n>` drops one — show the numbered list first, so the user is picking
@@ -227,9 +230,9 @@ events for the same day. It shows both and does not judge; the reader draws the
 conclusion.
 
 ```bash
-bun src/cli.ts calendars                 # every calendar, read ones marked
-bun src/cli.ts calendars set "Familie" "Privat"  # read exactly these, and no others
-bun src/cli.ts calendars set none        # read none of them
+aula calendars                 # every calendar, read ones marked
+aula calendars set "Familie" "Privat"  # read exactly these, and no others
+aula calendars set none        # read none of them
 ```
 
 **`set` states the whole answer, not a delta.** Omitting a calendar stops it
@@ -249,15 +252,15 @@ nothing clashed.
 
 ## The daily brief
 
-`bun src/cli.ts new` generates the "Aula AI oversigt" — a self-contained HTML
+`aula new` generates the "Aula AI oversigt" — a self-contained HTML
 page in `~/.aula/brief/` — and opens it (`--no-open` to skip). It calls
 `claude` itself for extraction; a deterministic local renderer builds the
-layout. `--no-llm` produces a rules-only page. `bun src/cli.ts open` shows the
+layout. `--no-llm` produces a rules-only page. `aula open` shows the
 newest page without regenerating, and
-`open --web` opens the hosted copy where one is configured — `bun src/cli.ts
+`open --web` opens the hosted copy where one is configured — `aula
 publish` sets that up (it publishes the newest page and saves the URL in
 `~/.aula/config.json`; `publish --off` stops it). A
-weekday-morning schedule is installed with `bun src/cli.ts schedule` (06:30 by
+weekday-morning schedule is installed with `aula schedule` (06:30 by
 default, `--at HH:MM` to change, `--remove` to stop; launchd on macOS, Task
 Scheduler on Windows; it retries through the morning if the Mac was asleep).
 Offer both — don't install or publish unasked.
@@ -270,9 +273,9 @@ refresh themselves, so most of the time there is nothing to do.
 **Exit code 2 means the credentials died.** The error text says which kind and
 how to fix it — relay that rather than guessing. Do not retry the command, and
 never attempt to log in yourself: MitID needs the user's phone. Tell them to
-run `bun run login` in the aula-cli directory and approve in the MitID app.
+run `aula login` and approve in the MitID app.
 
-`bun src/cli.ts status` reports whether they are logged in and for how long.
+`aula status` reports whether they are logged in and for how long.
 Other exit codes: `3` = API error (the message says what went wrong), `1` = bug.
 
 ## Notes and limits
@@ -280,10 +283,10 @@ Other exit codes: `3` = API error (the message says what went wrong), `1` = bug.
 - **Sensitive threads** (`sensitive: true`) require a stepped-up session, which
   may expire before the login does. `whoami` reports `isSteppedUp`. When it is
   `false`, threads may be masked or missing; say so and suggest
-  `bun src/cli.ts refresh-stepup` before treating a quiet result as complete.
+  `aula refresh-stepup` before treating a quiet result as complete.
 - Message bodies in `messages` (without `--full`) are truncated by Aula itself.
   Use `--full` or `thread <id>` before quoting or summarising in detail.
 - The data is personal and about children — keep it in the conversation. Never
-  send it anywhere or publish it. If something containing real family data has
-  to be written to disk inside the repo (fixtures, notes, debug dumps), it goes
-  in the gitignored `data/` folder — see `data/README.md`.
+  send it anywhere, publish it, or write it to disk. If a scratch file is truly
+  unavoidable, it goes under `~/.aula/` — never the working directory, which is
+  very often a repository the user commits from.
