@@ -84,7 +84,10 @@ import {
   removePreference,
   resetPreferences,
 } from './preferences.ts';
+import { parseSkillTarget, runInstallSkill } from './install-skill.ts';
+import { buildVersion } from './runtime.ts';
 import { runSchedule } from './schedule.ts';
+import { coordinateScheduledBrief } from './scheduled-brief.ts';
 import { SUPPORTED_WIDGET_IDS, type WeekPlan } from './integrations/index.ts';
 import { addLocalDays, isoDate, localIsoDate } from './integrations/types.ts';
 import type { CommonFile, Contact, ThreadDetail } from './types.ts';
@@ -124,6 +127,9 @@ Everyday:
   login                        Log in with MitID (tokens refresh themselves)
   logout                       Forget the stored login
   status                       Whether you are logged in, and for how much longer
+  install-skill [claude|codex] Teach your agent to use this tool, then open a
+                               new session (--out <dir> to write elsewhere)
+  version                      Which build this is, and for which platform
 
 Options for new:
   --days <n>                   How much history to read (default 60)
@@ -156,6 +162,8 @@ type them:
   tasks / assignments / reminders / homework
                                Homework, per vendor and combined
   refresh-stepup               Restore step-up so sensitive threads read again
+  scheduled-run                What the morning schedule starts: waits through
+                               sleep, then generates the overview
   doctor                       Call every endpoint and report status + timing
   cache status|clear           Inspect or drop the response cache
   raw <method> [k=v ...]       Any un-wrapped Aula read method
@@ -186,9 +194,21 @@ Examples:
 
 // ---------------------------------------------------------------- entrypoint
 
+/** Build and platform, so a bug report says which binary produced it. */
+function versionLine(): string {
+  return `aula ${buildVersion()} (${process.platform}-${process.arch})`;
+}
+
 async function main(): Promise<number> {
   const argv = process.argv.slice(2);
   const command = argv[0];
+
+  // `--version` before command parsing: it is what someone types to find out
+  // which build they have, and that has to answer even when nothing else does.
+  if (command === '--version' || command === '-v') {
+    console.log(versionLine());
+    return 0;
+  }
 
   const wantsHelp = argv.includes('--help') || argv.includes('-h');
   if (!command || command === 'help' || (wantsHelp && !isCliCommand(command))) {
@@ -263,6 +283,18 @@ async function main(): Promise<number> {
         return `Dagens oversigt er allerede komplet${when ? ` (kl. ${when})` : ''} — intet at gøre.`;
       });
     }
+  }
+  if (command === 'version') {
+    console.log(versionLine());
+    return 0;
+  }
+  if (command === 'install-skill') {
+    return runInstallSkill(parseSkillTarget(positionals[0]), values.out);
+  }
+  // The scheduler's own entry point: waits through sleep, then runs the brief.
+  if (command === 'scheduled-run') {
+    const outcome = await coordinateScheduledBrief();
+    return outcome.status === 'complete' ? 0 : 1;
   }
   if (command === 'schedule') {
     return runSchedule({ remove: values.remove === true, ...(values.at ? { at: values.at } : {}) });

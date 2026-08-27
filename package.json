@@ -23,6 +23,7 @@
     "status": "bun src/cli.ts status --text",
     "whoami": "bun src/cli.ts whoami",
     "doctor": "bun src/cli.ts doctor --text",
+    "build": "bun scripts/build.ts",
     "test": "bun test --timeout 30000 src/ evals/",
     "eval": "bun evals/run.ts",
     "eval:list": "bun evals/run.ts --list",

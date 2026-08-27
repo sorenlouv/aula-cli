@@ -1,0 +1,95 @@
+# Build the release binaries and attach them to a GitHub release.
+#
+# The darwin targets are built on macOS rather than cross-compiled, so the
+# ad-hoc signature is produced by the platform that will verify it — Apple
+# Silicon refuses a binary with no valid signature at all, and that is the one
+# failure nobody would see until a user downloaded it.
+#
+# Asset names are stable on purpose: SETUP.md tells people to curl
+# `releases/latest/download/aula-darwin-arm64`, so renaming one breaks the
+# documented install.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            targets: 'aula-darwin-arm64 aula-darwin-x64'
+          - os: ubuntu-latest
+            targets: 'aula-linux-x64 aula-windows-x64.exe'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      # The gate is the same one a contributor runs before pushing; a release
+      # that fails it should never reach a user's machine.
+      - run: bun run typecheck
+      - run: bun run format:check
+      - run: bun test --timeout 30000 src/ evals/
+
+      - name: Build
+        run: |
+          for target in ${{ matrix.targets }}; do
+            bun run build --target "$target"
+          done
+
+      - name: Verify the darwin signatures
+        if: runner.os == 'macOS'
+        run: |
+          for binary in dist/aula-darwin-*; do
+            codesign --verify --verbose "$binary"
+          done
+
+      # A binary that cannot answer `version` is not worth publishing, and this
+      # is the only step that runs one on its own platform before release.
+      - name: Smoke-test the native binary
+        if: runner.os == 'macOS'
+        run: ./dist/aula-darwin-arm64 version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.os }}
+          path: dist/
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: staged
+          merge-multiple: true
+
+      # Each job wrote its own SHA256SUMS for its own targets; the release
+      # needs one file covering everything that ships.
+      - name: Combine the checksums
+        run: |
+          cd staged
+          rm -f SHA256SUMS
+          sha256sum aula-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            staged/aula-*
+            staged/SHA256SUMS
+          generate_release_notes: true

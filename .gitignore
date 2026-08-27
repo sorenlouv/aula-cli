@@ -1,6 +1,14 @@
 node_modules/
 *.log
 
+# Compiled release binaries — `bun run build` output, published as release
+# assets rather than committed.
+dist/
+
+# `bun build --compile` stages each binary in the working directory before
+# moving it, and leaves the staging file behind when a build is interrupted.
+.*.bun-build
+
 # Never commit a session — it grants full read access to the Aula account.
 .env
 session.json

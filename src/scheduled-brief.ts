@@ -12,10 +12,10 @@
 import { join } from 'node:path';
 import { loadState, todayIsComplete } from './brief/state.ts';
 import { localIsoDate } from './integrations/types.ts';
+import { cliInvocation, isCompiled } from './runtime.ts';
 import { errorMessage } from './validation.ts';
 
 const REPO = join(import.meta.dir, '..');
-const CLI_ENTRY = join(REPO, 'src', 'cli.ts');
 const CAFFEINATE = '/usr/bin/caffeinate';
 const PMSET = '/usr/bin/pmset';
 const RUN_ARGS = ['new', '--text', '--catch-up'];
@@ -66,8 +66,9 @@ const defaults: ScheduledBriefDependencies = {
   isComplete: (now) => todayIsComplete(loadState(), now),
   powerState: readMacPowerState,
   runBrief: async () => {
-    const child = Bun.spawn([CAFFEINATE, '-i', '-s', process.execPath, CLI_ENTRY, ...RUN_ARGS], {
-      cwd: REPO,
+    const child = Bun.spawn([CAFFEINATE, '-i', '-s', ...cliInvocation(), ...RUN_ARGS], {
+      // A binary needs no working directory; from source, relative imports do.
+      ...(isCompiled() ? {} : { cwd: REPO }),
       env: process.env,
       stdin: 'ignore',
       stdout: 'inherit',
