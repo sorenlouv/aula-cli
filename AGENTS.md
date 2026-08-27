@@ -119,6 +119,29 @@ bun scripts/login-page-demo.ts        # the rotating QR pair
 bun scripts/login-page-demo.ts otp    # code comparison
 ```
 
+## Releasing
+
+End users install a compiled binary, not this checkout — they have neither git
+nor bun, and on a fresh Mac `git` is the Command Line Tools stub that opens a
+GUI installer. `bun run build` compiles `dist/aula-<platform>-<arch>` for macOS,
+Linux and Windows plus `SHA256SUMS`; `bun run build --target aula-linux-x64`
+does one. Pushing a `v*` tag runs the same thing in CI and attaches the results
+to the release, so **the asset names in SETUP.md's curl are load-bearing** —
+renaming one breaks the documented install.
+
+`src/runtime.ts` is the only place that knows which mode the process is in.
+Anything that writes a command into a file somebody else runs later — the
+launchd plist, a Scheduled Task, cron lines, the installed skill — must take
+its argv from `programs()` or its spelling from `commandPrefix()`, never
+assume `bun src/cli.ts`. Both take the runtime as an optional parameter so the
+compiled branch is testable from a checkout; use that rather than adding a
+mode-specific test path.
+
+New files the binary must carry — templates, fixtures, anything read at
+runtime — have to be imported (`with { type: 'text' }`), not read from disk.
+`import.meta.dir` is a virtual path in a compiled binary, so `readFileSync`
+against it compiles happily and fails only for the user.
+
 ## Finding an unwrapped endpoint
 
 Read the method names out of Aula's bundle rather than guessing:
