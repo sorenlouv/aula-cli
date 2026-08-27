@@ -4,6 +4,7 @@ import {
   buildPlist,
   cronLines,
   parseAt,
+  programs,
   RETRY_EVERY_MINUTES,
   RETRY_FOR_MINUTES,
   scheduleTimes,
@@ -45,7 +46,8 @@ describe('scheduleTimes', () => {
 describe('buildPlist', () => {
   const plist = buildPlist({
     at: { hour: 6, minute: 30 },
-    bun: '/opt/homebrew/bin/bun',
+    program: ['/opt/homebrew/bin/bun', '/repo/src/scheduled-brief.ts'],
+    workdir: '/repo',
     path: '/opt/homebrew/bin:/usr/bin',
     logPath: '/tmp/launchd.log',
   });
@@ -70,7 +72,7 @@ describe('buildPlist', () => {
   test('bakes brief knobs into the agent, XML-escaped', () => {
     const withEnv = buildPlist({
       at: { hour: 6, minute: 30 },
-      bun: '/opt/homebrew/bin/bun',
+      program: ['/opt/homebrew/bin/bun', '/repo/src/scheduled-brief.ts'],
       path: '/usr/bin',
       logPath: '/tmp/launchd.log',
       env: {
@@ -95,6 +97,29 @@ describe('buildPlist', () => {
     expect(plist).toContain('<string>/tmp/launchd.log</string>');
     expect(plist).toContain('com.aula-cli.brief');
   });
+
+  test('a source checkout gets a working directory', () => {
+    expect(plist).toContain('<key>WorkingDirectory</key><string>/repo</string>');
+  });
+
+  /**
+   * The compiled shape: one argv entry and a subcommand. Omitting
+   * WorkingDirectory is deliberate rather than an oversight — a binary reads
+   * and writes only ~/.aula, and naming a directory that may since have been
+   * deleted is how a launchd job fails before it starts.
+   */
+  test('a binary runs itself, with no working directory and no interpreter', () => {
+    const compiled = buildPlist({
+      at: { hour: 6, minute: 30 },
+      program: ['/Users/x/.local/bin/aula', 'scheduled-run'],
+      path: '/Users/x/.local/bin:/usr/bin',
+      logPath: '/tmp/launchd.log',
+    });
+    expect(compiled).toContain('<string>/Users/x/.local/bin/aula</string>');
+    expect(compiled).toContain('<string>scheduled-run</string>');
+    expect(compiled).not.toContain('WorkingDirectory');
+    expect(compiled).not.toContain('.ts</string>');
+  });
 });
 
 describe('agentPath', () => {
@@ -116,11 +141,21 @@ describe('agentPath', () => {
     const path = agentPath({ bun: '/usr/local/bin/bun' });
     expect(path.startsWith('/usr/local/bin')).toBe(true);
   });
+
+  // A binary has no interpreter to locate, so nothing bun-shaped is baked.
+  test('needs no bun directory at all', () => {
+    const path = agentPath({ claude: '/Users/x/.local/bin/claude' });
+    expect(path.split(':')[0]).toBe('/Users/x/.local/bin');
+    expect(path).toContain('/usr/bin');
+  });
 });
 
 describe('schtasksCreateArgs', () => {
   test('a weekday-only task with a zero-padded start time, repeating through the retry window', () => {
-    const args = schtasksCreateArgs({ at: { hour: 6, minute: 5 }, bun: 'C:\\bun\\bun.exe' });
+    const args = schtasksCreateArgs({
+      at: { hour: 6, minute: 5 },
+      program: ['C:\\bun\\bun.exe', 'C:\\repo\\src\\cli.ts', 'new', '--text', '--catch-up'],
+    });
     expect(args).toContain('/SC');
     expect(args[args.indexOf('/SC') + 1]).toBe('WEEKLY');
     expect(args[args.indexOf('/D') + 1]).toBe('MON,TUE,WED,THU,FRI');
@@ -131,14 +166,70 @@ describe('schtasksCreateArgs', () => {
     expect(tr).toContain('"C:\\bun\\bun.exe"');
     expect(tr).toContain('new --text --catch-up');
   });
+
+  // Paths are quoted because Windows puts spaces in them; bare flags must not
+  // be, or schtasks reads the whole string as one program name.
+  test('quotes the executable but not the flags', () => {
+    const args = schtasksCreateArgs({
+      at: { hour: 6, minute: 30 },
+      program: ['C:\\Program Files\\aula.exe', 'new', '--text', '--catch-up'],
+    });
+    const tr = args[args.indexOf('/TR') + 1] ?? '';
+    expect(tr).toBe('"C:\\Program Files\\aula.exe" new --text --catch-up');
+  });
+});
+
+/**
+ * The runtime is injected so both branches are reachable from a source
+ * checkout. Without that, the compiled shape — the one every end user gets —
+ * would be the one shape the suite could never assert on.
+ */
+describe('programs', () => {
+  const compiled = { compiled: true, invocation: ['/Users/x/.local/bin/aula'] };
+  const source = { compiled: false, invocation: ['/opt/homebrew/bin/bun', '/repo/src/cli.ts'] };
+
+  test('a binary runs its own subcommand and needs no working directory', () => {
+    const { coordinator, direct, workdir } = programs(compiled);
+    expect(coordinator).toEqual(['/Users/x/.local/bin/aula', 'scheduled-run']);
+    expect(direct).toEqual(['/Users/x/.local/bin/aula', 'new', '--text', '--catch-up']);
+    expect(workdir).toBeUndefined();
+  });
+
+  test('a checkout runs the coordinator file through its own interpreter', () => {
+    const { coordinator, direct, workdir } = programs(source);
+    expect(coordinator[0]).toBe('/opt/homebrew/bin/bun');
+    expect(coordinator[1]).toContain('scheduled-brief.ts');
+    expect(direct.slice(0, 2)).toEqual(['/opt/homebrew/bin/bun', '/repo/src/cli.ts']);
+    expect(workdir).toBeTruthy();
+  });
+
+  // Whatever the shape, the scheduled run must stay idempotent: --catch-up is
+  // what makes the retry lines free once the morning has already succeeded.
+  test('every scheduled invocation passes --catch-up', () => {
+    for (const runtime of [compiled, source]) {
+      expect(programs(runtime).direct).toContain('--catch-up');
+    }
+  });
 });
 
 describe('cronLines', () => {
   test('the run, then quarter-hour retries for three hours, weekdays only, all with --catch-up', () => {
     const lines = cronLines({ hour: 6, minute: 30 });
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toMatch(/^30 6 \* \* 1-5 cd .* && bun src\/cli\.ts new --text --catch-up$/);
+    expect(lines[0]).toMatch(/^30 6 \* \* 1-5 .* new --text --catch-up$/);
     expect(lines[1]).toMatch(/^\*\/15 7-9 \* \* 1-5 .* --catch-up$/);
+  });
+
+  /**
+   * cron runs with a bare PATH, so a bare `bun` in the command resolves to
+   * nothing and the line fails silently every weekday. Both the interpreter
+   * and the entry point are absolute for that reason.
+   */
+  test('names its interpreter and entry point absolutely', () => {
+    const [run = ''] = cronLines({ hour: 6, minute: 30 });
+    const command = run.replace(/^\S+ \S+ \S+ \S+ \S+ /, '');
+    expect(command.startsWith('/') || command.startsWith('cd /')).toBe(true);
+    expect(command).not.toMatch(/(^| )bun /);
   });
 
   test('no retry line when the run is in the last hour of the day', () => {

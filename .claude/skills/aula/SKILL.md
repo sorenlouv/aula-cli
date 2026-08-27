@@ -8,9 +8,7 @@ description: Query Aula (aula.dk), the Danish school and daycare platform, to an
 Read-only CLI over Aula's internal API. Every command prints JSON by default;
 add `--text` for a human-readable rendering.
 
-**Where the CLI lives:** {{AULA_CLI_DIR}}. Run every command from that
-directory. (If you are already working inside the aula-cli repository, that is
-the directory.) No build step — Bun runs the TypeScript directly:
+{{AULA_CLI_LOCATION}}
 
 ```bash
 bun src/cli.ts <command>

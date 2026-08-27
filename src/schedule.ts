@@ -7,22 +7,27 @@
  * quietly the command prints the cron lines that work everywhere.
  *
  * launchd starts jobs with a bare environment, so every tool the run needs —
- * bun, and `claude` with the node its plugin hooks shell out to — has its
- * directory baked into the agent's PATH at install time. That is why "re-run
+ * `claude`, and the node its plugin hooks shell out to — has its directory
+ * baked into the agent's PATH at install time. That is why "re-run
  * `aula schedule` after switching node versions" is real advice: a hook whose
  * node has moved can cost `claude` its exit status *after* the work is done.
  * Windows tasks inherit the user's PATH from the registry, so nothing needs
  * baking there.
+ *
+ * What gets scheduled depends on how this CLI was installed: a compiled binary
+ * schedules itself by absolute path, while a source checkout schedules the bun
+ * that is running us plus an entry file. See `programs()` — everything else
+ * here takes the argv it produces and does not care which shape it got.
  *
  * **A laptop is asleep at 06:30.** That is the normal case. macOS Power Nap can
  * start a calendar job during a short battery DarkWake, where `caffeinate -s`
  * is not honoured. Starting Aula and Claude there consumes the trigger but
  * cannot finish the brief.
  *
- * The launchd job therefore starts `scheduled-brief.ts`, a cheap coordinator
- * that waits without a sleep assertion. It is suspended with the Mac and
- * resumes on the next wake; only a full wake or AC power starts the expensive
- * child under caffeinate. Calendar retries remain as crash recovery.
+ * The launchd job therefore starts the coordinator, a cheap process that waits
+ * without a sleep assertion. It is suspended with the Mac and resumes on the
+ * next wake; only a full wake or AC power starts the expensive child under
+ * caffeinate. Calendar retries remain as crash recovery.
  */
 
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -30,15 +35,46 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { BRIEF_DIR } from './brief/state.ts';
 import { UsageError } from './errors.ts';
+import { cliInvocation, isCompiled } from './runtime.ts';
 
 const LABEL = 'com.aula-cli.brief';
 const TASK_NAME = 'aula-cli-brief';
 const REPO = join(import.meta.dir, '..');
-const ENTRY = join(REPO, 'src', 'cli.ts');
 const SCHEDULED_ENTRY = join(REPO, 'src', 'scheduled-brief.ts');
 
 /** The scheduled command. `--catch-up` is what makes the retries below free. */
 const RUN_ARGS = ['new', '--text', '--catch-up'];
+
+/**
+ * What the scheduler should run, and from where.
+ *
+ * A binary is one argv entry and needs no working directory: everything it
+ * reads or writes lives under `~/.aula`. A source checkout needs the
+ * interpreter, the entry file, and `cwd` set to the repo so relative imports
+ * resolve. `coordinator` is the sleep-aware wrapper (macOS only); `direct` is
+ * the brief itself, for schedulers that have no wrapper.
+ *
+ * `runtime` is injected by the tests: from a source checkout the compiled
+ * branch is otherwise unreachable, and it is the branch every end user gets.
+ */
+export function programs(runtime?: { compiled: boolean; invocation: string[] }): {
+  coordinator: string[];
+  direct: string[];
+  workdir?: string;
+} {
+  const { compiled, invocation } = runtime ?? {
+    compiled: isCompiled(),
+    invocation: cliInvocation(),
+  };
+  if (compiled) {
+    return { coordinator: [...invocation, 'scheduled-run'], direct: [...invocation, ...RUN_ARGS] };
+  }
+  return {
+    coordinator: [...invocation.slice(0, 1), SCHEDULED_ENTRY],
+    direct: [...invocation, ...RUN_ARGS],
+    workdir: REPO,
+  };
+}
 
 export const RETRY_EVERY_MINUTES = 15;
 export const RETRY_FOR_MINUTES = 180;
@@ -78,11 +114,13 @@ export function scheduleTimes(at: At): At[] {
  * the standard trail. Deduplicated so a claude and a node from the same dir do
  * not repeat it.
  */
-export function agentPath(tools: { bun: string; claude?: string; node?: string }): string {
+export function agentPath(tools: { bun?: string; claude?: string; node?: string }): string {
   const dirs = [
     tools.claude && dirname(tools.claude),
     tools.node && dirname(tools.node),
-    dirname(tools.bun),
+    // Absent for a compiled binary, which is invoked by absolute path and
+    // needs nothing on PATH to start.
+    tools.bun && dirname(tools.bun),
     join(homedir(), '.local', 'bin'),
     '/opt/homebrew/bin',
     '/usr/bin',
@@ -118,7 +156,10 @@ const BAKED_ENV = [
 /** The launchd agent, weekdays only. Exported for tests. */
 export function buildPlist(opts: {
   at: At;
-  bun: string;
+  /** Argv the agent runs — see `programs()`. */
+  program: string[];
+  /** Only a source checkout needs one; a binary reads and writes ~/.aula. */
+  workdir?: string;
   path: string;
   logPath: string;
   env?: Record<string, string>;
@@ -128,7 +169,7 @@ export function buildPlist(opts: {
     `<key>Hour</key><integer>${at.hour}</integer>` +
     `<key>Minute</key><integer>${at.minute}</integer></dict>`;
   const times = scheduleTimes(opts.at);
-  const program = [opts.bun, SCHEDULED_ENTRY];
+  const program = opts.program;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -138,8 +179,7 @@ export function buildPlist(opts: {
   <array>
 ${program.map((arg) => `    <string>${xmlEscape(arg)}</string>`).join('\n')}
   </array>
-  <key>WorkingDirectory</key><string>${REPO}</string>
-  <key>EnvironmentVariables</key>
+${opts.workdir ? `  <key>WorkingDirectory</key><string>${xmlEscape(opts.workdir)}</string>\n` : ''}  <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key><string>${opts.path}</string>
     <key>HOME</key><string>${homedir()}</string>
@@ -164,7 +204,7 @@ ${[1, 2, 3, 4, 5].flatMap((weekday) => times.map((at) => entry(weekday, at))).jo
  * same retry window (`/RI` every N minutes, `/DU` for how long). Exported for
  * tests.
  */
-export function schtasksCreateArgs(opts: { at: At; bun: string }): string[] {
+export function schtasksCreateArgs(opts: { at: At; program: string[] }): string[] {
   const hours = Math.floor(RETRY_FOR_MINUTES / 60);
   const minutes = RETRY_FOR_MINUTES % 60;
   return [
@@ -177,7 +217,12 @@ export function schtasksCreateArgs(opts: { at: At; bun: string }): string[] {
     '/TN',
     TASK_NAME,
     '/TR',
-    `"${opts.bun}" "${ENTRY}" ${RUN_ARGS.join(' ')}`,
+    // The executable is always quoted (Windows paths contain spaces), and so
+    // is any argument that contains one. Flags and subcommands stay bare, or
+    // schtasks reads the whole string as one program name.
+    opts.program
+      .map((arg, index) => (index === 0 || arg.includes(' ') ? `"${arg}"` : arg))
+      .join(' '),
     '/ST',
     clock(opts.at),
     '/RI',
@@ -192,7 +237,9 @@ export function schtasksCreateArgs(opts: { at: At; bun: string }): string[] {
  * following three hours. Exported for tests.
  */
 export function cronLines(at: At): string[] {
-  const command = `cd ${REPO} && bun src/cli.ts ${RUN_ARGS.join(' ')}`;
+  const { direct, workdir } = programs();
+  const run = direct.map((arg) => (arg.includes(' ') ? `"${arg}"` : arg)).join(' ');
+  const command = workdir ? `cd ${workdir} && ${run}` : run;
   const from = at.hour + 1;
   const to = Math.min(23, at.hour + RETRY_FOR_MINUTES / 60);
   return [
@@ -258,15 +305,18 @@ function claudeMissing(): boolean {
 }
 
 function installDarwin(at: At): number {
-  const bun = Bun.which('bun');
+  // A compiled binary is its own interpreter, so bun is only required when
+  // running from source — where it is, by definition, already running us.
+  const bun = isCompiled() ? undefined : Bun.which('bun');
   const claude = Bun.which('claude');
   const node = Bun.which('node');
   const uid = process.getuid?.();
-  if (!bun || uid === undefined) {
-    console.error(bun ? 'Could not determine the user id.' : 'Could not find bun on PATH.');
+  if ((!isCompiled() && !bun) || uid === undefined) {
+    console.error(uid === undefined ? 'Could not determine the user id.' : 'Could not find bun.');
     return 1;
   }
   if (claudeMissing()) return 1;
+  const { coordinator, workdir } = programs();
   const plist = plistPath();
   const logPath = join(BRIEF_DIR, 'launchd.log');
   const env = Object.fromEntries(
@@ -281,10 +331,11 @@ function installDarwin(at: At): number {
     plist,
     buildPlist({
       at,
-      bun,
+      program: coordinator,
+      ...(workdir ? { workdir } : {}),
       logPath,
       path: agentPath({
-        bun,
+        ...(bun ? { bun } : {}),
         ...(claude ? { claude } : {}),
         ...(node ? { node } : {}),
       }),
@@ -331,15 +382,17 @@ function removeDarwin(): number {
 }
 
 function installWindows(at: At): number {
-  const bun = Bun.which('bun');
-  if (!bun) {
+  if (!isCompiled() && !Bun.which('bun')) {
     console.error('Could not find bun on PATH.');
     return 1;
   }
   // Windows tasks inherit PATH from the registry, so `claude` does not need
   // baking — but a `claude` that is not installed at all still fails at 06:30.
   if (claudeMissing()) return 1;
-  const created = sh(['schtasks', ...schtasksCreateArgs({ at, bun })]);
+  // No coordinator on Windows: Task Scheduler has its own wake handling, so
+  // the task runs the brief directly.
+  const { direct } = programs();
+  const created = sh(['schtasks', ...schtasksCreateArgs({ at, program: direct })]);
   if (!created.ok) {
     console.error(`schtasks failed: ${created.err}`);
     return 1;
