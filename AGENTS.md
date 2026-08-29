@@ -7,6 +7,28 @@ modes, nearly all of which return a successful-looking response.
 [BRIEF.md](BRIEF.md) is the daily brief's design; [SETUP.md](SETUP.md) the
 install runbook.
 
+## Working agreements
+
+How I want work done. The hard rules below are this project's own and win where
+they conflict.
+
+**Every feature is implemented in a worktree.** Create it before the first edit
+(the `EnterWorktree` tool, `git worktree add ../aula-cli-<feature> -b
+<feature>`, or an `isolation: "worktree"` subagent); this checkout is for
+reading and merging only. I run several agents at once and they would otherwise
+overwrite each other. Removing the worktree and branch is part of the merge, not
+a follow-up — if one is dirty, show me the diff instead of force-removing it. On
+my machine a `PreToolUse` hook blocks edits made in this checkout; if you hit
+it, you skipped this step.
+
+**Commit at every completed step of the plan**, once `bun test src/` and
+`bun run typecheck` pass — committing on a feature branch is standing
+authorization, no need to ask. Pushing and merging still wait for me.
+
+**Keep technical debt low; do not preserve backwards compatibility.** I am the
+only user, so breaking changes are encouraged wherever they simplify — with the
+public-repo hard rules below the one thing that never bends.
+
 ## Hard rules
 
 - **Never write to Aula.** `assertReadOnly` in `client.ts` and `widgets.ts`
