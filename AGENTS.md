@@ -22,8 +22,10 @@ my machine a `PreToolUse` hook blocks edits made in this checkout; if you hit
 it, you skipped this step.
 
 **Commit at every completed step of the plan**, once `bun test src/` and
-`bun run typecheck` pass — committing on a feature branch is standing
-authorization, no need to ask. Pushing and merging still wait for me.
+`bun run typecheck` pass, and **merge back into `main` as soon as the whole
+change is green.** Both are standing authorization, no need to ask — a finished
+change parked on a branch is worse than a moving `main`, so do not leave one
+sitting in a worktree waiting for me. Pushing and PRs still wait for me.
 
 **Keep technical debt low; do not preserve backwards compatibility.** I am the
 only user, so breaking changes are encouraged wherever they simplify — with the
