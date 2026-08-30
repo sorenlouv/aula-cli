@@ -121,7 +121,7 @@ test('unknown commands and malformed arguments are rejected before authenticatio
 
   for (const { args, message } of cases) {
     const result = runWithoutLogin(...args);
-    assert.equal(result.code, 1, args.join(' '));
+    assert.equal(result.code, 2, args.join(' '));
     assert.match(result.stderr, message);
     // Stripped of the checkout path first. A usage error names the script it
     // was run from, so `cmd()` puts an absolute path in this string, and the
@@ -143,7 +143,7 @@ test('unknown commands and malformed arguments are rejected before authenticatio
 test('--days is bounded by the calendar endpoint only where the full range is read', () => {
   for (const command of ['calendar', 'doctor']) {
     const rejected = runWithoutLogin(command, '--days', '90');
-    assert.equal(rejected.code, 1);
+    assert.equal(rejected.code, 2);
     assert.match(rejected.stderr, /--days must be an integer of at least 1 and at most 50/);
     assert.deepEqual(rejected.requests, []);
   }
@@ -236,7 +236,7 @@ test('digest --child reaches the standalone commands too', () => {
 // class of bug this project is least equipped to notice.
 test('--child is refused by commands that cannot honour it', () => {
   const result = sandbox().run('thread', '5001', '--child', 'Alma');
-  assert.equal(result.code, 1);
+  assert.equal(result.code, 2);
   assert.match(result.stderr, /does not accept --child.*otherwise be ignored/);
   assert.match(result.stderr, /digest/, 'should name the commands that do');
   assert.equal(result.requests.length, 0, 'must be refused before spending a request');
@@ -244,7 +244,7 @@ test('--child is refused by commands that cannot honour it', () => {
 
 test('an unknown child is refused rather than silently matching nobody', () => {
   const result = sandbox().run('digest', '--child', 'Nobody');
-  assert.equal(result.code, 1);
+  assert.equal(result.code, 2);
   assert.match(result.stderr, /No child matches "Nobody"/);
 });
 
@@ -1048,7 +1048,7 @@ test('a login Aula will not accept is reported in plain language, with the fix',
   const box = sandbox({ FAKE_AULA_REJECT_TOKEN: '1' });
   const result = box.run('whoami');
 
-  assert.equal(result.code, 2, 'a credentials problem, so the skill can tell it from a bug');
+  assert.equal(result.code, 5, 'setup required — `aula login`, never a retry');
 
   const flat = result.stderr.replace(/\s+/g, ' ');
   assert.match(flat, /Aula rejected your login/i);
@@ -1067,7 +1067,7 @@ test('Aula being down does not send the user off to redo MitID', () => {
   const box = sandbox({ FAKE_AULA_DOWN: '1' });
   const result = box.run('whoami');
 
-  assert.equal(result.code, 3, 'not a credentials problem');
+  assert.equal(result.code, 1, 'a source is down: retry later, not a credentials problem');
   const flat = result.stderr.replace(/\s+/g, ' ');
   assert.match(flat, /Aula is having trouble/i);
   assert.doesNotMatch(flat, /bun run login/, 'logging in again cannot fix an outage');

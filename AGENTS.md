@@ -31,6 +31,36 @@ sitting in a worktree waiting for me. Pushing and PRs still wait for me.
 only user, so breaking changes are encouraged wherever they simplify — with the
 public-repo hard rules below the one thing that never bends.
 
+## Exit codes
+
+The fleet's shared table, as of the change that adopted it. This repo used to
+have its own colliding scheme (1 usage *and* bug, 2 credentials, 3 API error),
+which meant an agent driving several of these tools could not branch on a code
+without first knowing which tool produced it — and the fleet doc spent five
+lines saying so.
+
+| Code | Meaning |
+| --- | --- |
+| 0 | success |
+| 1 | Aula is down or blocking, or a bug in this client |
+| 2 | usage error |
+| 4 | resolved, but nothing to report |
+| 5 | credentials or setup — run `aula login` |
+
+They are the public contract, shared with `cvr`, `bolig`, `tinglysning` and
+`dgs` and recorded in `../contract.json`; change them only in lockstep with
+that file and `../AGENTS.md`.
+
+**`--json` is accepted everywhere and ignored.** JSON is already the default
+here; the flag exists so an agent driving the whole fleet does not have to
+remember which tool wants it and which rejects it. It used to be a hard error
+with empty stdout.
+
+**Every argv mistake is a `UsageError`.** `parseArgs` runs with `strict: true`
+and throws a plain Node `TypeError`, which escaped into the "this is a bug in
+the client" branch and printed a raw stack — a mistyped flag was byte-identical
+to a crash. `parseCommandLine` wraps it.
+
 ## Hard rules
 
 - **Never write to Aula.** `assertReadOnly` in `client.ts` and `widgets.ts`

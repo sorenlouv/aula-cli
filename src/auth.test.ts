@@ -110,7 +110,7 @@ test('$AULA_TOKEN_KEY keeps the key out of the filesystem', () => {
   // Without the key the file is just bytes — which is the point of setting it.
   delete box.env.AULA_TOKEN_KEY;
   const blind = box.run('status');
-  assert.equal(blind.code, 2);
+  assert.equal(blind.code, 5, 'setup required: the key has to be supplied, not retried');
   assert.match(blind.stderr, /AULA_TOKEN_KEY/);
 });
 
@@ -122,7 +122,7 @@ test('an unreadable token file is reported as a key problem, not a missing login
   writeFileSync(box.tokenPath, '{ not json');
 
   const result = box.run('status');
-  assert.equal(result.code, 2);
+  assert.equal(result.code, 5);
   assert.match(result.stderr, /could not be read/);
   assert.doesNotMatch(result.stderr, /Not logged in/);
 });

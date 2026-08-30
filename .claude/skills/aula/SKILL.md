@@ -270,13 +270,27 @@ Offer both — don't install or publish unasked.
 Auth is a real MitID login; tokens live encrypted in `~/.aula/tokens.json` and
 refresh themselves, so most of the time there is nothing to do.
 
-**Exit code 2 means the credentials died.** The error text says which kind and
+**Exit code 5 means the credentials died.** The error text says which kind and
 how to fix it — relay that rather than guessing. Do not retry the command, and
 never attempt to log in yourself: MitID needs the user's phone. Tell them to
 run `aula login` and approve in the MitID app.
 
 `aula status` reports whether they are logged in and for how long.
-Other exit codes: `3` = API error (the message says what went wrong), `1` = bug.
+
+Exit codes are the fleet's shared table — `aula` used to have its own, colliding
+scheme, which meant an agent driving several of these tools could not branch on
+a code without knowing which tool it came from:
+
+| Code | Meaning | What to do |
+| --- | --- | --- |
+| 0 | success | use the JSON on stdout |
+| 1 | Aula is down or blocking, or a bug in this client | retry later; a stack trace means a bug |
+| 2 | usage error | fix the command line |
+| 4 | resolved, but nothing to report | a real answer — record it and move on |
+| 5 | credentials or setup | run `aula login`; never retry unchanged |
+
+`--json` is accepted and ignored: JSON is already the default, and the flag
+exists so you do not have to remember which tool in the fleet wants it.
 
 ## Notes and limits
 
@@ -287,6 +301,21 @@ Other exit codes: `3` = API error (the message says what went wrong), `1` = bug.
 - Message bodies in `messages` (without `--full`) are truncated by Aula itself.
   Use `--full` or `thread <id>` before quoting or summarising in detail.
 - The data is personal and about children — keep it in the conversation. Never
-  send it anywhere, publish it, or write it to disk. If a scratch file is truly
-  unavoidable, it goes under `~/.aula/` — never the working directory, which is
-  very often a repository the user commits from.
+  publish it, write it to disk, or disclose it to anyone but the user. If a
+  scratch file is truly unavoidable, it goes under `~/.aula/` — never the
+  working directory, which is very often a repository the user commits from.
+
+  One deliberate exception, because the rule as written forbade something the
+  fleet's own instructions require: a guardian's address that the user asked
+  about may be passed to the sibling public-register tools (`bolig`,
+  `tinglysning`, `dgs`, `cvr`). Those are lookups against public records, not
+  disclosures of Aula data. Nothing else crosses that line, and the address
+  goes no further than those tools.
+
+- **This tool is only ever called with a name the USER typed.** It reads the
+  user's own children's school and daycare, so it can turn a parent they
+  already know into an address — it is not a people search. A name discovered
+  by another tool (an owner from `tinglysning`, a proprietor from a `cvr`
+  c/o field) goes to `dgs` or `cvr`, never here. This is the one hard boundary
+  in the fleet, and it is repeated here because a session that loads only this
+  skill never reads the fleet-level AGENTS.md where it also lives.
