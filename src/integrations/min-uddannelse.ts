@@ -113,7 +113,7 @@ async function fetchMu<T>(
     });
     return widgetFetch(
       {
-        url: `${url}?${params}`,
+        url: `${url}?${params.toString()}`,
         widgetId,
         headers: { authorization: `Bearer ${token}`, accept: 'application/json' },
       },

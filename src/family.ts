@@ -127,7 +127,7 @@ export function buildFamily(
     childInstitutionProfileIds,
     institutionCodes,
     widgets: detectWidgets(context),
-    isSteppedUp: Boolean(context.isSteppedUp),
+    isSteppedUp: context.isSteppedUp,
     // Recorded by the MitID login on the stored token record — the one place
     // it exists, since no Aula endpoint ever reveals it.
     mitidUsername,
@@ -203,8 +203,8 @@ export function integrationContext(
   const children = opts.children ?? family.children;
   return {
     isoWeek: opts.isoWeek ?? isoWeekString(),
-    guardianId: String(family.guardian.userId),
-    sessionId: family.mitidUsername ?? String(family.guardian.userId),
+    guardianId: family.guardian.userId,
+    sessionId: family.mitidUsername ?? family.guardian.userId,
     sessionIdIsFallback: family.mitidUsername === undefined,
     children: children.map((child) => ({
       id: child.id,

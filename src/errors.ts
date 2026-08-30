@@ -1,4 +1,29 @@
 /**
+ * The fleet's shared exit-code table.
+ *
+ * These are the public contract, shared with `cvr`, `bolig`, `tinglysning` and
+ * `dgs` and recorded in `../contract.json`; `contract.test.ts` asserts the two
+ * agree. The codes used to be bare literals scattered through the catch chain
+ * in `cli.ts`, which is why this repo was the only one with a contract entry
+ * and no test for it — there was nothing stable to assert against.
+ *
+ * No 3. The shared table's exit 3 means "nothing, or too many things, matched —
+ * refine using the candidates on stderr", and this tool is only ever called
+ * with a name the user typed, so it has no candidate list to refine from.
+ */
+export const EXIT = {
+  OK: 0,
+  /** Aula is down or blocking, or a bug in this client. */
+  ERROR: 1,
+  /** Usage error: fix the command line. */
+  USAGE: 2,
+  /** Resolved, but nothing to report. */
+  NOTHING: 4,
+  /** Credentials or setup — run `aula login`. Never fixed by retrying. */
+  SETUP: 5,
+} as const;
+
+/**
  * Raised when the *user* got the invocation wrong — an unknown child, an
  * unparseable date. These print as a plain message; a stack trace would only
  * bury the part they need to read.

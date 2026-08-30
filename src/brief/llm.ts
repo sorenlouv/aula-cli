@@ -395,7 +395,7 @@ function mergeCardRepairs(
   parsed: unknown,
   candidates: CardRepairCandidate[],
   repaired: unknown,
-): unknown | null {
+): unknown {
   if (!isRecord(parsed) || !Array.isArray(parsed.cards)) return null;
   if (!isRecord(repaired) || !Array.isArray(repaired.repairs)) return null;
   if (repaired.repairs.length !== candidates.length) return null;

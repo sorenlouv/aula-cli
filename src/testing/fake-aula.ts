@@ -402,7 +402,9 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
       return envelope(page === 0 ? [tagged, ...visible] : []);
     }
     case 'calendar.getEventsByProfileIdsAndResourceIds': {
-      const body: unknown = JSON.parse(String(init?.body ?? '{}'));
+      // Only a string body is real here; anything else would stringify to
+      // "[object Object]" and parse into nonsense.
+      const body: unknown = JSON.parse(typeof init?.body === 'string' ? init.body : '{}');
       const rawIds =
         isRecord(body) && Array.isArray(body.instProfileIds)
           ? body.instProfileIds.filter(isNumber)

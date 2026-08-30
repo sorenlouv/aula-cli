@@ -9,6 +9,25 @@ const COPENHAGEN = 'Europe/Copenhagen';
 const AULA_TIMESTAMP =
   /^(\d{4}-\d{2}-\d{2})[T ](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:(?:0\d|1[0-3]):?[0-5]\d|14:?00))?$/;
 
+/**
+ * Coerce a wire value to text without ever inventing text.
+ *
+ * `String(someObject)` is the literal "[object Object]", and most of what this
+ * client reads is `unknown` off a third party's JSON. A calendar server named
+ * "[object Object]" is a failure that looks exactly like an answer. Only
+ * strings and finite numbers are text; everything else is absent.
+ *
+ * Introduced when type-aware linting (`no-base-to-string`) found six of these.
+ * Named `wireText` and not `asText` on purpose: `asText` is already a *boolean*
+ * in `cli.ts` ("render as text, not JSON"), and one repo does not need two
+ * meanings for one name.
+ */
+export function wireText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return '';
+}
+
 export function indent(text: string, spaces: number): string {
   const pad = ' '.repeat(spaces);
   return (text || '(empty)')
@@ -252,7 +271,7 @@ export function upcomingBirthdays(contacts: BirthdayContact[], limit?: number): 
 
     rows.push({
       name: contact.fullName,
-      group: String(contact.group ?? contact.mainGroupName ?? ''),
+      group: contact.group ?? contact.mainGroupName ?? '',
       date: `${parts[2]}-${parts[3]}`,
       inDays,
       turns,

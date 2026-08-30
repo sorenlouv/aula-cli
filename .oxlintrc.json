@@ -1,20 +1,29 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["typescript", "unicorn", "oxc"],
-  "categories": { "correctness": "error" },
+  "extends": ["./oxlint.base.json"],
   "ignorePatterns": ["node_modules", "dist", "data", "attachments", ".claude/worktrees"],
   "rules": {
     "unicorn/no-new-array": "off"
   },
   "overrides": [
     {
+      "files": ["**/*.test.ts", "**/*.test.tsx"],
+      "rules": {
+        "typescript/await-thenable": "off"
+      }
+    },
+    {
       "files": ["src/source-hygiene.test.ts"],
-      "rules": { "no-control-regex": "off" }
+      "rules": {
+        "no-control-regex": "off"
+      }
     },
     {
       "files": ["src/browser/**"],
       "plugins": ["react", "jsx-a11y"],
-      "env": { "browser": true },
+      "env": {
+        "browser": true
+      },
       "rules": {
         "react-hooks/rules-of-hooks": "error",
         "react-hooks/exhaustive-deps": "error",

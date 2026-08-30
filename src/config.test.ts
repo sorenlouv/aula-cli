@@ -1,118 +1,57 @@
-import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { readConfig, updateConfig, writeConfig } from './config.ts';
+/**
+ * Asserts this repo's lint and format configuration against the fleet's.
+ *
+ * Six repos, no shared workspace, and until now six independently drifting
+ * configs: three repos formatted with single quotes and two with double, and
+ * every `.oxlintrc.json` sat at oxlint's narrowest `correctness` tier because
+ * that is what the first one happened to say. "The configs are copies of the
+ * sibling repos'" was true in the sense that they started as copies, and false
+ * in the sense that nothing kept them that way.
+ *
+ * So the fleet root owns them (`../config/`), a script copies them in
+ * (`../scripts/sync-config.sh`), and this asserts the copy — the same bargain
+ * contract.json makes.
+ *
+ * WHY A SKIP IS HONEST HERE, HAVING JUST BEEN CALLED DISHONEST NEXT DOOR.
+ * contract.test.ts skipping in CI was a real hole: the substantive claim ("this
+ * tool emits what it says it emits") could be checked from this repo alone, and
+ * it silently was not. Here there is no such half. The *effect* of this config
+ * is enforced on every CI run — `npm run lint` and `npm run format:check` use
+ * it — and the only thing this file adds is "and it matches the fleet's", which
+ * genuinely cannot be known without the fleet root beside the checkout.
+ */
 
-const URL = 'https://claude.ai/code/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
+import { expect, test } from 'bun:test';
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-const dirs: string[] = [];
-function configPath(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'aula-config-test-'));
-  dirs.push(dir);
-  // A nested path, so the writer has to create the directory it lives in.
-  return join(dir, 'aula', 'config.json');
-}
-afterEach(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+const local = (name: string): string => fileURLToPath(new URL(`../${name}`, import.meta.url));
+const fleet = (name: string): string =>
+  fileURLToPath(new URL(`../../config/${name}`, import.meta.url));
+
+const PAIRS = [
+  { local: local('.prettierrc'), fleet: fleet('prettierrc.json') },
+  { local: local('oxlint.base.json'), fleet: fleet('oxlint.base.json') },
+];
+
+test('the lint and format config matches the fleet root', () => {
+  // A standalone checkout has no fleet root, so there is genuinely nothing to
+  // compare against — unlike the contract tests this pattern came from, where
+  // skipping hid a claim that could have been checked from this repo alone.
+  // The *effect* of this config is enforced on every CI run regardless.
+  if (!existsSync(fleet('prettierrc.json'))) return;
+
+  for (const pair of PAIRS) {
+    expect(readFileSync(pair.local, 'utf8')).toBe(readFileSync(pair.fleet, 'utf8'));
+  }
 });
 
-describe('config.json', () => {
-  test('a missing file is an empty config, not an error', () => {
-    expect(readConfig(configPath())).toEqual({});
-  });
-
-  test('a corrupt file is reported instead of treated as empty', () => {
-    const path = configPath();
-    writeConfig({}, path);
-    writeFileSync(path, '{not json');
-    expect(() => readConfig(path)).toThrow(/config\.json.*ugyldig/i);
-    expect(() => updateConfig({ artifactUrl: URL }, path)).toThrow(/config\.json.*ugyldig/i);
-    expect(readFileSync(path, 'utf8')).toBe('{not json');
-  });
-
-  test('a non-string url is rejected, a padded one is trimmed', () => {
-    const path = configPath();
-    writeConfig({}, path);
-    writeFileSync(path, JSON.stringify({ artifactUrl: 42 }));
-    expect(() => readConfig(path)).toThrow(/artifactUrl/);
-    writeFileSync(path, JSON.stringify({ artifactUrl: `  ${URL}\n` }));
-    expect(readConfig(path)).toEqual({ artifactUrl: URL });
-  });
-
-  test('an arbitrary URL is not accepted as an artifact target', () => {
-    const path = configPath();
-    writeConfig({}, path);
-    writeFileSync(path, JSON.stringify({ artifactUrl: 'https://example.com/public-page' }));
-    expect(() => readConfig(path)).toThrow(/artifactUrl.*ugyldigt format/);
-  });
-
-  test('writes create the file and its directory, readable only by the owner', () => {
-    const path = configPath();
-    writeConfig({ artifactUrl: URL }, path);
-    expect(readConfig(path)).toEqual({ artifactUrl: URL });
-    expect(statSync(path).mode & 0o777).toBe(0o600);
-    expect(readFileSync(path, 'utf8').endsWith('\n')).toBe(true);
-  });
-});
-
-describe('config.json holds more than one preference', () => {
-  const CALENDARS = [{ id: 'far@eksempel.dk', name: 'Familien' }];
-
-  test('calendars survive a publish — the one that used to eat them', () => {
-    const path = configPath();
-    updateConfig({ calendars: CALENDARS }, path);
-    // `aula publish` goes through setTarget → updateConfig, and the earlier
-    // version rebuilt the file from `artifactUrl` alone.
-    updateConfig({ artifactUrl: URL }, path);
-    expect(readConfig(path)).toEqual({ artifactUrl: URL, calendars: CALENDARS });
-  });
-
-  test('publish --off forgets the URL and nothing else', () => {
-    const path = configPath();
-    updateConfig({ artifactUrl: URL, calendars: CALENDARS }, path);
-    updateConfig({ artifactUrl: undefined }, path);
-    expect(readConfig(path)).toEqual({ calendars: CALENDARS });
-  });
-
-  test('a key this version knows nothing about is carried through untouched', () => {
-    const path = configPath();
-    writeConfig({ artifactUrl: URL, somethingNewer: { a: 1 } }, path);
-    updateConfig({ calendars: CALENDARS }, path);
-    expect(readConfig(path).somethingNewer).toEqual({ a: 1 });
-  });
-
-  test('junk or duplicate calendars are rejected rather than silently rewritten', () => {
-    const path = configPath();
-    // Written as raw JSON rather than through `writeConfig`, because the case
-    // being tested is a hand-edited file — which the docs call a supported way
-    // to configure this, and which no type can police.
-    writeConfig({}, path);
-    writeFileSync(
-      path,
-      JSON.stringify({
-        calendars: [
-          { id: 'a@example.com', name: 'A' },
-          { id: '  ', name: 'blank id' },
-          { id: 'a@example.com', name: 'A again' },
-          'not an object',
-          { id: 'b@example.com' },
-        ],
-      }),
-    );
-    expect(() => readConfig(path)).toThrow(/calendars\[1\]\.id/);
-  });
-
-  test('every configured calendar keeps the displayed name the user selected', () => {
-    const path = configPath();
-    writeConfig({}, path);
-    writeFileSync(path, JSON.stringify({ calendars: [{ id: 'a@example.com' }] }));
-    expect(() => readConfig(path)).toThrow(/calendars\[0\]\.name mangler/);
-  });
-
-  test('an empty calendar list reads as absent rather than as an empty array', () => {
-    const path = configPath();
-    writeConfig({ calendars: [] }, path);
-    expect(readConfig(path)).toEqual({});
-  });
+test('.oxlintrc.json extends the shared base rather than restating it', () => {
+  // This one needs no fleet root: it is a claim about this repo alone. Without
+  // the extends line the base file would sit there being copied, synced and
+  // drift-tested while oxlint ignored it completely.
+  const config = JSON.parse(readFileSync(local('.oxlintrc.json'), 'utf8')) as {
+    extends?: string[];
+  };
+  expect(config.extends).toEqual(['./oxlint.base.json']);
 });

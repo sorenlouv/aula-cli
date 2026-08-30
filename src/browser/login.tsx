@@ -26,6 +26,9 @@ type Tone = 'neutral' | 'ok' | 'bad';
 type Copy = { title: string; lede: string; tone: Tone };
 
 /** Six digits read as six digits, not as four hundred eighty-one thousand. */
+// The rule guards against splitting emoji into code points. This is a
+// six-digit MitID code.
+// oxlint-disable-next-line typescript/no-misused-spread
 const spaced = (code: string) => [...code].join(' ');
 
 /** The id the username field points its `aria-describedby` at. */
@@ -412,6 +415,10 @@ function IdentityList({
           reads the first one. */}
       <ul class="options">
         {options.map((name, index) => (
+          // The list is rendered once from a fixed server response and never
+          // reorders or filters, so the index IS the stable identity here.
+          // The names are not: Aula can offer the same login twice.
+          // oxlint-disable-next-line react/no-array-index-key
           <li key={index}>
             <button type="button" class="option" disabled={busy} onClick={() => void choose(index)}>
               {name}

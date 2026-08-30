@@ -345,7 +345,10 @@ export function startLoginPage(initial: LoginPageState = { kind: 'ask-username' 
   const close = () => {
     // `true` closes live connections too — without it an in-flight poll can
     // hold the process open after the login has already returned.
-    server.stop(true);
+    // `void`: stop() is async in Bun and nothing here waits on it — the close
+    // is fire-and-forget by design, and saying so is what stops the linter
+    // reading it as a forgotten await.
+    void server.stop(true);
   };
 
   return {

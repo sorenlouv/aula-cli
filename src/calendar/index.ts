@@ -16,6 +16,7 @@ import { localIsoDate } from '../integrations/types.ts';
 import { errorMessage, parseIsoDateParts } from '../validation.ts';
 import { CalendarNotConnectedError, listEvents } from './connector.ts';
 import type { CalendarRef, PersonalEvent } from './types.ts';
+import { wireText } from '../cli-helpers.ts';
 
 export { CalendarNotConnectedError, listCalendars } from './connector.ts';
 export type { ConnectorCalendar } from './connector.ts';
@@ -186,8 +187,12 @@ export function toPersonalEvent(raw: unknown, calendar: CalendarRef): PersonalEv
 function keyOf(raw: Record<string, unknown>, calendar: CalendarRef, start: TimeRef): string {
   const series = typeof raw.recurringEventId === 'string' ? raw.recurringEventId : String(raw.id);
   const original = isRecordish(raw.originalStartTime) ? (raw.originalStartTime as TimeRef) : start;
-  const slot = String(original.dateTime ?? original.date ?? start.dateTime ?? start.date ?? '');
-  if (!slot) throw new Error(`Aftalen ${String(raw.id)} mangler et tidspunkt til sin nøgle.`);
+  const slot =
+    wireText(original.dateTime) ||
+    wireText(original.date) ||
+    wireText(start.dateTime) ||
+    wireText(start.date);
+  if (!slot) throw new Error(`Aftalen ${wireText(raw.id)} mangler et tidspunkt til sin nøgle.`);
   return `cal:${calendar.id}:${series}:${slot}`;
 }
 

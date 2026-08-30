@@ -83,7 +83,7 @@ export async function getReminders(
   const people = await tokens.withToken(widgetId, async (token) => {
     return await widgetFetch(
       {
-        url: `${SYSTEMATIC_URL}?${params}`,
+        url: `${SYSTEMATIC_URL}?${params.toString()}`,
         widgetId,
         headers: {
           'aula-authorization': `Bearer ${token}`,

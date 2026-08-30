@@ -331,7 +331,7 @@ export class AulaClient {
     const cacheable = !NEVER_CACHED.has(method);
     const cacheKey = { query: opts.query ?? null, body: opts.body ?? null };
     if (cacheable) {
-      const hit = this.#cache.get<unknown>(method, cacheKey);
+      const hit = this.#cache.get(method, cacheKey);
       if (hit !== undefined) return hit;
     }
 

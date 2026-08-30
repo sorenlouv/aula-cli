@@ -30,12 +30,14 @@ async function withVendor<T>(
   const calls: Call[] = [];
   const original = globalThis.fetch;
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    const url = String(input);
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     calls.push({
       url,
       method: init?.method ?? 'GET',
       headers: (init?.headers ?? {}) as Record<string, string>,
-      ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}),
+      // The stub is only ever handed a string body; a Blob would
+      // stringify to "[object Object]" and parse into nonsense.
+      ...(typeof init?.body === 'string' ? { body: JSON.parse(init.body) as unknown } : {}),
     });
     return new Response(JSON.stringify(respond(url)), {
       status: 200,

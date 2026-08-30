@@ -157,6 +157,21 @@ fallback sources.
 
 ## Formatting
 
+**`typescript/await-thenable` is off in this repo's test files, and only this
+repo's.** Every one of the eleven findings was `await expect(p).rejects
+.toThrow(...)`, which in Bun genuinely returns a promise that must be awaited —
+`@types/bun` types it as returning void. Dropping the awaits to satisfy the
+rule would turn each of those assertions into an unhandled rejection that
+asserts nothing. It is scoped to `.oxlintrc.json` here rather than the fleet
+base because aula-cli is the only Bun repo; the rule stays on everywhere else.
+
+**The rest of the lint and format config is not this repo's to change.**
+`.prettierrc` and `oxlint.base.json` are copies owned by the fleet root
+(`../config/`), copied in by `../scripts/sync-config.sh` and asserted by
+`src/config.test.ts`. `.oxlintrc.json` extends the vendored base and holds only
+what is genuinely local: the `src/browser` React overrides, the ignore list, and
+the two rules above. `../config/README.md` says which rules are on and why.
+
 Prettier owns the layout — single quotes, 100 columns, pinned in `.prettierrc`.
 Both sides run that same config: VSCode format-on-save through the Prettier
 extension, and agent edits through the `PostToolUse` hook in

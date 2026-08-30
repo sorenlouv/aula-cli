@@ -74,7 +74,7 @@ import { cmd } from './runtime.ts';
 import { ClaudeMissingError } from './llm/claude.ts';
 import { BRIEF_DIR, loadState, recordDeploy, saveState, todayIsComplete } from './brief/state.ts';
 import { runDoctor } from './doctor.ts';
-import { AulaSessionError, UsageError } from './errors.ts';
+import { AulaSessionError, EXIT, UsageError } from './errors.ts';
 import { fmt, openInBrowser } from './io.ts';
 import { AulaAuthFlowError } from './vendor/aula-auth/index.ts';
 import { resolveFamily, selectChildren, type Family } from './family.ts';
@@ -681,7 +681,10 @@ async function main(): Promise<number> {
     }
 
     default:
-      console.error(`Unknown command "${command}".\n\n${USAGE}`);
+      // `command` is `never` here: the switch above is exhaustive over the
+      // declared commands, and this branch exists for the argv that got past
+      // parsing anyway. String() is what makes that sayable.
+      console.error(`Unknown command "${String(command)}".\n\n${USAGE}`);
       return 1;
   }
 }
@@ -1660,7 +1663,7 @@ try {
     // the fleet reserves for "a source is down, retry later" — so a typo and
     // an outage were the same code.
     reportProblem(err.message);
-    process.exitCode = 2;
+    process.exitCode = EXIT.USAGE;
   } else if (
     err instanceof AulaAuthError ||
     err instanceof AulaSessionError ||
@@ -1671,7 +1674,7 @@ try {
     // 5, the fleet's "setup required — do not retry unchanged". Expired
     // credentials are fixed by `aula login`, never by retrying.
     reportProblem(err.message);
-    process.exitCode = 5;
+    process.exitCode = EXIT.SETUP;
   } else if (err instanceof AulaApiError) {
     // No "Aula API error:" prefix any more. It labelled the failure without
     // saying anything about it, and it pushed the part worth reading — which
@@ -1680,18 +1683,18 @@ try {
     // that; it used to be 3, which every sibling reads as "refine the query
     // and retry" — advice that cannot help when the server is down.
     reportProblem(err.message);
-    process.exitCode = 1;
+    process.exitCode = EXIT.ERROR;
   } else if (err instanceof WidgetError) {
     // A third-party school system, not Aula and not us: the vendor is down or
     // has changed its payload. Same class of "not a bug in this tool" as an
     // Aula API error, so it gets the same treatment rather than a stack trace.
     console.error(`Widget error (${err.widgetId}): ${err.message}`);
-    process.exitCode = 1;
+    process.exitCode = EXIT.ERROR;
   } else {
     // An unexpected error is a bug in this client, so the stack is the useful
     // part and it is printed raw rather than dressed up as advice.
     console.error(err instanceof Error ? (err.stack ?? err.message) : String(err));
-    process.exitCode = 1;
+    process.exitCode = EXIT.ERROR;
   }
 } finally {
   // Written once, here, rather than per response: flat-cache keeps the whole

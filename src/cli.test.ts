@@ -453,7 +453,11 @@ test('galleries drops the synthetic tagged-media row', () => {
 test('galleries sorts on the date it actually returns, not the wire order', () => {
   const albums = json(sandbox().run('galleries', '--no-cache'));
   const dates = albums.map((a: any) => a.createdAt);
-  assert.deepEqual([...dates].sort().reverse(), dates, 'newest first by createdAt');
+  assert.deepEqual(
+    [...dates].sort((a: string, b: string) => a.localeCompare(b)).reverse(),
+    dates,
+    'newest first by createdAt',
+  );
   assert.equal(albums[0].title, 'Tur til stranden');
 });
 

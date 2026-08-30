@@ -34,6 +34,15 @@ jobs:
       # this line the TSX would be checked by nothing.
       - run: bun run typecheck
       - run: bun run lint
+
+      # Type-aware linting, a separate pass because it needs a fully typechecked
+      # program. It is the only gate that can see String() over an `unknown`
+      # rendering an object as the literal text "[object Object]" — six of those
+      # were here, one of them turning a fetch URL into "[object Object]" inside
+      # a test's own assertion. It also found four `.sort()` calls with no
+      # comparator, which sorts numbers lexicographically.
+      - run: bun run lint:types
+
       - run: bun run format:check
 
       # Spawns `bun build` for the login page's client (src/browser/bundle.ts),

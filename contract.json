@@ -1,0 +1,243 @@
+{
+  "contract": 5,
+  "_readme": [
+    "The cross-repo contract, as data rather than prose.",
+    "",
+    "Six CLIs compose by piping JSON into one another, and until now the only",
+    "record of what they emit was AGENTS.md. Prose drifts silently: a renamed",
+    "key leaves every test green, and a driving agent that guesses wrong sees",
+    "`null` from jq, which reads exactly like an absent answer.",
+    "",
+    "Each repo has a test that loads this file and asserts its own slice, so a",
+    "rename now breaks a build instead of a reader. Each tool also prints its",
+    "slice with --contract, so an agent can ask rather than be told.",
+    "",
+    "Bump `contract` whenever anything below changes, and update the siblings",
+    "and AGENTS.md in the same pass — that is the repos' standing agreement."
+  ],
+
+  "exit_codes": {
+    "_note": "Shared by cvr, bolig, tinglysning and dgs. aula is deliberately disjoint; see its own entry.",
+    "0": "success — the JSON body is on stdout",
+    "1": "error: a source is down or blocking. Retry later; the entity may still exist",
+    "2": "usage error: fix the command line",
+    "3": "nothing, or too many things, matched. Refine using the candidates on stderr",
+    "4": "resolved, but nothing to report. A real, final answer — record it and move on",
+    "5": "setup required: credentials or a missing browser. Do not retry unchanged"
+  },
+
+  "join_keys": {
+    "_note": "DAWA UUIDs at two granularities. Match on these, never on the printed address, which is lossy.",
+    "door": {
+      "meaning": "the street door; equal for every home behind it",
+      "paths": {
+        "bolig": ".address.accessAddressId",
+        "tinglysning": ".accessAddressId",
+        "dgs": ".people[].accessAddressId"
+      }
+    },
+    "home": {
+      "meaning": "the individual dwelling; the only join that is exact in a block of flats",
+      "paths": {
+        "bolig": ".address.id",
+        "tinglysning": ".addressUnitId",
+        "dgs": ".people[].addressUnitId"
+      }
+    }
+  },
+
+  "tools": {
+    "cvr": {
+      "repo": "cvr",
+      "language": "go",
+      "exit_codes": [0, 1, 2, 3, 4, 5],
+      "body_on": [0, 4],
+      "progress_on_stderr": false,
+      "commands": {
+        "company": {
+          "shape": "object",
+          "keys": [
+            "cvr",
+            "name",
+            "status",
+            "company_type",
+            "address",
+            "postal_code",
+            "city",
+            "industry_code",
+            "industry",
+            "source"
+          ],
+          "optional": [
+            "co_name",
+            "phone",
+            "email",
+            "website",
+            "employees",
+            "start_date",
+            "end_date",
+            "bankrupt",
+            "advertising_protected",
+            "people",
+            "access_address_id",
+            "address_match_category",
+            "warnings"
+          ]
+        },
+        "search": { "shape": "array", "item_keys": ["cvr", "name", "status", "source"] },
+        "filings": { "shape": "array", "item_keys": ["period_end", "documents"] },
+        "financials": {
+          "shape": "object",
+          "keys": [
+            "periods",
+            "currently_profitable",
+            "profitable_throughout",
+            "years_profitable",
+            "years_loss",
+            "mixed_currency"
+          ],
+          "optional": [
+            "name",
+            "cvr",
+            "currency",
+            "first_profitable_year",
+            "turned_profitable",
+            "note",
+            "warnings",
+            "fetch_errors"
+          ]
+        }
+      }
+    },
+
+    "bolig": {
+      "repo": "bolig",
+      "language": "typescript",
+      "exit_codes": [0, 1, 2, 3, 4],
+      "body_on": [0, 3, 4],
+      "accepts_uuid": "a bare DAWA uuid in the positional argument skips resolution entirely",
+      "progress_on_stderr": true,
+      "commands": {
+        "default": {
+          "shape": "object",
+          "keys": [
+            "query",
+            "address",
+            "property",
+            "valuation",
+            "nearbySales",
+            "history",
+            "warnings",
+            "sources"
+          ],
+          "nullable": ["property"],
+          "notes": {
+            "warnings": "empty array is a real claim: every hop answered. Non-empty means part of the result is missing rather than absent.",
+            "history": "an empty history beside a history warning is 'not looked up', not 'never traded'"
+          }
+        }
+      }
+    },
+
+    "tinglysning": {
+      "repo": "tinglysning",
+      "language": "typescript",
+      "exit_codes": [0, 1, 2, 3, 4, 5],
+      "body_on": [0, 3, 4],
+      "progress_on_stderr": true,
+      "commands": {
+        "default": {
+          "shape": "object",
+          "keys": [
+            "address",
+            "accessAddressId",
+            "addressUnitId",
+            "property",
+            "propertyType",
+            "propertyCount",
+            "propertyIndex",
+            "units",
+            "source",
+            "owners",
+            "charges",
+            "chargesTotal",
+            "publicAssessment",
+            "warnings"
+          ],
+          "nullable": ["addressUnitId", "charges", "chargesTotal", "publicAssessment"],
+          "_charges": [
+            "What is registered AGAINST the property (Hæftelser), beside who owns it.",
+            "`principal` is what the deed was REGISTERED for, never the balance still",
+            "outstanding — a deed is not written down in the register as it is repaid.",
+            "`chargesTotal` is therefore an upper bound on debt, not a debt figure. Do",
+            "not subtract it from a bolig valuation and report the result as equity.",
+            "null (not []) means the charges were never read: only the API payload",
+            "carries them, so the DOM fallback yields null. [] means none registered.",
+            "`chargesTotal` is null if any principal failed to parse; that charge keeps",
+            "its raw string in `principalText`, and `warnings` names how many."
+          ],
+          "_publicAssessment": [
+            "The offentlig ejendomsvurdering the tingbog carries, with the date it was",
+            "set. The same figure bolig reports under .valuation.excluded as 'Den",
+            "offentlige ejendomsvurdering' — often years stale, which `assessedAt`",
+            "makes visible without a second lookup."
+          ]
+        }
+      }
+    },
+
+    "dgs": {
+      "repo": "dgs",
+      "language": "typescript",
+      "exit_codes": [0, 1, 2, 4, 5],
+      "body_on": [0, 4],
+      "progress_on_stderr": true,
+      "never_emits": {
+        "3": "an ambiguous name is answered with a ranked list at exit 0; there is no candidate list to refine from"
+      },
+      "commands": {
+        "search": {
+          "shape": "object",
+          "keys": ["query", "page", "count", "hasMore", "people", "warnings"]
+        },
+        "person": {
+          "shape": "object",
+          "keys": ["id", "name", "warnings"],
+          "note": "a miss emits the same envelope with found:false; a hit omits `found`",
+          "optional": [
+            "address",
+            "street",
+            "postalCode",
+            "city",
+            "phone",
+            "url",
+            "accessAddressId",
+            "addressUnitId",
+            "givenName",
+            "familyName",
+            "coordinates"
+          ]
+        }
+      }
+    },
+
+    "aula": {
+      "repo": "aula-cli",
+      "language": "typescript",
+      "exit_codes": [0, 1, 2, 4, 5],
+      "body_on": [0, 4],
+      "_note": "aula now uses the shared table. It previously had a disjoint scheme (1 usage AND bug, 2 credentials, 3 API error), which meant a code could not be read without first knowing which tool produced it. An Aula outage is exit 1 (a source is down); expired credentials are exit 5 (run `aula login`). --json is accepted and ignored.",
+      "bridge": {
+        "command": "contacts --role guardian",
+        "emits": "that guardian's address, when the family chose to share it in Aula",
+        "boundary": "aula is only ever called with a name the USER typed. A name discovered by another tool goes to dgs or cvr, never here."
+      }
+    },
+
+    "vurderingsportalen": {
+      "repo": "vurderingsportalen",
+      "archived": true,
+      "_note": "Its upstream is gone (NXDOMAIN) and its binary is not on PATH. Not part of the driving chain."
+    }
+  }
+}

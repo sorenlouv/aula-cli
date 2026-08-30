@@ -102,7 +102,7 @@ export async function getWeekPlan(
   const people = await tokens.withToken(widgetId, async (token) => {
     return await widgetFetch(
       {
-        url: `${MEEBOOK_URL}?${params}`,
+        url: `${MEEBOOK_URL}?${params.toString()}`,
         widgetId,
         headers: {
           authorization: `Bearer ${token}`,

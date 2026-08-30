@@ -122,6 +122,10 @@ export function generation(dir = BRIEF_DIR, env?: Record<string, string>): Gener
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
       ]);
+      // `void`, and nothing chains off this: the rule exists to catch a .then
+      // whose undefined return silently becomes the next .then's argument, and
+      // there is no next one. The handler is a terminal side effect.
+      // oxlint-disable-next-line promise/always-return
       void child.exited.then(async (code) => {
         const [out, err] = await output;
         running = false;

@@ -147,6 +147,10 @@ describe('the page behaviour', () => {
       },
     };
 
+    // Running the brief's own client-side script against a fake DOM is the
+    // entire point of this test — there is no other way to prove DONE_SCRIPT
+    // behaves, short of a browser.
+    // oxlint-disable-next-line typescript/no-implied-eval
     new Function('document', 'localStorage', DONE_SCRIPT)(document, localStorage);
 
     expect(JSON.parse(stored)).toEqual({ 'post:13311009|2026-08-17': originalStamp });
@@ -205,6 +209,10 @@ describe('the page behaviour', () => {
       setItem: () => undefined,
     };
 
+    // Running the brief's own client-side script against a fake DOM is the
+    // entire point of this test — there is no other way to prove DONE_SCRIPT
+    // behaves, short of a browser.
+    // oxlint-disable-next-line typescript/no-implied-eval
     new Function('document', 'localStorage', DONE_SCRIPT)(document, localStorage);
 
     expect(aula.names.has('is-done')).toBe(true);

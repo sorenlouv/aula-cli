@@ -124,7 +124,7 @@ describe('recurring weekdays', () => {
     expect(
       findRecurringWeekdays(
         'Løb fast om mandagen, tur hver torsdag og tirsdage er turdage. On Wednesdays, swim every Friday.',
-      ).sort(),
+      ).sort((a, b) => a - b),
     ).toEqual([1, 2, 3, 4, 5]);
     expect(
       findRecurringWeekdays(

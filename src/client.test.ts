@@ -35,6 +35,21 @@ import {
   upcomingBirthdays,
 } from './cli-helpers.ts';
 
+/**
+ * The URL a fetch was called with, whatever form it arrived in.
+ *
+ * `String(input)` was wrong for a `Request`: it stringifies to the literal
+ * "[object Object]", so an assertion like `url.includes('/profiles')` would
+ * fail for a reason that has nothing to do with the code under test — and a
+ * negative assertion would pass vacuously. Found by type-aware
+ * `no-base-to-string`.
+ */
+function requestUrl(input: Parameters<typeof fetch>[0]): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.href;
+  return input.url;
+}
+
 const COOKIE = 'PHPSESSID=test; Csrfp-Token=test-csrf';
 
 /**
@@ -140,7 +155,7 @@ test('token auth sends the access token as a query parameter, not a Bearer heade
     async (input, init) => {
       call++;
       if (call === 1) return jsonResponse(OK_PROFILES); // version probe
-      url = String(input);
+      url = requestUrl(input);
       headers = new Headers(init?.headers);
       return jsonResponse({ status: { code: 0 }, data: [] });
     },
@@ -282,7 +297,7 @@ test('getCommonFiles sends the parameters Aula silently requires', async () => {
     async (input) => {
       call++;
       if (call === 1) return jsonResponse(OK_PROFILES);
-      url = String(input);
+      url = requestUrl(input);
       return jsonResponse({ status: { code: 0 }, data: { commonFiles: [], totalAmount: 0 } });
     },
     async () => {
@@ -350,7 +365,7 @@ test('cookie auth never adds an access_token parameter', async () => {
     async (input) => {
       call++;
       if (call === 1) return jsonResponse(OK_PROFILES);
-      url = String(input);
+      url = requestUrl(input);
       return jsonResponse({ status: { code: 0 }, data: [] });
     },
     async () => {
@@ -534,7 +549,7 @@ test('a superseded token is swapped out and the request replayed', async () => {
   await withFetch(
     async (input: string | Request | URL) => {
       call++;
-      sent.push(new URL(String(input)).searchParams.get('access_token'));
+      sent.push(new URL(requestUrl(input)).searchParams.get('access_token'));
       if (call === 1) return jsonResponse(OK_PROFILES); // version probe
       if (call === 2) return jsonResponse({ status: { code: 20, subCode: 9 }, data: null }, 403);
       return jsonResponse(ONE_PROFILE);
@@ -619,7 +634,7 @@ test('concurrent requests share one token recovery', async () => {
     async (input: string | Request | URL) => {
       call++;
       if (call === 1) return jsonResponse(OK_PROFILES); // version probe
-      const token = new URL(String(input)).searchParams.get('access_token');
+      const token = new URL(requestUrl(input)).searchParams.get('access_token');
       return token === 'stale'
         ? jsonResponse({ status: { code: 20 }, data: null }, 403)
         : jsonResponse(ONE_PROFILE);
@@ -707,7 +722,7 @@ test('a retired API version is probed around instead of failing', async () => {
   const seen: string[] = [];
   await withFetch(
     async (input) => {
-      const url = String(input);
+      const url = requestUrl(input);
       seen.push(url);
       // v24 is retired; v23 answers.
       if (url.includes('/v23/')) return jsonResponse(OK_PROFILES);
@@ -731,7 +746,7 @@ test('the retirement probe searches above whatever version is configured', async
   const tried: number[] = [];
   await withFetch(
     async (input) => {
-      const version = Number(/\/v(\d+)\//.exec(String(input))?.[1] ?? 0);
+      const version = Number(/\/v(\d+)\//.exec(requestUrl(input))?.[1] ?? 0);
       tried.push(version);
       if (version === 38) return jsonResponse(OK_PROFILES);
       return jsonResponse({ status: { code: 10 }, data: null });
@@ -921,7 +936,7 @@ test('array query parameters use the PHP-style repeated-key form Aula expects', 
     async (input) => {
       call++;
       if (call === 1) return jsonResponse(OK_PROFILES);
-      captured = String(input);
+      captured = requestUrl(input);
       return jsonResponse({ status: { code: 0 }, data: [] });
     },
     async () => {
@@ -1069,7 +1084,7 @@ function withProbedFetch<T>(
     async (input) => {
       call++;
       if (call === 1) return jsonResponse(OK_PROFILES);
-      const url = String(input);
+      const url = requestUrl(input);
       urls.push(url);
       return jsonResponse({ status: { code: 0 }, data: handler(url) });
     },
@@ -1335,7 +1350,7 @@ function sessionEnforcingAula(): { handler: FetchStub; sessions: number } & { se
   let minted = 0;
 
   const handler: FetchStub = async (input, init) => {
-    const url = new URL(String(input));
+    const url = new URL(requestUrl(input));
     const method = url.searchParams.get('method') ?? '';
     sent.push(method);
     // Latency is load-bearing, not decoration. A stub that resolves in the same
@@ -1344,7 +1359,7 @@ function sessionEnforcingAula(): { handler: FetchStub; sessions: number } & { se
     // passed against the broken client for exactly that reason.
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    const cookies = String((init?.headers as Record<string, string>)?.Cookie ?? '');
+    const cookies = (init?.headers as Record<string, string>)?.Cookie ?? '';
     let sid = /PHPSESSID=([^;]+)/.exec(cookies)?.[1];
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (!sid) {
@@ -1423,7 +1438,7 @@ test('a failed bootstrap is not sticky for the life of the client', async () => 
   const sent: string[] = [];
   let failNext = true;
   const handler: FetchStub = async (input) => {
-    const method = new URL(String(input)).searchParams.get('method') ?? '';
+    const method = new URL(requestUrl(input)).searchParams.get('method') ?? '';
     sent.push(method);
     if (method === 'profiles.getProfileContext' && failNext) {
       failNext = false;
@@ -1467,7 +1482,7 @@ test('a 500 with a success envelope is reported as a rejected login, not a shape
   const seen: string[] = [];
   await withFetch(
     async (input) => {
-      const authenticated = new URL(String(input)).searchParams.has('access_token');
+      const authenticated = new URL(requestUrl(input)).searchParams.has('access_token');
       seen.push(authenticated ? 'authenticated' : 'anonymous');
       // A healthy Aula turns a credential-free request away cleanly, which is
       // what tells the two causes of a 500 apart.

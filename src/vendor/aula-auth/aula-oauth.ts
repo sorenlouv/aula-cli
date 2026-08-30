@@ -12,6 +12,7 @@ import { AulaAuthFlowError } from './errors.ts';
 import type { AulaHttpClient } from './http.ts';
 import type { Logger } from './logger.ts';
 import { silentLogger } from './logger.ts';
+import { wireText } from '../../cli-helpers.ts';
 
 export interface AulaOAuthConfig {
   /** Aula's mobile-app OAuth client ID. */
@@ -205,7 +206,7 @@ export function parseTokenResponse(rawBody: string, fallbackRefresh?: string): A
     throw new OAuthError('Token response missing access_token');
   }
   if (parsed.token_type && parsed.token_type !== 'Bearer') {
-    throw new OAuthError(`Unexpected token_type: ${parsed.token_type}`);
+    throw new OAuthError(`Unexpected token_type: ${wireText(parsed.token_type)}`);
   }
   if (typeof parsed.expires_in !== 'number' || !Number.isFinite(parsed.expires_in)) {
     throw new OAuthError('Token response missing numeric expires_in');

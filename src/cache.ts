@@ -98,9 +98,9 @@ export class ResponseCache {
    * widget id for a vendor plan. It stays in the clear so `cache status` can
    * say what is cached; everything identifying is hashed into the other half.
    */
-  get<T>(namespace: string, key: unknown): T | undefined {
+  get(namespace: string, key: unknown): unknown {
     if (!this.#store) return undefined;
-    return this.#store.get<T>(this.#key(namespace, key));
+    return this.#store.get(this.#key(namespace, key));
   }
 
   set(namespace: string, key: unknown, value: unknown): void {

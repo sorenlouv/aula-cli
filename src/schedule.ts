@@ -245,8 +245,8 @@ export function cronLines(at: At, claude: string): string[] {
   ];
 }
 
-function sh(cmd: string[]): { ok: boolean; err: string } {
-  const result = Bun.spawnSync({ cmd, stdout: 'pipe', stderr: 'pipe' });
+function sh(argv: string[]): { ok: boolean; err: string } {
+  const result = Bun.spawnSync({ cmd: argv, stdout: 'pipe', stderr: 'pipe' });
   return { ok: result.exitCode === 0, err: result.stderr.toString().trim() };
 }
 

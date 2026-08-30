@@ -30,6 +30,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "oxlint",
+    "lint:types": "oxlint --type-aware",
     "lint:fix": "oxlint --fix",
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/browser",
     "typecheck:watch": "tsc --noEmit --watch --preserveWatchOutput",
@@ -42,7 +43,8 @@
     "oxlint": "1.80.0",
     "preact": "^10.29.8",
     "prettier": "3.9.6",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "oxlint-tsgolint": "^7.0.2001"
   },
   "dependencies": {
     "cheerio": "^1.2.0",

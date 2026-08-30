@@ -43,6 +43,7 @@
 import { errorMessage, isRecord } from '../validation.ts';
 import { modelEffortArgs, spawnClaude } from '../llm/claude.ts';
 import { googleCalendarToolRequest } from '../llm/requests/google-calendar.ts';
+import { wireText } from '../cli-helpers.ts';
 
 /** Generous for a call measured at 8–9s; short enough to cost minutes, not a morning. */
 const TIMEOUT_MS = 120_000;
@@ -259,7 +260,7 @@ async function attemptTool(
   try {
     return JSON.parse(result.text) as unknown;
   } catch (err) {
-    throw new Error(`${tool} svarede ikke med JSON: ${errorMessage(err)}`);
+    throw new Error(`${tool} svarede ikke med JSON: ${errorMessage(err)}`, { cause: err });
   }
 }
 
@@ -322,7 +323,7 @@ export function parseStream(stdout: string): {
       servers = parsed.mcp_servers
         .filter(isRecord)
         .map((server) => ({
-          name: String(server.name ?? ''),
+          name: wireText(server.name),
           status: typeof server.status === 'string' ? server.status : null,
         }))
         .filter((server) => server.name.length > 0);

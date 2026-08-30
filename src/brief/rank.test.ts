@@ -210,7 +210,7 @@ describe('rank: the cap', () => {
     expect(brief.folded.every((c) => c.reasons.some((r) => r.includes('CARD_CAP')))).toBe(true);
     // The kept cards are still in page order.
     const dated = brief.cards.filter((c) => c.placement === 'upcoming').map((c) => c.date);
-    expect(dated).toEqual([...dated].sort());
+    expect(dated).toEqual([...dated].sort((a, b) => (a ?? '').localeCompare(b ?? '')));
   });
 
   test('a folded card is neither a card nor lost: its sources are covered', () => {
@@ -568,10 +568,11 @@ describe('cardsFromRules', () => {
       rules: cardsFromRules(input([post]), TODAY),
       hidden: [],
     });
-    expect([...brief.cards, ...brief.folded].map((c) => c.date).sort()).toEqual([
-      '2026-08-20',
-      '2026-08-25',
-    ]);
+    expect(
+      [...brief.cards, ...brief.folded]
+        .map((c) => c.date)
+        .sort((a, b) => (a ?? '').localeCompare(b ?? '')),
+    ).toEqual(['2026-08-20', '2026-08-25']);
     expect(brief.cards.every((c) => c.placement === 'action')).toBe(true);
     expect(brief.folded).toEqual([]);
   });

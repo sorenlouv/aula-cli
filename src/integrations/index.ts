@@ -185,7 +185,9 @@ async function cached(
     institutionCodes: [...ctx.institutionCodes].sort(),
     children: ctx.children.map((c) => `${c.id}:${c.userId}`).sort(),
   };
-  const hit = cache.get<WeekPlan>(`widget-${widgetId}`, key);
+  // The cache hands back `unknown`: it stores JSON and cannot know what it
+  // holds. This is the one place that does, so this is where the assertion is.
+  const hit = cache.get(`widget-${widgetId}`, key) as WeekPlan | undefined;
   if (hit !== undefined) return withSessionWarning(widgetId, ctx, hit);
   const fetched = await read();
   // Judged on the *warned* plan, so a missing MitID username still counts as a

@@ -631,7 +631,7 @@ export function normaliseThread(thread: ThreadSummary) {
     id: thread.id,
     subject: thread.subject?.trim() || '(no subject)',
     unread: !thread.read,
-    sensitive: Boolean(thread.sensitive),
+    sensitive: thread.sensitive,
     muted: Boolean(thread.muted),
     startedAt: thread.startedTime ?? null,
     lastMessageAt: thread.latestMessage?.sendDateTime ?? null,

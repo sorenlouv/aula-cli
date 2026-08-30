@@ -81,6 +81,10 @@ if (mode === 'username') {
   });
   process.stderr.write(`  picked again: ${options[picked - 1]} (option ${picked})\n`);
 } else if (mode === 'qr') {
+  // `hold` never changes on purpose: --hold means "rotate until Ctrl-C", which
+  // is what this demo is for. The rule is looking for a condition someone
+  // forgot to update.
+  // oxlint-disable-next-line eslint/no-unmodified-loop-condition
   for (let updateCount = 1; hold || updateCount <= 5; updateCount++) {
     const { qr1Json, qr2Json } = buildQrPayloads(channelBinding(), updateCount);
     page.update({ kind: 'qr', qr1: qr1Json, qr2: qr2Json, updateCount });
