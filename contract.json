@@ -1,5 +1,5 @@
 {
-  "contract": 5,
+  "contract": 6,
   "_readme": [
     "The cross-repo contract, as data rather than prose.",
     "",
@@ -17,11 +17,11 @@
   ],
 
   "exit_codes": {
-    "_note": "Shared by cvr, bolig, tinglysning and dgs. aula is deliberately disjoint; see its own entry.",
+    "_note": "Shared by cvr, bolig, tinglysning and dgs. aula is deliberately disjoint; see its own entry. WHICH STREAM a code writes to is per tool, not shared: read body_on.",
     "0": "success — the JSON body is on stdout",
     "1": "error: a source is down or blocking. Retry later; the entity may still exist",
     "2": "usage error: fix the command line",
-    "3": "nothing, or too many things, matched. Refine using the candidates on stderr",
+    "3": "nothing, or too many things, matched. Refine using the candidates \u2014 on stdout where this tool's body_on includes 3, on stderr otherwise. The two halves of the fleet differ, and reading the wrong stream looks exactly like no candidates at all",
     "4": "resolved, but nothing to report. A real, final answer — record it and move on",
     "5": "setup required: credentials or a missing browser. Do not retry unchanged"
   },
@@ -204,19 +204,7 @@
           "shape": "object",
           "keys": ["id", "name", "warnings"],
           "note": "a miss emits the same envelope with found:false; a hit omits `found`",
-          "optional": [
-            "address",
-            "street",
-            "postalCode",
-            "city",
-            "phone",
-            "url",
-            "accessAddressId",
-            "addressUnitId",
-            "givenName",
-            "familyName",
-            "coordinates"
-          ]
+          "optional": ["address", "street", "postalCode", "city", "phone", "url", "accessAddressId", "addressUnitId", "givenName", "familyName", "coordinates"]
         }
       }
     },
