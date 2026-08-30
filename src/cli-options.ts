@@ -4,6 +4,10 @@ import { cmd } from './runtime.ts';
 
 const OPTION_DEFINITIONS = {
   text: { type: 'boolean' },
+  // Accepted and ignored. JSON is already the default here, but every sibling
+  // CLI spells the request --json, and making it a hard error with empty
+  // stdout turned a harmless cross-tool habit into a failed command.
+  json: { type: 'boolean' },
   full: { type: 'boolean' },
   unread: { type: 'boolean' },
   important: { type: 'boolean' },
@@ -138,18 +142,31 @@ function isOptionName(value: string): value is OptionName {
 }
 
 export function parseCommandLine(command: CliCommand, args: string[]) {
-  const parsed = parseArgs({
-    args,
-    allowPositionals: true,
-    strict: true,
-    options: OPTION_DEFINITIONS,
-  });
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args,
+      allowPositionals: true,
+      strict: true,
+      options: OPTION_DEFINITIONS,
+    });
+  } catch (err) {
+    // strict:true throws a plain Node TypeError for an unknown or malformed
+    // flag. It used to escape the UsageError branch entirely and land in the
+    // "this is a bug in the client" one, which prints a raw stack — so a
+    // mistyped flag was byte-identical to a crash, at the same exit code.
+    throw new UsageError(err instanceof Error ? err.message : String(err));
+  }
 
   const allowed = new Set<OptionName>(COMMAND_OPTIONS[command]);
   const ignored = Object.entries(parsed.values)
     .filter(([, value]) => value !== undefined)
     .map(([name]) => name)
     .filter(isOptionName)
+    // --json is accepted everywhere and means nothing here: JSON is already
+    // the default. It exists so an agent driving the whole fleet does not have
+    // to remember which tool wants the flag and which rejects it.
+    .filter((name) => name !== 'json')
     .filter((name) => !allowed.has(name));
   if (ignored.length > 0) {
     const acceptedBy = ignored.map((name) => {

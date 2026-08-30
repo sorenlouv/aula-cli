@@ -1656,8 +1656,11 @@ try {
   process.exitCode = await main();
 } catch (err) {
   if (err instanceof UsageError) {
+    // 2, like every sibling: "fix the command line". This used to be 1, which
+    // the fleet reserves for "a source is down, retry later" — so a typo and
+    // an outage were the same code.
     reportProblem(err.message);
-    process.exitCode = 1;
+    process.exitCode = 2;
   } else if (
     err instanceof AulaAuthError ||
     err instanceof AulaSessionError ||
@@ -1665,20 +1668,25 @@ try {
     // token refresh is a credentials problem, not a bug, so no stack trace.
     err instanceof AulaAuthFlowError
   ) {
+    // 5, the fleet's "setup required — do not retry unchanged". Expired
+    // credentials are fixed by `aula login`, never by retrying.
     reportProblem(err.message);
-    process.exitCode = 2;
+    process.exitCode = 5;
   } else if (err instanceof AulaApiError) {
     // No "Aula API error:" prefix any more. It labelled the failure without
     // saying anything about it, and it pushed the part worth reading — which
     // is now a plain-language headline — into the middle of the line.
+    // 1, the fleet's "a source is down or blocking". An Aula outage is exactly
+    // that; it used to be 3, which every sibling reads as "refine the query
+    // and retry" — advice that cannot help when the server is down.
     reportProblem(err.message);
-    process.exitCode = 3;
+    process.exitCode = 1;
   } else if (err instanceof WidgetError) {
     // A third-party school system, not Aula and not us: the vendor is down or
     // has changed its payload. Same class of "not a bug in this tool" as an
     // Aula API error, so it gets the same treatment rather than a stack trace.
     console.error(`Widget error (${err.widgetId}): ${err.message}`);
-    process.exitCode = 3;
+    process.exitCode = 1;
   } else {
     // An unexpected error is a bug in this client, so the stack is the useful
     // part and it is printed raw rather than dressed up as advice.
