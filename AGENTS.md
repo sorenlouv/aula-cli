@@ -23,9 +23,10 @@ it, you skipped this step.
 
 **Commit at every completed step of the plan**, once `bun test src/` and
 `bun run typecheck` pass, and **merge back into `main` as soon as the whole
-change is green.** Both are standing authorization, no need to ask — a finished
-change parked on a branch is worse than a moving `main`, so do not leave one
-sitting in a worktree waiting for me. Pushing and PRs still wait for me.
+change is green.** Both are standing authorization, no need to ask — a
+finished change parked on a branch goes stale, and the other agents working
+alongside you cannot see it until it lands, so do not leave one sitting in a
+worktree waiting for me. Pushing and PRs still wait for me.
 
 **Keep technical debt low; do not preserve backwards compatibility.** I am the
 only user, so breaking changes are encouraged wherever they simplify — with the
