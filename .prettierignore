@@ -1,6 +1,12 @@
 node_modules/
 bun.lock
 
+# Vendored from the fleet root by ../scripts/sync-contract.sh. `bun run format`
+# reflows its arrays, and the contract test compares parsed JSON, so the rewrite
+# passes every check while leaving this copy textually diverged from the root it
+# is supposed to mirror — churn that reappears on the next sync.
+contract.json
+
 # Gitignored working data — attachments and anything derived from real Aula
 # responses. Never formatted, never read.
 data/

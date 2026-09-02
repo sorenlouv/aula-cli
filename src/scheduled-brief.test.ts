@@ -3,9 +3,11 @@ import {
   coordinateScheduledBrief,
   DEFER_POLL_MS,
   INCOMPLETE_RETRY_MS,
+  MAX_ATTEMPTS,
   shouldDeferForDarkWake,
   type MacPowerState,
 } from './scheduled-brief.ts';
+import { scheduleTimes } from './schedule.ts';
 
 describe('shouldDeferForDarkWake', () => {
   test('defers only a positively identified battery DarkWake', () => {
@@ -74,6 +76,44 @@ describe('coordinateScheduledBrief', () => {
 
     expect(outcome).toEqual({ status: 'complete', attempts: 2 });
     expect(waits).toEqual([INCOMPLETE_RETRY_MS]);
+  });
+
+  test('gives up after the declared window instead of retrying until midnight', async () => {
+    // The loop used to end only at the local day boundary, so a cause retrying
+    // could never fix — an expired `claude` login — cost thirty-one full runs
+    // across nine hours, each one a spawned model process and a permission
+    // prompt.
+    const waits: number[] = [];
+    const logs: string[] = [];
+    let runs = 0;
+
+    const outcome = await coordinateScheduledBrief({
+      now: () => morning,
+      isComplete: () => false,
+      powerState: () => ({ source: 'ac', fullWake: true }),
+      runBrief: async () => {
+        runs += 1;
+        return 0;
+      },
+      wait: async (milliseconds) => {
+        waits.push(milliseconds);
+      },
+      log: (message) => logs.push(message),
+    });
+
+    expect(outcome).toEqual({ status: 'retries-exhausted', attempts: MAX_ATTEMPTS });
+    expect(runs).toBe(MAX_ATTEMPTS);
+    // One wait fewer than attempts: the last failure gives up rather than
+    // sleeping through a quarter hour it has no intention of using.
+    expect(waits).toEqual(Array(MAX_ATTEMPTS - 1).fill(INCOMPLETE_RETRY_MS));
+    expect(logs.at(-1)).toContain('gave up');
+  });
+
+  test('the attempt budget is exactly the schedule it implements', () => {
+    // Both sides derive from RETRY_EVERY_MINUTES and RETRY_FOR_MINUTES, and
+    // this is what stops one of them being pinned to a literal again: when they
+    // disagree, `aula schedule` prints a window the coordinator does not keep.
+    expect(MAX_ATTEMPTS).toBe(scheduleTimes({ hour: 6, minute: 30 }).length);
   });
 
   test('stops instead of generating yesterday after the local day changes', async () => {

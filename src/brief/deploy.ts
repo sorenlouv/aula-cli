@@ -44,6 +44,7 @@
  */
 
 import { CONFIG_PATH, readConfig, updateConfig } from '../config.ts';
+import { cmd } from '../runtime.ts';
 import { errorMessage } from '../validation.ts';
 import { modelEffortArgs, parseClaudeJson, spawnClaude } from '../llm/claude.ts';
 import {
@@ -61,10 +62,21 @@ export { isArtifactUrl } from '../llm/requests/artifact-deploy.ts';
  */
 const TIMEOUT_MS = 120_000;
 
+/**
+ * The two ways a deploy does not happen are not the same event, and collapsing
+ * them into one `skipped` is what let a lost `artifactUrl` go unreported for
+ * days: the run said `complete: true` and printed nothing while the shared link
+ * kept showing the day it was last configured. `off` is what the caller asked
+ * for and stays quiet; `unconfigured` is a fact about the installation that the
+ * caller cannot see from the exit code, so it earns a note.
+ */
 export type DeployResult =
-  | { status: 'skipped'; reason: string }
   | { status: 'ok'; url: string }
-  | { status: 'failed'; reason: string };
+  | { status: 'failed'; reason: string }
+  /** `--no-deploy`: no hosted copy was wanted this run. Silent by design. */
+  | { status: 'off'; reason: string }
+  /** No `artifactUrl` in the config — hosting was never set up, or was lost. */
+  | { status: 'unconfigured'; reason: string };
 
 /** The configured target, or null when the brief stays local. */
 export function readTarget(configPath = CONFIG_PATH): string | null {
@@ -129,7 +141,12 @@ export async function deployArtifact(
     } catch (err) {
       return { status: 'failed', reason: errorMessage(err) };
     }
-    if (!url) return { status: 'skipped', reason: 'ingen artifact-URL konfigureret' };
+    if (!url) {
+      return {
+        status: 'unconfigured',
+        reason: `Ingen hosted kopi er konfigureret. Kør \`${cmd('publish')}\` for at få et link.`,
+      };
+    }
     if (!isArtifactUrl(url)) return { status: 'failed', reason: `ugyldig artifact-URL: ${url}` };
   }
 
