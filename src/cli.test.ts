@@ -305,17 +305,20 @@ test('cache status reports what is stored, and clear empties it', () => {
   const box = sandbox();
   box.run('digest');
 
-  const stats = json(box.run('cache', 'status'));
-  assert.ok(stats.entries > 5);
-  assert.ok(stats.byNamespace['messaging.getThreads'] >= 1);
+  const { responses, layouts } = json(box.run('cache', 'status'));
+  assert.ok(responses.entries > 5);
+  assert.ok(responses.byNamespace['messaging.getThreads'] >= 1);
   // Widget tokens expire in about a minute and the expiry retry depends on
   // getting a genuinely fresh one, so they are never stored.
-  assert.equal(stats.byNamespace['aulaToken.getAulaToken'], undefined);
+  assert.equal(responses.byNamespace['aulaToken.getAulaToken'], undefined);
   // One entry per widget covers the token *and* the vendor round-trip.
-  assert.equal(stats.byNamespace['widget-0004'], 1);
+  assert.equal(responses.byNamespace['widget-0004'], 1);
+  // The layout cache is reported too. It used to be invisible here and
+  // untouched by `clear`, so clearing to force a fresh brief did nothing.
+  assert.equal(typeof layouts.entries, 'number');
 
   assert.equal(json(box.run('cache', 'clear')).cleared, true);
-  assert.equal(json(box.run('cache', 'status')).entries, 0);
+  assert.equal(json(box.run('cache', 'status')).responses.entries, 0);
 
   box.reset();
   box.run('digest');
@@ -1051,6 +1054,14 @@ test('a reused layout says so, and --no-cache forces a fresh one', () => {
   const fresh = json(box.run('new', '--no-deploy', '--no-open', '--no-cache'));
   assert.equal(fresh.layoutCached, false);
   assert.equal(modelCalls(), 2, '--no-cache must reach the model again');
+
+  // `cache clear` used to empty ~/.aula/cache only, leaving the layout on disk
+  // to come straight back — the one thing someone clearing the cache wants
+  // gone.
+  assert.equal(json(box.run('cache', 'clear')).layouts.cleared, true);
+  const afterClear = json(box.run('new', '--no-deploy', '--no-open'));
+  assert.equal(afterClear.layoutCached, false, 'a cleared layout must not be served');
+  assert.equal(modelCalls(), 3);
 });
 
 test('a partial model response is supplemented by rule-grounded obligations', () => {

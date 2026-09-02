@@ -6,6 +6,7 @@
 
 import type { AulaClient } from './../client.ts';
 import { calendarWindow, loadPersonalEvents, type PersonalEvent } from '../calendar/index.ts';
+import { ResponseCache } from '../cache.ts';
 import { readConfig } from '../config.ts';
 import { addLocalDays, localIsoDate, type WeekPlan } from '../integrations/types.ts';
 import { buildDigest, collectAlbums, type ChildGroups, loadGroups } from './../digest.ts';
@@ -279,7 +280,7 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
 
   // --------------------------------------------------- the family's own diary
   const calendarStartedAt = performance.now();
-  const personal = await collectPersonal(now);
+  const personal = await collectPersonal(now, client.cache);
   opts.onPhase?.('calendar', Math.round(performance.now() - calendarStartedAt));
   items.push(...personal.items);
   health.push(...personal.health);
@@ -446,7 +447,10 @@ function summariseWarning(warning: string): string {
  * appointment that looks like a free afternoon is the worst thing this feature
  * could do.
  */
-async function collectPersonal(now: Date): Promise<{ items: SourceItem[]; health: HealthNote[] }> {
+async function collectPersonal(
+  now: Date,
+  cache: ResponseCache,
+): Promise<{ items: SourceItem[]; health: HealthNote[] }> {
   let calendars;
   try {
     calendars = readConfig().calendars ?? [];
@@ -464,7 +468,7 @@ async function collectPersonal(now: Date): Promise<{ items: SourceItem[]; health
   // show. Monday is the maximum: fourteen dates through the following Sunday.
   const { days } = overviewWindow(localIsoDate(now));
   const { from, to } = calendarWindow(now, days);
-  const loaded = await loadPersonalEvents(calendars, { from, to });
+  const loaded = await loadPersonalEvents(calendars, { from, to }, cache);
 
   const health: HealthNote[] = loaded.warnings.map((message) => ({
     level: 'warn',

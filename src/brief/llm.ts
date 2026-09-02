@@ -616,6 +616,59 @@ export async function extractCards(
   };
 }
 
+export type ExtractionCacheStats = { path: string; entries: number; bytes: number };
+
+/** Every `extract-*.json` currently on disk, with its total size. */
+function extractionCacheFiles(): string[] {
+  try {
+    return readdirSync(CACHE_DIR)
+      .filter((name) => /^extract-[a-f0-9]+\.json$/.test(name))
+      .map((name) => join(CACHE_DIR, name));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * What the layout cache holds, for `aula cache status`.
+ *
+ * It reports separately from the response cache rather than being folded into
+ * it: this one is content-addressed with no TTL, so "live entries" and "TTL"
+ * would both be lies about it.
+ */
+export function extractionCacheStats(): ExtractionCacheStats {
+  const files = extractionCacheFiles();
+  let bytes = 0;
+  for (const path of files) {
+    try {
+      bytes += statSync(path).size;
+    } catch {
+      // Raced with a prune; it is not in the total because it is not there.
+    }
+  }
+  return { path: CACHE_DIR, entries: files.length, bytes };
+}
+
+/**
+ * Drops every cached layout. Returns whether there was anything to drop.
+ *
+ * `aula cache clear` used to remove only `~/.aula/cache`, so a reader who
+ * cleared the cache to force a fresh brief still got the model's stored answer
+ * back in ten milliseconds — the one thing they were trying to avoid, and
+ * nothing said so.
+ */
+export function clearExtractionCache(): boolean {
+  const files = extractionCacheFiles();
+  for (const path of files) {
+    try {
+      unlinkSync(path);
+    } catch {
+      // Already gone is the outcome asked for.
+    }
+  }
+  return files.length > 0;
+}
+
 function pruneExtractionCache(keepPath: string): void {
   const files = readdirSync(CACHE_DIR)
     .filter((name) => /^extract-[a-f0-9]+\.json$/.test(name))
