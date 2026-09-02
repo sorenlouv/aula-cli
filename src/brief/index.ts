@@ -48,6 +48,17 @@ export type BriefRun = {
   brief: RankedBrief;
   topline: string | null;
   origin: 'model' | 'fallback';
+  /**
+   * Whether `origin: 'model'` came from the extraction cache instead of a model
+   * that ran just now.
+   *
+   * `origin` alone cannot say it, and the difference is four minutes: the cache
+   * is keyed on the payload, prompt and schema with no TTL, so an unchanged
+   * morning answers in single-digit milliseconds. Without this the only honest
+   * reading of a two-second run was in the private developer log, and a run
+   * that never called the model looked exactly like one that did.
+   */
+  layoutCached: boolean;
   published: PublishResult;
   deployment: DeployResult;
   notes: string[];
@@ -161,6 +172,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   let extractionStatus: string | null = null;
   let overviewWarning: string | null = null;
   let extractionTelemetry: unknown = null;
+  let layoutCached = false;
   /** Set when the run failed on something a later attempt cannot fix. */
   let dependencyMissing = false;
 
@@ -169,6 +181,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
     try {
       const extracted = await extractCards(input, { useCache: opts.useCache !== false });
       extractionTelemetry = extracted.telemetry ?? null;
+      layoutCached = extracted.telemetry?.cacheHit === true;
       phase('extract', extractStartedAt, { extraction: extractionTelemetry });
       topline = extracted.topline;
       summaries = extracted.childSummaries;
@@ -333,6 +346,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
     brief,
     topline,
     origin,
+    layoutCached,
     published,
     deployment,
     notes,

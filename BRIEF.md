@@ -332,7 +332,12 @@ problem in *Datastatus*. Extraction is cached against a hash of the payload,
 instructions **and schema**,
 so a prompt or field-description edit takes effect on the next run rather than
 being masked by an entry the old wording produced. Only complete validated
-answers are cached, and the cache retains the newest 32 entries.
+answers are cached, and the cache retains the newest 32 entries. There is no
+TTL: an unchanged morning keeps answering from the same entry, which is the
+point, but it means `layout: "model"` alone cannot tell a fresh four-minute call
+from a seven-millisecond reuse. `layoutCached` in the `new` output says which
+happened — *genbrugt svar* in `--text` — and `--no-cache` bypasses both this
+cache and the Aula response cache to force the call.
 
 Prompt projection removes a thread title already carried in its own field and
 keeps ordinary sources whole. An exceptional source over 8,000 characters keeps
