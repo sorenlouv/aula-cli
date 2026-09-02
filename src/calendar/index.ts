@@ -12,6 +12,7 @@
  * turns into a `Datastatus` line.
  */
 
+import { ResponseCache } from '../cache.ts';
 import { localIsoDate } from '../integrations/types.ts';
 import { errorMessage, parseIsoDateParts } from '../validation.ts';
 import { CalendarNotConnectedError, listEvents } from './connector.ts';
@@ -53,6 +54,7 @@ export function calendarWindow(now: Date, days = PERSONAL_CALENDAR_DAYS): { from
 export async function loadPersonalEvents(
   calendars: CalendarRef[],
   opts: { from: Date; to: Date; timeoutMs?: number },
+  cache: ResponseCache = ResponseCache.disabled(),
 ): Promise<CalendarLoad> {
   const events: PersonalEvent[] = [];
   const warnings: string[] = [];
@@ -63,11 +65,13 @@ export async function loadPersonalEvents(
 
   for (const calendar of calendars) {
     try {
-      const raw = await listEvents(
-        calendar.id,
-        from,
-        to,
-        opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {},
+      const raw = await cachedEvents(cache, calendar.id, from, to, () =>
+        listEvents(
+          calendar.id,
+          from,
+          to,
+          opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {},
+        ),
       );
       const calendarEvents: PersonalEvent[] = [];
       for (const item of raw) {
@@ -93,6 +97,42 @@ export async function loadPersonalEvents(
     `${a.date}${a.startTime ?? ''}`.localeCompare(`${b.date}${b.startTime ?? ''}`),
   );
   return { events, warnings, notConnected };
+}
+
+/**
+ * The one hop in a warm brief that used to cost real time.
+ *
+ * Every other remote read has a cache: Aula's responses and the vendor weekly
+ * plans share `ResponseCache`, and the model's ranking has its own
+ * content-addressed one. The calendar had none, and once two calendars were
+ * configured it was about 25 of the 25 seconds a fully warm `aula new` took —
+ * the extraction answered from disk in 10ms while this leg re-ran two `claude`
+ * subprocesses through the Google Calendar connector every single time.
+ *
+ * The window is already truncated to local midnight by `calendarWindow`, so
+ * `{calendarId, from, to}` is stable for a whole day and makes an honest key.
+ *
+ * Cached per calendar rather than per load, so one unreadable calendar cannot
+ * cost the others their entry — the same rule the surrounding loop follows for
+ * warnings. And the *raw* connector answer rather than the mapped events:
+ * `toPersonalEvent` is ours to change, and a mapped value stored under an old
+ * shaping would outlive the fix. A read that threw is never stored, so a
+ * connector blip is not pinned for the TTL.
+ */
+async function cachedEvents(
+  cache: ResponseCache,
+  calendarId: string,
+  from: string,
+  to: string,
+  read: () => Promise<unknown[]>,
+): Promise<unknown[]> {
+  const key = { calendarId, from, to };
+  // The cache hands back `unknown`; this is the one place that knows the shape.
+  const hit = cache.get('google-calendar', key);
+  if (Array.isArray(hit)) return hit;
+  const raw = await read();
+  cache.set('google-calendar', key, raw);
+  return raw;
 }
 
 // --------------------------------------------------------------- shaping

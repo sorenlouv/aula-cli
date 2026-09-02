@@ -67,6 +67,11 @@ import {
   withFullMessages,
 } from './digest.ts';
 import { BRIEF_TITLE, runBrief } from './brief/index.ts';
+import {
+  clearExtractionCache,
+  extractionCacheStats,
+  type ExtractionCacheStats,
+} from './brief/llm.ts';
 import { overviewWindow } from './brief/dates.ts';
 import { deployArtifact, readTarget, setTarget } from './brief/deploy.ts';
 import { explain } from './brief/rank.ts';
@@ -708,14 +713,37 @@ function commandHelp(command: CliCommand): string {
 
 function runCache(positionals: string[], asText: boolean, ttlMs: number): number {
   const sub = positionals[0] ?? 'status';
+  // Both caches, always. They are one thing to the reader — "what this would
+  // answer from disk instead of fetching" — and clearing only the responses
+  // left the model's stored layout to come straight back, which is exactly what
+  // someone running this is trying to get rid of.
   if (sub === 'clear') {
-    const cleared = clearCache();
-    return emit({ cleared, path: CACHE_PATH }, asText, (r) =>
-      r.cleared ? `Cleared ${r.path}.` : 'Nothing was cached.',
+    const responses = clearCache();
+    const layouts = clearExtractionCache();
+    return emit(
+      {
+        cleared: responses || layouts,
+        responses: { cleared: responses, path: CACHE_PATH },
+        layouts: { cleared: layouts, path: extractionCacheStats().path },
+      },
+      asText,
+      (r) =>
+        r.cleared
+          ? [
+              r.responses.cleared ? `Cleared ${r.responses.path}.` : null,
+              r.layouts.cleared ? `Cleared layouts in ${r.layouts.path}.` : null,
+            ]
+              .filter((line): line is string => line !== null)
+              .join('\n')
+          : 'Nothing was cached.',
     );
   }
   if (sub === 'status') {
-    return emit(cacheStats({ ttlMs }), asText, renderCacheStats);
+    return emit(
+      { responses: cacheStats({ ttlMs }), layouts: extractionCacheStats() },
+      asText,
+      renderCacheStats,
+    );
   }
   console.error(`Unknown cache subcommand "${sub}". Use "status" or "clear".`);
   return 1;
@@ -1130,13 +1158,19 @@ function runForget(raw: string | undefined): number {
   return 0;
 }
 
-function renderCacheStats(stats: CacheStats): string {
-  const byNamespace = Object.entries(stats.byNamespace).sort((a, b) => b[1] - a[1]);
+function renderCacheStats(all: { responses: CacheStats; layouts: ExtractionCacheStats }): string {
+  const { responses, layouts } = all;
+  const byNamespace = Object.entries(responses.byNamespace).sort((a, b) => b[1] - a[1]);
   return [
-    `Cache file:  ${stats.path}`,
-    `TTL:         ${Math.round(stats.ttlMs / 1000)}s`,
-    `Live entries: ${stats.entries} (${(stats.bytes / 1024).toFixed(0)} KiB on disk)`,
-    ...byNamespace.map(([name, count]) => `  ${String(count).padStart(4)}  ${name}`),
+    'Responses (Aula, vendor plans, calendar)',
+    `  File:    ${responses.path}`,
+    `  TTL:     ${Math.round(responses.ttlMs / 1000)}s`,
+    `  Live:    ${responses.entries} (${(responses.bytes / 1024).toFixed(0)} KiB on disk)`,
+    ...byNamespace.map(([name, count]) => `    ${String(count).padStart(4)}  ${name}`),
+    '',
+    'Layouts (the model’s ranking, keyed on content — no TTL)',
+    `  Dir:     ${layouts.path}`,
+    `  Entries: ${layouts.entries} (${(layouts.bytes / 1024).toFixed(0)} KiB on disk)`,
   ].join('\n');
 }
 

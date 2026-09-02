@@ -121,12 +121,26 @@ fallback sources.
 
 ## Non-obvious behaviour
 
+- **Two caches, and `cache status` reports both.** Remote *responses* — Aula,
+  the vendor weekly plans and the Google Calendar reads — share one TTL'd
+  `ResponseCache` in `~/.aula/cache/responses`; the model's *layout* is cached
+  separately in `~/.aula/brief/cache`, keyed on content with no TTL. `--no-cache`
+  bypasses both, and `cache clear` empties both. It used to empty only the
+  responses, so clearing to force a fresh brief still served the stored ranking
+  back in ten milliseconds.
 - Reads are cached 600 s in `~/.aula/cache/responses`, so a second `digest`
   inside the window makes no requests; `--no-cache` is the first thing to reach
   for and `cache status` shows what is held. Never cached:
   `aulaToken.getAulaToken`, because the vendor-token retry needs a genuinely
   fresh one, and failed calls, so a transient 403 is not pinned for the TTL.
   `#ensureApiVersion` and `#ensureSession` bypass the cache deliberately.
+- The calendar goes through that same response cache, keyed on
+  `{calendarId, from, to}` — `calendarWindow` truncates to local midnight, so
+  the key is stable for a day. Per calendar, and storing the *raw* connector
+  answer: one unreadable calendar must not cost the others their entry, and
+  `toPersonalEvent` is ours to change. Without this, two configured calendars
+  cost ~25 s of `claude` subprocesses on *every* run — on a fully warm
+  `aula new`, essentially the entire runtime.
 - `login`, `logout` and `refresh-stepup` drop the cache — threads cached without
   step-up under-report the sensitive ones and look complete.
 - An access token can be refused while far from its `exp`: a `refresh_token`

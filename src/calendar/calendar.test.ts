@@ -117,6 +117,22 @@ describe('the bounded calendar window', () => {
     expect(to.getTime() - from.getTime()).toBe(14 * 86_400_000 - 3_600_000);
   });
 
+  test('is identical at every hour of one day, which is what makes it a cache key', () => {
+    // `loadPersonalEvents` keys its entries on {calendarId, from, to}. Taken
+    // from the raw clock this would name a slightly different fortnight on
+    // every run, miss every time, and go on spending ~25 seconds re-reading two
+    // calendars through the connector — the whole cost the cache removes.
+    const morning = calendarWindow(new Date(2026, 7, 30, 6, 30), 14);
+    const midnightish = calendarWindow(new Date(2026, 7, 30, 23, 59, 59), 14);
+    expect(morning.from.getTime()).toBe(midnightish.from.getTime());
+    expect(morning.to.getTime()).toBe(midnightish.to.getTime());
+
+    // And it does move on, so a run just after midnight is not served
+    // yesterday's fortnight.
+    const nextDay = calendarWindow(new Date(2026, 7, 31, 0, 0, 1), 14);
+    expect(nextDay.from.getTime()).toBeGreaterThan(morning.from.getTime());
+  });
+
   test('uses the overview horizon as the same exclusive calendar end', () => {
     const now = new Date(2026, 7, 30, 16, 30); // Sunday
     const overview = overviewWindow(localIsoDate(now));
