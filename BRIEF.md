@@ -491,8 +491,13 @@ does not start Aula or Claude: the coordinator is suspended with the Mac and
 resumes when AC power or a full graphical wake makes a long request viable.
 Only the expensive child runs under `caffeinate -i -s`. Calendar triggers still
 repeat every `RETRY_EVERY_MINUTES` (15) for `RETRY_FOR_MINUTES` (180) as crash
-recovery. The live coordinator can continue after that window until the run is
-complete or the local day ends.
+recovery, and the live coordinator spends that same window as a budget of
+`MAX_ATTEMPTS` (13) runs that actually *executed*. Deferring through sleep costs
+nothing from it, so a Mac that wakes at noon still gets the whole budget — while
+a cause no retry can fix stops after three hours instead of at midnight. It used
+to run to midnight: an expired `claude` login once cost thirty-one full runs
+across nine hours, each a spawned model process and a macOS permission prompt,
+and the thirty-first was as doomed as the first.
 
 Every generation passes `--catch-up`; `state.json`'s `lastRun.complete` stops
 retries after a complete run. Retryable fetch failures, model/deploy degradation

@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { loadState, todayIsComplete } from './brief/state.ts';
 import { localIsoDate } from './integrations/types.ts';
 import { cliInvocation, isCompiled } from './runtime.ts';
+import { RETRY_EVERY_MINUTES, RETRY_FOR_MINUTES } from './schedule.ts';
 import { errorMessage } from './validation.ts';
 
 const REPO = join(import.meta.dir, '..');
@@ -21,7 +22,28 @@ const PMSET = '/usr/bin/pmset';
 const RUN_ARGS = ['new', '--text', '--catch-up'];
 
 export const DEFER_POLL_MS = 60_000;
-export const INCOMPLETE_RETRY_MS = 15 * 60_000;
+export const INCOMPLETE_RETRY_MS = RETRY_EVERY_MINUTES * 60_000;
+
+/**
+ * The declared retry window, counted in attempts.
+ *
+ * `schedule.ts` already says how long a morning may be retried — every
+ * `RETRY_EVERY_MINUTES` for `RETRY_FOR_MINUTES` — and writes exactly that into
+ * the launchd slots, the Windows `/RI` and `/DU` pair and the cron hour range.
+ * This loop ignored it and retried until the local day ended, so the process
+ * implementing the schedule outlived the schedule it was implementing, and
+ * `aula schedule`'s own printed promise ("retrying every 15 min until 09:30")
+ * was not what ran. An expired `claude` login held one morning at "incomplete"
+ * for thirty-one attempts across nine hours — each a full Aula read, a spawned
+ * model process and a macOS permission prompt — and the thirty-first was as
+ * doomed as the first.
+ *
+ * Counted in attempts rather than against the clock on purpose: a DarkWake
+ * defer polls without spending one, so a Mac that sleeps past the window still
+ * gets the whole budget on the wake that follows. A deadline would take that
+ * away, and it is the case this coordinator exists for.
+ */
+export const MAX_ATTEMPTS = 1 + RETRY_FOR_MINUTES / RETRY_EVERY_MINUTES;
 
 export type MacPowerState = {
   source: 'ac' | 'battery' | 'unknown';
@@ -81,11 +103,14 @@ const defaults: ScheduledBriefDependencies = {
 };
 
 export type ScheduledBriefOutcome = {
-  status: 'complete' | 'day-ended';
+  status: 'complete' | 'day-ended' | 'retries-exhausted';
   attempts: number;
 };
 
-/** Wait through DarkWake and retry incomplete runs until today succeeds or ends. */
+/**
+ * Wait through DarkWake, then retry incomplete runs until one succeeds, the
+ * declared window's attempts run out, or the local day ends.
+ */
 export async function coordinateScheduledBrief(
   overrides: Partial<ScheduledBriefDependencies> = {},
 ): Promise<ScheduledBriefOutcome> {
@@ -123,7 +148,17 @@ export async function coordinateScheduledBrief(
     const after = deps.now();
     if (localIsoDate(after) !== day) return { status: 'day-ended', attempts };
     if (deps.isComplete(after)) return { status: 'complete', attempts };
-    deps.log('Scheduled brief is incomplete; retrying in 15 minutes while awake.');
+    if (attempts >= MAX_ATTEMPTS) {
+      // The run's own notes are already in this log — stderr is inherited — so
+      // this line says what the scheduler decided, not what went wrong.
+      deps.log(
+        `Scheduled brief gave up after ${attempts} attempts; see the notes above. Tomorrow's schedule tries again.`,
+      );
+      return { status: 'retries-exhausted', attempts };
+    }
+    deps.log(
+      `Scheduled brief is incomplete; retrying in ${RETRY_EVERY_MINUTES} minutes while awake.`,
+    );
     await deps.wait(INCOMPLETE_RETRY_MS);
   }
 }
