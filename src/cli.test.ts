@@ -1009,6 +1009,50 @@ test("the model's cards and hides reach the page — the whole return leg", () =
   assert.match(page, /Vist fordi:<\/b> Beskeden er rettet til jer/);
 });
 
+test('a reused layout says so, and --no-cache forces a fresh one', () => {
+  // The extraction cache is keyed on payload + prompt + schema with no TTL, so
+  // an unchanged morning answers in milliseconds. `layout: "model"` is true of
+  // both a fresh call and a reused one, which made a two-second run look
+  // identical to a four-minute one from the outside.
+  const answer = JSON.stringify({
+    topline: 'Genbrugt svar.',
+    cards: [
+      {
+        title: 'Svar Yrsa om mødet',
+        summary: 'Yrsa spørger om en dato.',
+        children: [],
+        date: null,
+        needsAction: true,
+        reason: 'Beskeden er rettet til jer om jeres barn.',
+        sourceKeys: ['thread:5002'],
+      },
+    ],
+    personalEvents: [],
+    childSummaries: {},
+    hidden: [],
+  });
+  const box = sandboxWithClaude('ok', answer);
+  const claudeLog = join(box.dir, 'claude.log');
+  box.env.FAKE_CLAUDE_LOG = claudeLog;
+  const modelCalls = () => readFileSync(claudeLog, 'utf8').split('\n').filter(Boolean).length;
+
+  const first = json(box.run('new', '--no-deploy', '--no-open'));
+  assert.equal(first.layout, 'model');
+  assert.equal(first.layoutCached, false, 'the first run has nothing to reuse');
+  assert.equal(modelCalls(), 1);
+
+  const second = json(box.run('new', '--no-deploy', '--no-open'));
+  assert.equal(second.layout, 'model');
+  assert.equal(second.layoutCached, true);
+  assert.equal(modelCalls(), 1, 'a cache hit must not spawn the model at all');
+
+  // The escape hatch, and the reason the flag is worth having: without a way to
+  // force the call, a wrong cached answer is unfalsifiable.
+  const fresh = json(box.run('new', '--no-deploy', '--no-open', '--no-cache'));
+  assert.equal(fresh.layoutCached, false);
+  assert.equal(modelCalls(), 2, '--no-cache must reach the model again');
+});
+
 test('a partial model response is supplemented by rule-grounded obligations', () => {
   const answer = JSON.stringify({
     topline: 'Ufuldstændigt svar.',

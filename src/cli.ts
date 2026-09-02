@@ -667,6 +667,7 @@ async function main(): Promise<number> {
           pdf: run.published.pdfPath,
           png: run.published.pngPath,
           layout: run.origin,
+          layoutCached: run.layoutCached,
           deployed: run.deployment.status === 'ok' ? run.deployment.url : null,
           complete: run.complete,
           retryable: run.retryable,
@@ -1544,6 +1545,7 @@ function renderBrief(result: {
   pdf: string | null;
   png: string | null;
   layout: string;
+  layoutCached: boolean;
   deployed: string | null;
   complete: boolean;
   retryable: boolean;
@@ -1552,10 +1554,17 @@ function renderBrief(result: {
   hidden: number;
   notes: string[];
 }): string {
+  // "genbrugt svar" rather than a timestamp: the extraction cache has no TTL,
+  // so the entry behind a hit may be from this morning or from days ago —
+  // whenever the sources, the prompt and the schema last differed.
+  const layout =
+    result.layout === 'model'
+      ? `modellen skrev kortene${result.layoutCached ? ' (genbrugt svar)' : ''}`
+      : 'kun reglerne';
   const lines = [
     result.topline ?? '(ingen topline)',
     '',
-    `${result.cards} kort, ${result.hidden} kilde(r) skjult — ${result.layout === 'model' ? 'modellen skrev kortene' : 'kun reglerne'}`,
+    `${result.cards} kort, ${result.hidden} kilde(r) skjult — ${layout}`,
     `HTML: ${result.html}`,
   ];
   if (result.pdf) lines.push(`PDF:  ${result.pdf}`);
