@@ -51,6 +51,32 @@ export {
 const CACHE_DIR = join(BRIEF_DIR, 'cache');
 const CACHE_FILE_LIMIT = 32;
 /**
+ * How long one extraction call may take, measured rather than guessed.
+ *
+ * A high-effort extraction of ~55 sources takes about four and a half minutes.
+ * The old 300s ceiling therefore left roughly thirty seconds of headroom: the
+ * scheduled run on 2026-09-02 finished its model call in 266s, and two runs
+ * that overlapped later the same morning both crossed 300s, timed out on both
+ * attempts, and spent ten minutes each to produce a rules-only page. A ceiling
+ * that close to the normal case does not catch stalls, it converts a slow
+ * morning into a degraded brief.
+ *
+ * Doubling it is deliberate: a genuine stall is caught by the same timeout one
+ * attempt later, and the scheduler's own budget (see `scheduled-brief.ts`)
+ * bounds the day regardless of how long a single call takes.
+ */
+const EXTRACTION_TIMEOUT_MS = 600_000;
+
+/**
+ * `AULA_BRIEF_TIMEOUT` in seconds, for a machine or model where the default is
+ * wrong. `aula schedule` bakes it into the agent alongside the model and effort
+ * it already carries — launchd hands the job no shell environment.
+ */
+function extractionTimeoutMs(): number {
+  const seconds = Number(process.env.AULA_BRIEF_TIMEOUT);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : EXTRACTION_TIMEOUT_MS;
+}
+/**
  * Bumped whenever the answer's shape changes. It is part of the cache key, so
  * an entry written under the old contract is simply not found rather than
  * read back with a field missing — the first run after an upgrade must not
@@ -498,7 +524,11 @@ export async function extractCards(
   // so letting it through still produces a brief — it just produces an honest
   // one. Nothing is written to the cache on this path either; a 06:30 outage
   // must not pin a degraded brief for the rest of the day.
-  const call = { timeoutMs: opts.timeoutMs ?? 300_000, schema, purpose: 'brief' as const };
+  const call = {
+    timeoutMs: opts.timeoutMs ?? extractionTimeoutMs(),
+    schema,
+    purpose: 'brief' as const,
+  };
   const answer = await runClaude(instructions, body, call);
 
   // `runClaude` requires the schema-checked tool parameters. Unstructured text
@@ -530,7 +560,7 @@ export async function extractCards(
     };
     try {
       const repair = await runClaude(repairInstructions, JSON.stringify(repairPayload), {
-        timeoutMs: Math.min(opts.timeoutMs ?? 300_000, 120_000),
+        timeoutMs: Math.min(opts.timeoutMs ?? extractionTimeoutMs(), 120_000),
         schema: repairSchema,
         maxAttempts: 1,
         purpose: 'repair',

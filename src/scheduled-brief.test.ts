@@ -3,7 +3,7 @@ import {
   coordinateScheduledBrief,
   DEFER_POLL_MS,
   INCOMPLETE_RETRY_MS,
-  MAX_ATTEMPTS,
+  RETRY_WINDOW_MS,
   shouldDeferForDarkWake,
   type MacPowerState,
 } from './scheduled-brief.ts';
@@ -85,10 +85,11 @@ describe('coordinateScheduledBrief', () => {
     // prompt.
     const waits: number[] = [];
     const logs: string[] = [];
+    let clock = morning.getTime();
     let runs = 0;
 
     const outcome = await coordinateScheduledBrief({
-      now: () => morning,
+      now: () => new Date(clock),
       isComplete: () => false,
       powerState: () => ({ source: 'ac', fullWake: true }),
       runBrief: async () => {
@@ -97,23 +98,83 @@ describe('coordinateScheduledBrief', () => {
       },
       wait: async (milliseconds) => {
         waits.push(milliseconds);
+        clock += milliseconds;
       },
       log: (message) => logs.push(message),
     });
 
-    expect(outcome).toEqual({ status: 'retries-exhausted', attempts: MAX_ATTEMPTS });
-    expect(runs).toBe(MAX_ATTEMPTS);
+    // Instant runs land one per retry interval, so the window admits exactly
+    // the launchd slots `scheduleTimes` writes for the same window — the two
+    // derive from the same constants and this is what keeps them saying the
+    // same thing.
+    const slots = scheduleTimes({ hour: 6, minute: 30 }).length;
+    expect(outcome).toEqual({ status: 'retries-exhausted', attempts: slots });
+    expect(runs).toBe(slots);
     // One wait fewer than attempts: the last failure gives up rather than
     // sleeping through a quarter hour it has no intention of using.
-    expect(waits).toEqual(Array(MAX_ATTEMPTS - 1).fill(INCOMPLETE_RETRY_MS));
+    expect(waits).toEqual(Array(slots - 1).fill(INCOMPLETE_RETRY_MS));
     expect(logs.at(-1)).toContain('gave up');
   });
 
-  test('the attempt budget is exactly the schedule it implements', () => {
-    // Both sides derive from RETRY_EVERY_MINUTES and RETRY_FOR_MINUTES, and
-    // this is what stops one of them being pinned to a literal again: when they
-    // disagree, `aula schedule` prints a window the coordinator does not keep.
-    expect(MAX_ATTEMPTS).toBe(scheduleTimes({ hour: 6, minute: 30 }).length);
+  test('a slow run spends the window in wall-clock time, not in attempts', async () => {
+    // Each attempt burns half an hour — two ten-minute model timeouts and the
+    // wait between them. A budget counted in attempts would allow thirteen of
+    // those and sit there for seven hours; the window admits six.
+    const slow = 30 * 60_000;
+    let clock = morning.getTime();
+    let runs = 0;
+
+    const outcome = await coordinateScheduledBrief({
+      now: () => new Date(clock),
+      isComplete: () => false,
+      powerState: () => ({ source: 'ac', fullWake: true }),
+      runBrief: async () => {
+        runs += 1;
+        clock += slow;
+        return 0;
+      },
+      wait: async (milliseconds) => {
+        clock += milliseconds;
+      },
+      log: () => {},
+    });
+
+    expect(outcome.status).toBe('retries-exhausted');
+    // Thirteen attempts at this speed would be nearly ten hours. Five fit.
+    expect(runs).toBe(5);
+    // The window bounds when a new attempt may *start*, not when a running one
+    // must finish: a brief in flight is never killed mid-run, so the process
+    // can outlive the window by at most the length of one attempt.
+    expect(clock - morning.getTime()).toBeLessThanOrEqual(RETRY_WINDOW_MS + slow);
+  });
+
+  test('sleeping through the scheduled hour does not spend the window', async () => {
+    // The clock starts at the first attempt that runs, not at process start.
+    // A Mac that wakes at noon gets the same three hours it would have had at
+    // 06:30 — the case the coordinator exists for.
+    const power: MacPowerState[] = [
+      { source: 'battery', fullWake: false },
+      { source: 'battery', fullWake: false },
+    ];
+    let clock = morning.getTime();
+    let runs = 0;
+
+    const outcome = await coordinateScheduledBrief({
+      now: () => new Date(clock),
+      isComplete: () => runs === 1,
+      powerState: () => power.shift() ?? { source: 'ac', fullWake: true },
+      runBrief: async () => {
+        runs += 1;
+        return 0;
+      },
+      // Five hours of DarkWake polling, well past the window, before any run.
+      wait: async () => {
+        clock += 150 * 60_000;
+      },
+      log: () => {},
+    });
+
+    expect(outcome).toEqual({ status: 'complete', attempts: 1 });
   });
 
   test('stops instead of generating yesterday after the local day changes', async () => {

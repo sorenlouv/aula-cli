@@ -139,6 +139,7 @@ const xmlEscape = (value: string) =>
 const BAKED_ENV = [
   'AULA_BRIEF_MODEL',
   'AULA_BRIEF_EFFORT',
+  'AULA_BRIEF_TIMEOUT',
   'AULA_BRIEF_REPAIR_MODEL',
   'AULA_BRIEF_REPAIR_EFFORT',
   'AULA_TOOL_MODEL',

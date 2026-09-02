@@ -25,7 +25,7 @@ export const DEFER_POLL_MS = 60_000;
 export const INCOMPLETE_RETRY_MS = RETRY_EVERY_MINUTES * 60_000;
 
 /**
- * The declared retry window, counted in attempts.
+ * The declared retry window, as the duration it actually is.
  *
  * `schedule.ts` already says how long a morning may be retried — every
  * `RETRY_EVERY_MINUTES` for `RETRY_FOR_MINUTES` — and writes exactly that into
@@ -38,12 +38,18 @@ export const INCOMPLETE_RETRY_MS = RETRY_EVERY_MINUTES * 60_000;
  * model process and a macOS permission prompt — and the thirty-first was as
  * doomed as the first.
  *
- * Counted in attempts rather than against the clock on purpose: a DarkWake
- * defer polls without spending one, so a Mac that sleeps past the window still
- * gets the whole budget on the wake that follows. A deadline would take that
- * away, and it is the case this coordinator exists for.
+ * This was briefly a count of attempts instead, which only holds while every
+ * attempt is quick. Raising the extraction timeout to ten minutes broke that:
+ * two timed-out calls plus the wait between them is a thirty-five minute
+ * attempt, and thirteen of those is a seven-hour morning — the very shape the
+ * count was introduced to prevent.
+ *
+ * The clock starts at the first attempt that actually *ran*, not at process
+ * start, which is what lets it stay a duration without punishing the case this
+ * coordinator exists for: a DarkWake defer polls without starting it, so a Mac
+ * that wakes at noon still gets the full window from noon.
  */
-export const MAX_ATTEMPTS = 1 + RETRY_FOR_MINUTES / RETRY_EVERY_MINUTES;
+export const RETRY_WINDOW_MS = RETRY_FOR_MINUTES * 60_000;
 
 export type MacPowerState = {
   source: 'ac' | 'battery' | 'unknown';
@@ -118,6 +124,7 @@ export async function coordinateScheduledBrief(
   const day = localIsoDate(deps.now());
   let attempts = 0;
   let wasDeferred = false;
+  let windowOpenedAt: number | null = null;
 
   for (;;) {
     const now = deps.now();
@@ -136,6 +143,9 @@ export async function coordinateScheduledBrief(
 
     if (wasDeferred) deps.log('Scheduled brief resumed after a full wake or AC connection.');
     wasDeferred = false;
+    // The window opens on the first attempt that runs, so sleeping through the
+    // scheduled hour costs nothing of it.
+    windowOpenedAt ??= now.getTime();
     attempts += 1;
     deps.log(`Scheduled brief attempt ${attempts} started.`);
     try {
@@ -148,11 +158,17 @@ export async function coordinateScheduledBrief(
     const after = deps.now();
     if (localIsoDate(after) !== day) return { status: 'day-ended', attempts };
     if (deps.isComplete(after)) return { status: 'complete', attempts };
-    if (attempts >= MAX_ATTEMPTS) {
+    // Would the next attempt start after the window closes? Asked before the
+    // wait rather than after it, so a spent budget ends the process now instead
+    // of sleeping a quarter of an hour to discover the same thing.
+    if (
+      after.getTime() - (windowOpenedAt ?? after.getTime()) + INCOMPLETE_RETRY_MS >
+      RETRY_WINDOW_MS
+    ) {
       // The run's own notes are already in this log — stderr is inherited — so
       // this line says what the scheduler decided, not what went wrong.
       deps.log(
-        `Scheduled brief gave up after ${attempts} attempts; see the notes above. Tomorrow's schedule tries again.`,
+        `Scheduled brief gave up after ${attempts} attempts in ${RETRY_FOR_MINUTES} minutes; see the notes above. Tomorrow's schedule tries again.`,
       );
       return { status: 'retries-exhausted', attempts };
     }

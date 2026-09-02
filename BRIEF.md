@@ -252,7 +252,10 @@ aula new [--days 60] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 | `brief/done.ts` | Tick keys and the client-side store |
 
 `AULA_BRIEF_MODEL` and `AULA_BRIEF_EFFORT` override extraction, where stronger
-judgment can improve the answer. A date-only repair defaults separately to
+judgment can improve the answer. `AULA_BRIEF_TIMEOUT` (seconds) overrides how
+long one extraction call may take; the default is 600, against a typical
+four-and-a-half-minute call. It was 300, which left about thirty seconds of
+headroom and turned two slow mornings into rules-only pages. A date-only repair defaults separately to
 Haiku at low effort (`AULA_BRIEF_REPAIR_MODEL` and
 `AULA_BRIEF_REPAIR_EFFORT`), because it may only rewrite one rejected card
 against its existing sources. Calendar and publishing calls only transport
@@ -496,13 +499,20 @@ does not start Aula or Claude: the coordinator is suspended with the Mac and
 resumes when AC power or a full graphical wake makes a long request viable.
 Only the expensive child runs under `caffeinate -i -s`. Calendar triggers still
 repeat every `RETRY_EVERY_MINUTES` (15) for `RETRY_FOR_MINUTES` (180) as crash
-recovery, and the live coordinator spends that same window as a budget of
-`MAX_ATTEMPTS` (13) runs that actually *executed*. Deferring through sleep costs
-nothing from it, so a Mac that wakes at noon still gets the whole budget — while
-a cause no retry can fix stops after three hours instead of at midnight. It used
-to run to midnight: an expired `claude` login once cost thirty-one full runs
-across nine hours, each a spawned model process and a macOS permission prompt,
-and the thirty-first was as doomed as the first.
+recovery, and the live coordinator spends that same window as `RETRY_WINDOW_MS`
+(180 minutes) of wall clock. The clock starts at the first attempt that actually
+*ran*, so deferring through sleep costs nothing from it and a Mac that wakes at
+noon still gets the whole three hours — while a cause no retry can fix stops
+after them instead of at midnight. The window bounds when a new attempt may
+start, not when a running one must finish; a brief in flight is never killed
+mid-run.
+
+It used to run to midnight: an expired `claude` login once cost thirty-one full
+runs across nine hours, each a spawned model process and a macOS permission
+prompt, and the thirty-first was as doomed as the first. It was then briefly a
+count of thirteen attempts, which only holds while attempts are quick — at a
+ten-minute extraction timeout, two timeouts plus the wait between them is a
+thirty-five-minute attempt, and thirteen of those is a seven-hour morning.
 
 Every generation passes `--catch-up`; `state.json`'s `lastRun.complete` stops
 retries after a complete run. Retryable fetch failures, model/deploy degradation
