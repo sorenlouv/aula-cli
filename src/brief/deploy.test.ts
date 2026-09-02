@@ -77,12 +77,17 @@ describe('isArtifactUrl', () => {
 });
 
 describe('deployArtifact', () => {
-  test('skips silently when no target is configured', async () => {
+  test('reports an unconfigured target rather than skipping quietly', async () => {
+    // A lost `artifactUrl` used to be indistinguishable from `--no-deploy`, so
+    // the brief kept reporting success while the shared link went stale. The
+    // status has to say which of the two happened, and the reason has to name
+    // the command that fixes it.
     const result = await deployArtifact('/tmp/artifact.html', {
       title: 'T',
       configPath: configPath(),
     });
-    expect(result.status).toBe('skipped');
+    expect(result.status).toBe('unconfigured');
+    expect(result.status === 'unconfigured' && result.reason).toContain('publish');
   });
 
   test('refuses a target that is not an artifact url', async () => {

@@ -281,13 +281,18 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   // Local first, hosted second. The file on disk is the brief; the artifact is
   // a convenience on top of it, so a deploy that fails is a note on an
   // otherwise good run rather than a failed one.
-  let deployment: DeployResult = { status: 'skipped', reason: 'slået fra med --no-deploy' };
+  let deployment: DeployResult = { status: 'off', reason: 'slået fra med --no-deploy' };
   const deployStartedAt = performance.now();
   if (opts.deploy !== false) {
     deployment = await deployArtifact(published.artifactPath, { title: BRIEF_TITLE });
     if (deployment.status === 'failed') {
       notes.push(`Artifact blev ikke opdateret: ${deployment.reason}`);
     }
+    // Reported, but never a failure: no amount of retrying conjures a URL, so
+    // marking the run incomplete would hand the scheduler a condition it cannot
+    // fix and leave it retrying until midnight. The note is the whole remedy —
+    // it names the one command that sets hosting up.
+    if (deployment.status === 'unconfigured') notes.push(deployment.reason);
     if (deployment.status === 'ok') recordDeploy(state, deployment.url, now);
   }
   phase('deploy', deployStartedAt, { status: deployment.status });

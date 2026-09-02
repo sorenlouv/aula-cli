@@ -738,6 +738,27 @@ test('every completed brief records revision and phase timings privately', () =>
   assert.equal(typeof finished.revision.dirty, 'boolean');
 });
 
+test('a brief with no hosted copy configured says so and still counts as complete', () => {
+  // The deploy is deliberately left on: every other `new` test passes
+  // `--no-deploy`, which is how a lost `artifactUrl` stayed invisible. Both
+  // produced the same silent `skipped`, so an installation whose config had
+  // gone missing published nothing and reported success every morning. With no
+  // target configured this returns before spawning anything, so the test costs
+  // no subprocess.
+  const box = sandbox();
+  const result = box.run('new', '--no-llm', '--no-open');
+  assert.equal(result.code, 0, result.stderr);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.deployed, null);
+  // Not a failure, and it must never become one: retrying cannot create a URL,
+  // so an incomplete run here would put the scheduler into an all-day loop.
+  assert.equal(out.complete, true);
+  assert.ok(
+    out.notes.some((note: string) => note.includes(cmd('publish'))),
+    `the run must name the command that fixes it, got: ${JSON.stringify(out.notes)}`,
+  );
+});
+
 test('a model outage is prominent on the page and leaves private diagnostics', () => {
   const box = sandboxWithClaude('error');
   const result = box.run('new', '--no-deploy', '--no-open');
