@@ -2,8 +2,8 @@
 
 You are setting this up for someone who is not a developer. When you are done
 they have a daily overview of their children's school and daycare at a
-claude.ai address they can bookmark — it refreshes itself every weekday
-morning, so they never have to open Claude Code again to read it.
+claude.ai address they can bookmark — it refreshes itself every morning and
+every evening, so they never have to open Claude Code again to read it.
 
 Work steps 0–8 in order, then offer the optional extras. In a normal run the
 user is needed twice: the login page (step 2), where they type their MitID
@@ -195,17 +195,21 @@ The page is private to the user's own claude.ai account. Every later run,
 including every scheduled one, redeploys to that same address, so a bookmark
 never goes stale.
 
-## 7. Have it run every morning
+## 7. Have it run morning and evening
 
 ```bash
 aula schedule
 ```
 
-Weekdays at 06:30; `--at HH:MM` to change it, `--remove` to stop. On macOS
-this installs a launchd agent, on Windows a Scheduled Task; on Linux it prints
-cron lines to install by hand. A laptop asleep at 06:30 is the normal case, so
-the job waits for a real wake and retries through the morning — the user does
-not have to leave the machine on.
+Every day at 06:00 and 18:00, weekends included; `--at HH:MM,HH:MM` to change
+the times, `--remove` to stop. On macOS this installs a launchd agent, on
+Windows a Scheduled Task; on Linux it prints cron lines to install by hand.
+
+**The machine does not have to be on.** A laptop asleep at 06:00 is the normal
+case, not the exception. The job waits for a real wake rather than burning its
+trigger on a Power Nap, retries through the slot, and — if the machine was shut
+or shut down across the whole slot — catches up within about fifteen minutes of
+being opened again. The user never has to remember to leave it running.
 
 On macOS the agent runs with a fixed `PATH` — launchd hands it no copy of
 your shell's — so the schedule bakes in where `claude` lives, and whichever of
@@ -222,9 +226,11 @@ Lead with the address. Say something like this, in the language the user has
 been speaking:
 
 > Your overview is at **[the URL from step 6]**. Bookmark it — on your phone
-> too. It updates itself every weekday morning at 06:30, so it is always
-> current, and you never need to open Claude Code to read it. You will need to
-> be signed in to claude.ai to see it; it is private to your account.
+> too. It updates itself every morning at 06:00 and every evening at 18:00,
+> weekends included, so it is always current, and you never need to open Claude
+> Code to read it. If your machine is off or asleep when that happens it
+> catches up shortly after you open it again. You will need to be signed in to
+> claude.ai to see it; it is private to your account.
 
 Then mention, briefly, that they can also ask about Aula in plain language in
 a new session, and that the overview can be taught what matters to them:
@@ -285,7 +291,7 @@ time — it is not tied to setup.
 - **A weekly plan says COULD NOT BE READ** — the school's vendor failed; it is
   not an empty week. The warning names the vendor.
 - **Scheduled overview misbehaves** — read `~/.aula/brief/launchd.log`.
-  `timed out`: the Mac slept mid-run, and the retries redo the morning.
+  `timed out`: the Mac slept mid-run, and the retries redo the slot.
   `Not logged in`: `claude` has no credentials outside a terminal — run
   `claude` once, log in, and try again. `command not found`: something is off
   launchd's bare PATH — re-run `aula schedule`.
