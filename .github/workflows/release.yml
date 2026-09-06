@@ -35,9 +35,20 @@ jobs:
       # a deprecation with a deadline attached. Note the major numbers are not
       # in step: setup-bun is still v2 because v2 is already a node24 action.
       - uses: actions/checkout@v7
+      # The compiler is pinned in .bun-version, because `latest` meant the
+      # toolchain that produces a release could change under it between one tag
+      # and the next, with nothing recording which one built a given binary.
+      # It did: the signature defect in v0.3.1's darwin-arm64 came from the Bun
+      # that happened to be latest that day, and Bun 1.4.2 then fixed it without
+      # anything here moving. A release should be reproducible from its tag, and
+      # a toolchain upgrade should be a commit that CI can reject.
+      #
+      # ci.yml reads the same file. Bumping it is the whole upgrade — run the
+      # gate and `bun run build` on the new version first, and check that
+      # `bun install --frozen-lockfile` still leaves bun.lock alone.
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: .bun-version
 
       - run: bun install --frozen-lockfile
 
