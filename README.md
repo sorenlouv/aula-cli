@@ -8,7 +8,7 @@ Hver morgen klokken 6 og hver aften klokken 18 — også i weekenden — vågner
 
 Kom nemt igang ved at sige til din agent:
 
-> I want to install Aula CLI. Follow the setup instructions at 
+> Jeg vil gerne installere Aula CLI. Følg vejledningen her:
 > https://raw.githubusercontent.com/sorenlouv/aula-cli/main/SETUP.md
 
 Undervejs spørger agenten én gang, hvilke funktioner du vil have med:
