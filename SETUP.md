@@ -122,27 +122,17 @@ bold line is one option's label and the sentence under it is that option's
 description; a control that takes both should be given both.
 
 > **Hvilke funktioner vil du gerne have med?**
-> Vælg lige den kombination, du vil — ingen af dem er nødvendige, og de kan
-> alle slås til senere.
 >
-> **Privat link til din telefon** *(anbefalet)*
-> Overblikket lægges på claude.ai på en privat adresse, som kun du kan se, og
-> opdateres samme sted hver gang — så du kan gemme det som bogmærke og læse det
-> på telefonen uden at åbne Claude Code.
+> **Cloud support** *(anbefalet)*
+> Aula Overblikket uploades til claude.ai, hvor kun du kan tilgå det, så du kan læse det på telefonen og andre computere uden at åbne Claude Code.
 >
-> **Opdatering morgen og aften** *(anbefalet)*
-> Et nyt overblik dannes automatisk kl. 06 og kl. 18 hver dag, også i weekenden.
-> Er computeren slukket eller i dvale, bliver det dannet kort efter, du åbner
-> den igen.
+> **Daglig generering** *(anbefalet)*
+> Et nyt overblik dannes automatisk dagligt kl. 06 hver dag.
+> Er computeren slukket eller i dvale, bliver det genereret når du åbner den igen.
 >
-> **Jeres egen kalender**
-> Aftaler fra Google Kalender vises sammen med skolens og børnehavens i
+> **Google Calendar integration**
+> Aftaler fra Google Kalender vises sammen med begivenheder fra Aula i
 > overblikket. Kræver, at Google Kalender er forbundet i Claudes indstillinger.
->
-> **Fortæl hvad der er vigtigt for jer**
-> Bestemte afsendere eller emner bliver altid fremhævet, andre nedtonet. Jeg
-> spørger, hvad der betyder noget for jer, og skriver det ned med jeres egne
-> ord.
 
 The first two carry *(anbefalet)* in the label — a checkbox control cannot
 usually be handed to the user pre-ticked, and that word is what does the work
