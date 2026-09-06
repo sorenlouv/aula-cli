@@ -92,11 +92,21 @@ to a crash. `parseCommandLine` wraps it.
 
 ## Code is English; Danish is what the reader sees
 
-Danish belongs only in strings a parent reads: rendered page text, CLI output,
-prompt prose, diagnostics that reach the page. Identifiers, type names, keys
+Everything a parent reads is Danish, and Danish belongs nowhere else: rendered
+page text, CLI output, prompt prose, diagnostics that reach the page, and the
+questions an agent puts to them on our behalf. Identifiers, type names, keys
 (including JSON exchanged with the model), `data-*` attributes, CSS classes,
 sentinel values, comments and test names are English.
 
+- **What an agent says to the parent is parent-facing copy; the document it
+  reads to know what to say is not.** `SETUP.md` is English, for the agent
+  following it. Its feature question first said to ask "in the language the
+  user has been speaking" — so an agent that had just read several pages of
+  English asked a Danish parent in English, and handed them a checkbox list to
+  answer in a language nobody in the family had used. Every line the parent's
+  own eyes land on is therefore written out in Danish in the document itself.
+  Leave none of it to be translated at runtime; that is the step that gets
+  skipped.
 - **A Danish external contract is mirrored verbatim** and mapped at the
   boundary; `min-uddannelse.ts` is the pattern. MinUddannelse really does send
   `kuvertnavn`, `ugebreve` and `hold: [{ navn }]`, and its schema is public at
