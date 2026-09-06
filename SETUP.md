@@ -8,8 +8,9 @@ Claude Code again to read it.
 
 Work steps 0–11 in order. Four of them are features the user chooses in step 2
 — skip the ones they did not pick, and never turn on one nobody asked for. In a
-normal run the user is needed twice: the question in step 2, and the login page
+minimal run the user is needed twice: the question in step 2, and the login page
 in step 3, where they type their MitID username and approve on their phone.
+Picking the calendar adds a stop at step 6 and the preferences one at step 10.
 Everything else, run without asking. When something fails, follow its section —
 a failure can add a stop, such as a login the user has to run themselves.
 
@@ -19,6 +20,14 @@ reads is Danish, whatever language they opened with and whatever language this
 document is in, and the Danish for the moments that matter is written out where
 it is needed. Speak plainly — the reader is a parent, not an engineer. Do not
 delegate any of this to subagents; it is a linear install.
+
+**Every choice from a known list is a click, not typing.** Where the user picks
+among options you are already holding — the features in step 2, their own
+calendars in step 6 — put them in a checkbox question and let them tick.
+Printing the options and asking them to type the ones they want is the same
+question made harder, and it invites a typo into an argument that has to match
+exactly. Only a genuinely open answer, like step 10's *hvad er vigtigt for jer*,
+is typed in the chat.
 
 This document is the whole of the setup. `AGENTS.md` is for people changing
 the code and has nothing you need here; the "From source" section at the end
@@ -252,17 +261,34 @@ aula calendars set "Familie" "Privat"  # read exactly these two, and no others
 aula calendars set none                # read none of them
 ```
 
-Show the list and let the user pick — the calendar names are theirs, so show
-them as they are and ask in Danish:
+**Turn what `calendars` printed into a second checkbox question — one option
+per calendar, its name as the label.** This is a choice from a list you are
+holding; do not print the names and ask the user to type them back. Ask in
+Danish:
 
-> Hvilke af dine kalendere skal med i overblikket?
+> **Google Kalender er forbundet. Vælg de kalendere, som skal indgå i
+> Aula-overblikket.**
+> Sæt kryds ved dem, I vil have med. Sætter I ingen kryds, kommer der ingen
+> kalenderaftaler i overblikket.
+>
+> - [ ] Familie
+> - [ ] Privat
+> - [ ] *(og så videre — én linje per kalender, præcis som den hedder)*
 
-Set exactly the calendars they name, and only when they name one — this writes
-to `~/.aula/config.json`. Pass the exact displayed names (or the id shown when
-two calendars share a name), never a list position, which may point at
-something else on a later read. `set` states the whole answer: it reads what
-you name and stops reading everything else, so pass every calendar that should
-be read, not only a new one.
+Their calendar names are their own — a work calendar, a shared one, an address.
+Reproduce each one exactly as `calendars` printed it and add nothing to it.
+
+Then pass exactly what they ticked to `set`, and nothing they did not — this
+writes to `~/.aula/config.json`. Pass the exact displayed names (or the id
+shown when two calendars share a name), never a list position, which may point
+at something else on a later read. Nothing ticked is an answer: that is
+`aula calendars set none`.
+
+`set` states the whole answer: it reads what you name and stops reading
+everything else, so pass every calendar that should be read, not only a new
+one. On a re-run, where `calendars` marks some as already read, say which those
+are in the question — a checkbox cannot be handed over pre-ticked, and one the
+user forgets to tick is one you have just stopped reading.
 
 It reports how many appointments each newly added calendar holds in the
 window the overview reads. Pass that back to the user, and say so if one comes
