@@ -14,8 +14,11 @@ Everything else, run without asking. When something fails, follow its section �
 a failure can add a stop, such as a login the user has to run themselves.
 
 Say in one sentence what you are about to do before each step, and report the
-outcome after it. Speak plainly — the reader is a parent, not an engineer.
-Do not delegate any of this to subagents; it is a linear install.
+outcome after it. **Speak Danish to them throughout** — every word the parent
+reads is Danish, whatever language they opened with and whatever language this
+document is in, and the Danish for the moments that matter is written out where
+it is needed. Speak plainly — the reader is a parent, not an engineer. Do not
+delegate any of this to subagents; it is a linear install.
 
 This document is the whole of the setup. `AGENTS.md` is for people changing
 the code and has nothing you need here; the "From source" section at the end
@@ -102,26 +105,42 @@ run the rest without stopping again except for the login.
 
 Ask it as a **single question with checkboxes** if your interface has a
 multiple-choice control, so the user ticks what they want in one pass;
-otherwise print the list and let them answer in prose. Ask in the language the
-user has been speaking — the Danish below is the reference wording, because
-that is who this is for.
+otherwise print the list and let them answer in prose.
+
+**Ask in Danish, in the words below.** They are already written — do not
+translate them into the language this document happens to be in, and do not
+compose your own. This applies to every quoted block from here to the end: what
+the parent reads is Danish, and the instructions around it are for you. Each
+bold line is one option's label and the sentence under it is that option's
+description; a control that takes both should be given both.
 
 > **Hvilke funktioner vil du gerne have med?**
+> Vælg lige den kombination, du vil — ingen af dem er nødvendige, og de kan
+> alle slås til senere.
 >
-> - [x] **Et privat link, du kan læse på telefonen.** Overblikket lægges på
->       claude.ai, hvor kun du kan se det, og opdateres samme sted hver gang.
->       *(anbefalet)*
-> - [x] **Opdatering morgen og aften.** Overblikket dannes af sig selv kl. 06
->       og kl. 18, også i weekenden, så det altid er nyt. *(anbefalet)*
-> - [ ] **Jeres egen kalender.** Aftaler fra Google Kalender vises sammen med
->       skolens og børnehavens i overblikket.
-> - [ ] **Fortæl hvad der er vigtigt for jer.** Bestemte afsendere eller emner
->       bliver altid fremhævet, andre nedtonet.
+> **Privat link til din telefon** *(anbefalet)*
+> Overblikket lægges på claude.ai på en privat adresse, som kun du kan se, og
+> opdateres samme sted hver gang — så du kan gemme det som bogmærke og læse det
+> på telefonen uden at åbne Claude Code.
 >
-> Ingen af dem er nødvendige for at komme i gang, og de kan slås til senere.
+> **Opdatering morgen og aften** *(anbefalet)*
+> Et nyt overblik dannes automatisk kl. 06 og kl. 18 hver dag, også i weekenden.
+> Er computeren slukket eller i dvale, bliver det dannet kort efter, du åbner
+> den igen.
+>
+> **Jeres egen kalender**
+> Aftaler fra Google Kalender vises sammen med skolens og børnehavens i
+> overblikket. Kræver, at Google Kalender er forbundet i Claudes indstillinger.
+>
+> **Fortæl hvad der er vigtigt for jer**
+> Bestemte afsendere eller emner bliver altid fremhævet, andre nedtonet. Jeg
+> spørger, hvad der betyder noget for jer, og skriver det ned med jeres egne
+> ord.
 
-The first two are ticked because they are what the tool is for: without them
-the overview is a page on one machine that somebody has to remember to
+The first two carry *(anbefalet)* in the label — a checkbox control cannot
+usually be handed to the user pre-ticked, and that word is what does the work
+instead. They are recommended because they are what the tool is for: without
+them the overview is a page on one machine that somebody has to remember to
 regenerate. The other two ask something of the user — a connector, or a
 sentence about their family — so they are offered, not assumed.
 
@@ -147,7 +166,11 @@ expected stop, and your only job is to hand over the link and wait.
 2. It prints a `http://127.0.0.1:…` link and opens it. Give the user the link
    as well, and tell them to leave the page open until it says they are logged
    in. The page asks for their MitID username, then shows the challenge they
-   approve in the MitID app on their phone.
+   approve in the MitID app on their phone. Hand it over like this:
+
+   > Åbn siden her og log ind med MitID: **[linket]**. Lad siden stå åben, til
+   > den siger, at du er logget ind. Den spørger først om dit MitID-brugernavn
+   > og viser derefter det, du skal godkende i MitID-appen på din telefon.
 3. Watch for `Login successful`, or for a failure with its reason.
 
 **Do not ask for the MitID username in the chat.** The page asks for it, and
@@ -232,13 +255,17 @@ aula calendars set "Familie" "Privat"  # read exactly these two, and no others
 aula calendars set none                # read none of them
 ```
 
-Show the list and let the user pick. Set exactly the calendars they name, and
-only when they name one — this writes to `~/.aula/config.json`. Pass the
-exact displayed names (or the id shown when two
-calendars share a name), never a list position, which may point at something
-else on a later read. `set` states the whole answer: it reads what you name
-and stops reading everything else, so pass every calendar that should be read,
-not only a new one.
+Show the list and let the user pick — the calendar names are theirs, so show
+them as they are and ask in Danish:
+
+> Hvilke af dine kalendere skal med i overblikket?
+
+Set exactly the calendars they name, and only when they name one — this writes
+to `~/.aula/config.json`. Pass the exact displayed names (or the id shown when
+two calendars share a name), never a list position, which may point at
+something else on a later read. `set` states the whole answer: it reads what
+you name and stops reading everything else, so pass every calendar that should
+be read, not only a new one.
 
 It reports how many appointments each newly added calendar holds in the
 window the overview reads. Pass that back to the user, and say so if one comes
@@ -313,9 +340,12 @@ the overview is current as of now and stays that way until somebody runs
 ## 10. What matters to them — only if they picked it
 
 The overview can be told what to always highlight and what to leave out. Ask
-what matters — a sender they never want to miss, a child, a subject, something
-they are tired of seeing — and write each answer down as a sentence in their
-own words:
+them, in Danish:
+
+> Hvad er vigtigt for jer i Aula? Det kan være en afsender, I aldrig vil gå
+> glip af, et af børnene, et bestemt emne — eller noget, I er trætte af at se.
+
+Then write each answer down as a sentence in their own words:
 
 ```bash
 aula remember "vis altid beskeder fra Johns far"
@@ -333,36 +363,36 @@ mainly the model call.
 
 Lead with where the overview is.
 
-**If it is online (step 8),** lead with the address. Say something like this,
-in the language the user has been speaking:
+**If it is online (step 8),** lead with the address:
 
-> Your overview is at **[the URL from step 8]**. Bookmark it — on your phone
-> too. It updates itself every morning at 06:00 and every evening at 18:00,
-> weekends included, so it is always current, and you never need to open Claude
-> Code to read it. If your machine is off or asleep when that happens, it
-> catches up shortly after you open it again. You will need to be signed in to
-> claude.ai to see it; it is private to your account.
+> Dit overblik ligger på **[adressen fra trin 8]**. Gem det som bogmærke — også
+> på telefonen. Det opdaterer sig selv hver morgen kl. 06 og hver aften kl. 18,
+> også i weekenden, så det altid er nyt, og du behøver aldrig åbne Claude Code
+> for at læse det. Er computeren slukket eller i dvale på det tidspunkt, bliver
+> det dannet kort efter, du åbner den igen. Du skal være logget ind på claude.ai
+> for at se det; det er privat og kun synligt for dig.
 
 Drop the two sentences about the times if they left the schedule off, and say
-instead that a fresh overview is one `aula new` away.
+instead: *Et nyt overblik er ét `aula new` væk.*
 
 **If it is not,** the overview is a page on this machine:
 
-> Your overview is on this computer. `aula open` opens the newest one, and
-> `aula new` makes a fresh one. [If they turned the schedule on: It is rebuilt
-> every morning at 06:00 and every evening at 18:00, weekends included, so what
-> `aula open` shows you is always current.]
+> Dit overblik ligger på denne computer. `aula open` åbner det nyeste, og
+> `aula new` danner et nyt. [Hvis de slog opdateringen til: Det dannes
+> automatisk hver morgen kl. 06 og hver aften kl. 18, også i weekenden, så det,
+> `aula open` viser dig, altid er nyt.]
 
 Then, either way, mention that they can ask about Aula in plain language in a
 new session — and name what they left off in step 2, with the one command that
-turns it on, so that "not now" is not a dead end:
+turns it on, so that "not now" is not a dead end. The left column is what you
+say to them; the right is what you type:
 
-| Left off                     | Turn it on later    |
-| ---------------------------- | ------------------- |
-| A private link for the phone | `aula publish`      |
-| Morning and evening updates  | `aula schedule`     |
-| Their own calendar           | `aula calendars`    |
-| What matters to them         | `aula remember "…"` |
+| Left off — say this                | Turn it on later    |
+| ---------------------------------- | ------------------- |
+| Privat link til din telefon        | `aula publish`      |
+| Opdatering morgen og aften         | `aula schedule`     |
+| Jeres egen kalender                | `aula calendars`    |
+| Fortæl hvad der er vigtigt for jer | `aula remember "…"` |
 
 ## Debugging
 
