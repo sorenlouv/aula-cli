@@ -69,13 +69,13 @@ describe('buildPlist', () => {
   });
 
   /**
-   * The calendar entries alone cannot serve a laptop that was shut or shut
-   * down over a slot: there is no trigger left until the next one. launchd
-   * starts an overdue `StartInterval` as soon as the machine wakes, and
-   * `RunAtLoad` covers the machine that was switched off entirely, so between
-   * them every return to life is a chance to catch up.
+   * `StartCalendarInterval` is itself the wake-up catch-up — launchd starts a
+   * firing missed during sleep the next time the machine wakes. The other two
+   * cover what it cannot: `RunAtLoad` for a machine that was switched off, so
+   * nothing was loaded to be overdue, and `StartInterval` for an awake machine
+   * whose coordinator died with the slot's own firing already spent.
    */
-  test('carries the wake-up heartbeat as well as the exact times', () => {
+  test('carries both catch-up triggers as well as the exact times', () => {
     expect(plist).toContain(`<key>StartInterval</key><integer>${HEARTBEAT_MINUTES * 60}</integer>`);
     expect(plist).toContain('<key>RunAtLoad</key><true/>');
   });

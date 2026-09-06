@@ -128,15 +128,18 @@ fallback sources.
   something to ask about. The ledger check was `todayIsComplete` while there
   was one run a day; at 18:00 that read the morning's `complete: true` and the
   evening overview could never have existed.
-- **The plist has two triggers, and the second one is why the page stays
-  fresh.** `StartCalendarInterval` fires at the slot times exactly;
-  `StartInterval` plus `RunAtLoad` is the wake-up heartbeat, and launchd starts
-  an overdue interval the moment the Mac wakes. Calendar entries alone leave a
-  machine that was shut across a slot with no trigger until the next one —
-  which, together with a `Weekday` of 1–5 on all sixty-five of them, is how the
-  hosted page came to sit two days stale every weekend. The heartbeat is
-  affordable only because `--catch-up` answers a settled slot from one file
-  read without opening a socket; do not add work before that check.
+- **The plist has three triggers, and `launchd.plist(5)` is the opposite way
+  round from what the names suggest.** `StartCalendarInterval` fires at the slot
+  times *and* is the wake-up catch-up: a firing missed during sleep is started
+  the next time the Mac wakes, several coalesced into one. `RunAtLoad` covers
+  the Mac that was switched off, where nothing was loaded to be overdue.
+  `StartInterval` is dropped outright during sleep — the man page blames
+  kqueue(3) — so it catches up nothing; it covers the awake Mac whose
+  coordinator died with the slot's own firing already spent, and it replaced a
+  grid of retry entries thirteen times its size. Do not attribute the wake
+  behaviour to `StartInterval`; that was wrong when first written here.
+  All of it is affordable only because `--catch-up` answers a settled slot from
+  one file read without opening a socket, so do not add work before that check.
 - **A spent retry window is written to `state.json` as `exhaustedSlot`.** The
   coordinator's three hours start at the first attempt that *ran*, so a Mac
   that wakes at noon still gets all of them — which means a later process

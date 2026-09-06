@@ -28,22 +28,32 @@
  * next wake; only a full wake or AC power starts the expensive child under
  * caffeinate.
  *
- * **Two triggers, not one.** The calendar entries fire at the slot times
- * exactly, which is what makes a brief that is ready at 06:00 rather than at
- * some point after it. The heartbeat — `StartInterval`, plus `RunAtLoad` for a
- * Mac that was switched off rather than asleep — fires whether or not a slot
- * has just passed, and launchd starts an overdue interval the moment the
- * machine wakes. That is the trigger for the case the calendar cannot cover: a
- * laptop opened at 14:00 has had no calendar entry since dawn and would
- * otherwise show yesterday's brief until the evening.
+ * **Three triggers, and each covers what the others cannot.** `launchd.plist(5)`
+ * is explicit about the difference, and it is the opposite way round from what
+ * the names suggest:
  *
- * A heartbeat only works because arriving is cheap. Every scheduled invocation
- * passes `--catch-up`, and `slotIsSettled` answers from the state file without
- * opening a socket, so the overwhelmingly common heartbeat — the one where
- * this slot's brief is already written — costs one file read and an exit.
+ * - `StartCalendarInterval` fires at the slot times, and — unlike cron — when
+ *   the machine was asleep at one, launchd starts the job the next time it
+ *   wakes, coalescing several missed firings into one. **This is the wake-up
+ *   catch-up.** A laptop shut at 06:00 and opened at 14:00 gets its overview
+ *   then, from this key alone.
+ * - `RunAtLoad` covers the machine that was switched *off* rather than asleep.
+ *   Nothing is loaded to be overdue in that case, so the agent runs once when
+ *   it is bootstrapped at login.
+ * - `StartInterval` is missed outright while the machine sleeps — the man page
+ *   says so, blaming kqueue(3) — so it catches up nothing. What it does cover
+ *   is the awake machine whose coordinator died: the slot's calendar firing is
+ *   spent, the next is twelve hours away, and this brings it back within the
+ *   quarter hour. It replaced a grid of retry entries that said the same thing
+ *   at thirteen times the size.
  *
- * launchd runs one instance of a label at a time, so a heartbeat that lands
- * while the coordinator is still retrying is dropped rather than doubled.
+ * Firing often only works because arriving is cheap. Every scheduled
+ * invocation passes `--catch-up`, and `slotIsSettled` answers from the state
+ * file without opening a socket, so the overwhelmingly common firing — the one
+ * where this slot's brief is already written — costs one file read and an exit.
+ *
+ * launchd runs one instance of a label at a time, so a firing that lands while
+ * the coordinator is still retrying is dropped rather than doubled.
  */
 
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -93,12 +103,13 @@ export const RETRY_EVERY_MINUTES = 15;
 export const RETRY_FOR_MINUTES = 180;
 
 /**
- * How often the scheduler asks whether the current slot still owes a brief.
+ * How often an awake machine re-asks whether the current slot still owes a
+ * brief.
  *
- * The same fifteen minutes as the retry interval, and for the same reason:
- * it is the shortest wait that cannot overlap two model runs, and it bounds
- * how stale the page can be after the machine comes back — a Mac opened at any
- * moment has its overview building within the quarter hour.
+ * The same fifteen minutes as the retry interval, and for the same reason: it
+ * is the shortest wait that cannot overlap two model runs. It does not bound
+ * how long a *sleeping* machine stays stale — `StartInterval` firings are
+ * dropped during sleep, and it is `StartCalendarInterval` that fires on wake.
  */
 export const HEARTBEAT_MINUTES = RETRY_EVERY_MINUTES;
 
@@ -160,7 +171,7 @@ const BAKED_ENV = [
 ];
 
 /**
- * The launchd agent: every day, at each slot, plus the wake-up heartbeat.
+ * The launchd agent: every day, at each slot, plus the two catch-up triggers.
  * Exported for tests.
  *
  * A `StartCalendarInterval` dict with no `Weekday` key fires every day of the
@@ -382,9 +393,7 @@ function installDarwin(slots: Slot[]): number {
     return 1;
   }
   console.log(`Installed — every day at ${formatSlots(slots)}, ${retryNote()}.`);
-  console.log(
-    `  Missed a slot because the Mac was off or asleep? It catches up within ${HEARTBEAT_MINUTES} min of waking.`,
-  );
+  console.log('  Missed a slot because the Mac was off or asleep? It catches up on the next wake.');
   console.log(
     '  On macOS, model work waits for a full wake or AC power, then holds the Mac awake.',
   );
@@ -433,7 +442,7 @@ function installWindows(slots: Slot[]): number {
   }
   console.log(`Installed — every day at ${formatSlots(slots)}, as Scheduled Task "${TASK_NAME}".`);
   console.log(
-    `  The task itself wakes every ${HEARTBEAT_MINUTES} min and does nothing unless the current slot still owes an overview.`,
+    `  The task fires every ${HEARTBEAT_MINUTES} min and does nothing unless the current slot still owes an overview.`,
   );
   console.log(`  output: ${BRIEF_DIR}`);
   console.log('  remove: aula schedule --remove');
