@@ -1,9 +1,9 @@
 # Build the release binaries and attach them to a GitHub release.
 #
-# The darwin targets are built on macOS rather than cross-compiled, so the
-# ad-hoc signature is produced by the platform that will verify it — Apple
-# Silicon refuses a binary with no valid signature at all, and that is the one
-# failure nobody would see until a user downloaded it.
+# The darwin targets are built on macOS because `bun build --compile` leaves
+# them with a signature that does not match their own bytes, and only codesign
+# can repair that. scripts/build.ts re-signs and verifies them; this file just
+# has to keep them on a macOS runner.
 #
 # Asset names are stable on purpose: SETUP.md tells people to curl
 # `releases/latest/download/aula-darwin-arm64`, so renaming one breaks the
@@ -59,11 +59,14 @@ jobs:
             bun run build --target "$target"
           done
 
-      # NOT `codesign --verify`. `bun build --compile` appends the bundle to the
-      # end of the signed Bun runtime, so the ad-hoc linker-signed hashes no
-      # longer cover the whole file and codesign calls it "modified" — while
-      # the kernel loads it happily, which is the only thing that matters here.
-      # Running the binary is the real check, so that is what this does.
+      # Running the binary is NOT sufficient on macOS, and this workflow used to
+      # say the opposite: it dismissed `codesign --verify` as a false alarm
+      # because the kernel loaded the binary anyway. The kernel validates code
+      # pages lazily, so "it started on the build machine" says nothing about a
+      # user's Mac — v0.3.1 passed this smoke test and was then SIGKILLed with
+      # "Code Signature Invalid" on the first Mac that tried to install it.
+      # scripts/build.ts now signs and verifies; the step below is the backstop
+      # that fails the release if that ever stops happening.
       #
       # Each job smoke-tests only what it can execute: an arm64 macOS runner
       # cannot run the x64 build without Rosetta, and neither runner can run
@@ -77,6 +80,16 @@ jobs:
             chmod +x dist/aula-linux-x64
             ./dist/aula-linux-x64 version
           fi
+
+      # Both darwin binaries, including the x64 one no runner here can execute.
+      # --strict is the point: it is what refuses a signature whose hashes do
+      # not cover the bytes on disk.
+      - name: Verify the macOS signatures
+        if: runner.os == 'macOS'
+        run: |
+          for binary in dist/aula-darwin-*; do
+            codesign --verify --strict --verbose=2 "$binary"
+          done
 
       # Runs on BOTH jobs. It used to be macOS-only, which meant the Linux and
       # Windows binaries were published with no verification of any kind.

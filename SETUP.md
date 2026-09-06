@@ -75,10 +75,17 @@ Pick the file for this machine — `uname -sm` says which:
 | `Linux x86_64`       | `aula-linux-x64`       |
 | Windows              | `aula-windows-x64.exe` |
 
+Download beside the destination and rename into place, rather than writing
+`aula` directly. macOS ties a binary's code signature to the file it validated,
+so overwriting one in place — which is what re-running this to update does —
+can leave a signed binary the kernel then refuses to start. The rename is
+atomic and gives each install a fresh file.
+
 ```bash
 mkdir -p ~/.local/bin
-curl -fsSL https://github.com/sorenlouv/aula-cli/releases/latest/download/aula-darwin-arm64 -o ~/.local/bin/aula
-chmod +x ~/.local/bin/aula
+curl -fsSL https://github.com/sorenlouv/aula-cli/releases/latest/download/aula-darwin-arm64 -o ~/.local/bin/aula.new
+chmod +x ~/.local/bin/aula.new
+mv ~/.local/bin/aula.new ~/.local/bin/aula
 ```
 
 Then confirm it runs, in a separate command:
@@ -427,11 +434,19 @@ say to them; the right is what you type:
 - **`aula: command not found` after installing** — `~/.local/bin` is not on
   `PATH` in this shell yet (step 1). Use the full `~/.local/bin/aula`, or open
   a new terminal.
+- **`Killed: 9`, or a crash report naming "Code Signature Invalid"** — the
+  binary's signature does not match its bytes, and macOS refuses to start it.
+  Releases up to and including v0.3.1 shipped that way. Re-run step 1 to fetch
+  a later release; `codesign --verify --strict ~/.local/bin/aula` should print
+  nothing. Do not paper over it with `codesign --force --sign -` — that works,
+  but it means the download is not what it should be, which is worth knowing.
 
 ## Updating
 
-Re-run the curl from step 1; it overwrites the binary in place. Nothing else
-changes — the login, preferences and hosted URL all live in `~/.aula`.
+Re-run the commands from step 1. Use all four of them — the download-then-`mv`
+is what keeps an update from overwriting a running binary in place, which macOS
+can refuse to start afterwards. Nothing else changes: the login, preferences and
+hosted URL all live in `~/.aula`.
 
 ## Uninstall
 

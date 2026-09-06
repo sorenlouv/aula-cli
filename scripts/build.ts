@@ -7,15 +7,15 @@
  * runtime into one executable, so installing aula-cli becomes downloading a
  * file and marking it executable.
  *
- * Cross-compiling from any host works because Bun ships the target runtimes;
- * the macOS outputs carry an ad-hoc signature, which is what Apple Silicon
- * requires to run an unsigned binary at all. Files fetched with curl are not
- * quarantined, so no Gatekeeper prompt stands between the download and the
- * first run.
+ * Cross-compiling the Linux and Windows targets from any host works because Bun
+ * ships the target runtimes. The macOS ones must be built on macOS, because
+ * they have to be re-signed here — see `signAndVerify`. Files fetched with curl
+ * are not quarantined, so no Gatekeeper prompt stands between the download and
+ * the first run.
  */
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import pkg from '../package.json' with { type: 'json' };
 
 type Target = { target: string; out: string };
@@ -48,6 +48,51 @@ function parseTargets(argv: string[]): Target[] {
   return found;
 }
 
+const isDarwin = (target: Target) => target.target.startsWith('bun-darwin');
+
+/**
+ * Re-sign a macOS binary ad-hoc, and refuse to ship one whose signature does
+ * not cover its own bytes.
+ *
+ * `bun build --compile` writes the payload into the Bun runtime *after* the
+ * signature over it was computed, so the output carries a signature that no
+ * longer matches the file. macOS validates code pages lazily as they fault in,
+ * so whether the kernel notices depends on which pages it happens to check —
+ * the same bytes run on the build machine and die with SIGKILL and "Code
+ * Signature Invalid" on a user's Mac. That is how v0.3.1 shipped: CI built it,
+ * ran it, and published a binary that Apple Silicon refused to start.
+ *
+ * The two targets are broken differently. darwin-arm64 got an ad-hoc signature
+ * whose final partial page was hashed zero-padded to 4096 bytes rather than
+ * truncated at codeLimit — one wrong slot; fixed upstream in Bun 1.4.2.
+ * darwin-x64 is not re-signed by Bun at all, so it still carries Bun's own
+ * Developer ID and hardened runtime over 58 modified pages including the
+ * Mach-O header, and is still broken in 1.4.2.
+ *
+ * Signing ad-hoc replaces both, which also drops the hardened runtime. That
+ * only removes restrictions: the entitlements it was lifting (JIT, unsigned
+ * executable memory) need no entitlement once nothing is enforcing them.
+ *
+ * Do not swap the verify for "run the binary" — running it is what failed to
+ * catch this. And do not skip it because `codesign --verify` once looked like
+ * a false alarm; it was reporting a real defect all along.
+ */
+async function signAndVerify(outfile: string): Promise<boolean> {
+  const steps = [
+    ['codesign', '--force', '--sign', '-', '--timestamp=none', outfile],
+    ['codesign', '--verify', '--strict', outfile],
+  ];
+  for (const args of steps) {
+    const proc = Bun.spawn(args, { stdout: 'pipe', stderr: 'pipe' });
+    const [code, err] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+    if (code !== 0) {
+      console.error(`  ${basename(outfile)}: codesign ${args[1]} FAILED\n${err}`);
+      return false;
+    }
+  }
+  return true;
+}
+
 async function build(target: Target, version: string): Promise<number> {
   const outfile = join(DIST, target.out);
   const proc = Bun.spawn(
@@ -71,6 +116,10 @@ async function build(target: Target, version: string): Promise<number> {
     console.error(`  ${target.out}: FAILED\n${err}`);
     return 0;
   }
+  // Before the size is read, and so before SHA256SUMS: signing rewrites the
+  // tail of the file, so a checksum taken first would describe a binary that
+  // is not the one being published.
+  if (isDarwin(target) && !(await signAndVerify(outfile))) return 0;
   return Bun.file(outfile).size;
 }
 
@@ -84,6 +133,23 @@ async function build(target: Target, version: string): Promise<number> {
  */
 const version = process.env.AULA_BUILD_VERSION?.replace(/^v/, '') || pkg.version;
 const targets = parseTargets(process.argv.slice(2));
+
+// `codesign` exists only on macOS, and an unsigned darwin binary is precisely
+// the bug this build step exists to prevent — so refuse to produce one rather
+// than emit something that looks like a release asset and cannot start. The
+// release workflow already builds the darwin targets on a macOS runner.
+if (process.platform !== 'darwin' && targets.some(isDarwin)) {
+  const names = targets
+    .filter(isDarwin)
+    .map((t) => t.out)
+    .join(', ');
+  console.error(
+    `The darwin targets must be built on macOS — this is ${process.platform}.\n` +
+      `Bun leaves ${names} carrying a signature that does not match the file, and\n` +
+      `only codesign can repair that. Build the other targets with --target.`,
+  );
+  process.exit(1);
+}
 
 // A stale binary from a previous run is worse than no binary: it looks like a
 // successful build of code that was never compiled.
