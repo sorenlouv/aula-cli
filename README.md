@@ -10,3 +10,12 @@ Kom nemt igang ved at sige til din agent:
 
 > I want to install Aula CLI. Follow the setup instructions at 
 > https://raw.githubusercontent.com/sorenlouv/aula-cli/main/SETUP.md
+
+Undervejs spørger agenten én gang, hvilke funktioner du vil have med:
+
+- **Et privat link, du kan læse på telefonen** — overblikket ligger på claude.ai, hvor kun du kan se det.
+- **Opdatering morgen og aften** — overblikket dannes af sig selv kl. 06 og kl. 18, også i weekenden.
+- **Jeres egen kalender** — aftaler fra Google Kalender vises sammen med skolens og børnehavens.
+- **Fortæl hvad der er vigtigt for jer** — bestemte afsendere eller emner bliver altid fremhævet, andre nedtonet.
+
+Ingen af dem er nødvendige for at komme i gang, og du kan slå dem til senere.

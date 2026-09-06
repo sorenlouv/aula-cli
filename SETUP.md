@@ -1,15 +1,17 @@
 # Setting up aula-cli
 
 You are setting this up for someone who is not a developer. When you are done
-they have a daily overview of their children's school and daycare at a
-claude.ai address they can bookmark — it refreshes itself every morning and
-every evening, so they never have to open Claude Code again to read it.
+they have a daily overview of their children's school and daycare — a page on
+this machine, and, if they want it, a claude.ai address they can bookmark that
+refreshes itself every morning and every evening, so they never have to open
+Claude Code again to read it.
 
-Work steps 0–8 in order, then offer the optional extras. In a normal run the
-user is needed twice: the login page (step 2), where they type their MitID
-username and approve on their phone, and the optional extras at the end.
-Everything else, run without asking. When something fails, follow its section
-— a failure can add a stop, such as a login the user has to run themselves.
+Work steps 0–11 in order. Four of them are features the user chooses in step 2
+— skip the ones they did not pick, and never turn on one nobody asked for. In a
+normal run the user is needed twice: the question in step 2, and the login page
+in step 3, where they type their MitID username and approve on their phone.
+Everything else, run without asking. When something fails, follow its section —
+a failure can add a stop, such as a login the user has to run themselves.
 
 Say in one sentence what you are about to do before each step, and report the
 outcome after it. Speak plainly — the reader is a parent, not an engineer.
@@ -19,8 +21,8 @@ This document is the whole of the setup. `AGENTS.md` is for people changing
 the code and has nothing you need here; the "From source" section at the end
 is likewise not part of a normal install.
 
-Most commands answer in seconds. Two take minutes — the login (step 2) and
-the first overview (step 5) — and each says so where it is used.
+Most commands answer in seconds. Two take minutes — the login (step 3) and
+the first overview (step 7) — and each says so where it is used.
 
 ## 0. The one prerequisite
 
@@ -53,10 +55,10 @@ Three things go wrong here, all of them silently:
   in a new command.
 - **Claude Code needs a paid plan** — Pro, Max, Team or Enterprise. The free
   claude.ai plan does not include it. If the user is on the free plan, stop
-  here and tell them: steps 5–7 cannot work, and the rest is not worth doing
+  here and tell them: steps 6–9 cannot work, and the rest is not worth doing
   on its own.
 
-`claude` also has to be logged in. If it is not, step 5 is where you find out;
+`claude` also has to be logged in. If it is not, step 7 is where you find out;
 see Debugging.
 
 ## 1. Install aula
@@ -92,7 +94,51 @@ command -v aula || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 That takes effect in the next command, not this one. Until it does, use the
 full `~/.local/bin/aula`.
 
-## 2. Log in with MitID
+## 2. Ask which features they want
+
+Everything up to here was unavoidable. What follows is a choice, and it is the
+only one in the setup: ask it once, now, before anything long-running, and then
+run the rest without stopping again except for the login.
+
+Ask it as a **single question with checkboxes** if your interface has a
+multiple-choice control, so the user ticks what they want in one pass;
+otherwise print the list and let them answer in prose. Ask in the language the
+user has been speaking — the Danish below is the reference wording, because
+that is who this is for.
+
+> **Hvilke funktioner vil du gerne have med?**
+>
+> - [x] **Et privat link, du kan læse på telefonen.** Overblikket lægges på
+>       claude.ai, hvor kun du kan se det, og opdateres samme sted hver gang.
+>       *(anbefalet)*
+> - [x] **Opdatering morgen og aften.** Overblikket dannes af sig selv kl. 06
+>       og kl. 18, også i weekenden, så det altid er nyt. *(anbefalet)*
+> - [ ] **Jeres egen kalender.** Aftaler fra Google Kalender vises sammen med
+>       skolens og børnehavens i overblikket.
+> - [ ] **Fortæl hvad der er vigtigt for jer.** Bestemte afsendere eller emner
+>       bliver altid fremhævet, andre nedtonet.
+>
+> Ingen af dem er nødvendige for at komme i gang, og de kan slås til senere.
+
+The first two are ticked because they are what the tool is for: without them
+the overview is a page on one machine that somebody has to remember to
+regenerate. The other two ask something of the user — a connector, or a
+sentence about their family — so they are offered, not assumed.
+
+How to read the answer:
+
+- "Alle" or "bare sæt det hele op" is all four.
+- No answer, or an answer that only says "kom i gang", is the two recommended
+  ones and nothing else. Never the calendar by default: it reads personal data
+  nobody asked you to read.
+- An explicit no to everything is an answer too. Honour it — the overview still
+  works as a page on this machine, and step 11 tells them how to add the rest.
+
+Write down what they picked. Steps 6, 8, 9 and 10 each run only if their
+feature was chosen, and each says so in its heading. Do not raise them again as
+you reach them; they were asked once, here.
+
+## 3. Log in with MitID
 
 The whole login happens on one page in the user's own browser. This is the
 expected stop, and your only job is to hand over the link and wait.
@@ -145,7 +191,7 @@ CAP008 more likely.
 
 Verify with `aula status --text`.
 
-## 3. Health check
+## 4. Health check
 
 ```bash
 aula doctor --text
@@ -160,7 +206,7 @@ warnings, and 1 only on a `FAIL`.
 Act on `WARN` and `FAIL` lines: run the command if the line gives you one,
 otherwise tell the user what it said before moving on.
 
-## 4. Install the skill
+## 5. Install the skill
 
 This is what lets the user ask about Aula in plain language later. Re-running
 overwrites it; the user needs a new session before it loads.
@@ -171,7 +217,40 @@ aula install-skill
 
 For Codex instead of Claude, `aula install-skill codex`.
 
-## 5. The first overview
+## 6. Their own calendar — only if they picked it
+
+Skip this whole section if they did not. Nothing is read until a calendar is
+named here: an installation where nobody named one reads nobody's calendar.
+
+Personal appointments then appear among the Aula cards in the overview, ordered
+by day, each with its own summary and a reason it is there. It is set up before
+the first overview so that the first one they see already has them in it.
+
+```bash
+aula calendars                         # every calendar, with the ones being read marked
+aula calendars set "Familie" "Privat"  # read exactly these two, and no others
+aula calendars set none                # read none of them
+```
+
+Show the list and let the user pick. Set exactly the calendars they name, and
+only when they name one — this writes to `~/.aula/config.json`. Pass the
+exact displayed names (or the id shown when two
+calendars share a name), never a list position, which may point at something
+else on a later read. `set` states the whole answer: it reads what you name
+and stops reading everything else, so pass every calendar that should be read,
+not only a new one.
+
+It reports how many appointments each newly added calendar holds in the
+window the overview reads. Pass that back to the user, and say so if one comes
+back empty when they expected otherwise.
+
+**If it says Google Calendar is not connected**, it prints the few clicks —
+Claude → Settings → Connectors → Google Calendar → Connect. Hand those to the
+user and wait: there is no API key or calendar-link alternative. If they would
+rather not do it now, move on. `aula calendars` works at any time, nothing else
+in the setup depends on it, and step 11 reminds them.
+
+## 7. The first overview
 
 ```bash
 aula new
@@ -181,21 +260,24 @@ aula new
 calls `claude` to write the overview, then opens the page. This is the step
 that fails if `claude` is missing or logged out — see Debugging.
 
-## 6. Put it online
+## 8. Put it online — only if they picked it
 
 ```bash
 aula publish
 ```
 
-This is the whole point of the setup: it publishes the overview as an artifact
-on claude.ai and prints the URL on the last line of output. **Keep that URL —
-step 8 needs it.**
+This publishes the overview as an artifact on claude.ai and prints the URL on
+the last line of output. **Keep that URL — step 11 needs it.**
 
 The page is private to the user's own claude.ai account. Every later run,
 including every scheduled one, redeploys to that same address, so a bookmark
 never goes stale.
 
-## 7. Have it run morning and evening
+If they did not pick it, run nothing here. The overview stays a page on this
+machine, `aula open` reopens it, and `aula publish` puts it online the day they
+change their mind.
+
+## 9. Have it run morning and evening — only if they picked it
 
 ```bash
 aula schedule
@@ -221,57 +303,66 @@ your user `PATH` and environment instead, and the printed cron lines carry a
 `PATH` of their own — on both, set the `AULA_*` values where the job will see
 them.
 
-## 8. Hand over
+Without the hosted copy from step 8 a scheduled run still rebuilds the local
+page, so `aula open` is current without anyone having to ask for it.
 
-Lead with the address. Say something like this, in the language the user has
-been speaking:
+If they did not pick this, run nothing here, and say plainly what that means:
+the overview is current as of now and stays that way until somebody runs
+`aula new`.
 
-> Your overview is at **[the URL from step 6]**. Bookmark it — on your phone
+## 10. What matters to them — only if they picked it
+
+The overview can be told what to always highlight and what to leave out. Ask
+what matters — a sender they never want to miss, a child, a subject, something
+they are tired of seeing — and write each answer down as a sentence in their
+own words:
+
+```bash
+aula remember "vis altid beskeder fra Johns far"
+```
+
+One sentence per `remember`; `aula preferences` lists them and `aula forget <n>`
+drops one. This is prose, not a syntax — record what they said, not a rule you
+inferred from it.
+
+It applies to the next overview. If they want to see the difference straight
+away, run `aula new` once more: most of the reading is still cached, so it is
+mainly the model call.
+
+## 11. Hand over
+
+Lead with where the overview is.
+
+**If it is online (step 8),** lead with the address. Say something like this,
+in the language the user has been speaking:
+
+> Your overview is at **[the URL from step 8]**. Bookmark it — on your phone
 > too. It updates itself every morning at 06:00 and every evening at 18:00,
 > weekends included, so it is always current, and you never need to open Claude
 > Code to read it. If your machine is off or asleep when that happens, it
 > catches up shortly after you open it again. You will need to be signed in to
 > claude.ai to see it; it is private to your account.
 
-Then mention, briefly, that they can also ask about Aula in plain language in
-a new session, and that the overview can be taught what matters to them:
+Drop the two sentences about the times if they left the schedule off, and say
+instead that a fresh overview is one `aula new` away.
 
-```bash
-aula remember "vis altid beskeder fra Johns far"
-```
+**If it is not,** the overview is a page on this machine:
 
-## Optional extra
+> Your overview is on this computer. `aula open` opens the newest one, and
+> `aula new` makes a fresh one. [If they turned the schedule on: It is rebuilt
+> every morning at 06:00 and every evening at 18:00, weekends included, so what
+> `aula open` shows you is always current.]
 
-Offer this now.
+Then, either way, mention that they can ask about Aula in plain language in a
+new session — and name what they left off in step 2, with the one command that
+turns it on, so that "not now" is not a dead end:
 
-**Their own calendar.** Personal appointments then appear among the Aula
-cards in the overview, ordered by day, each with its own summary and a reason
-it is there.
-
-```bash
-aula calendars                         # every calendar, with the ones being read marked
-aula calendars set "Familie" "Privat"  # read exactly these two, and no others
-aula calendars set none                # read none of them
-```
-
-Needs Google Calendar connected in Claude; there is no API key or
-calendar-link alternative, and `calendars` prints the few clicks when the
-connector is missing.
-
-Show the list and let the user pick. Set exactly the calendars they name, and
-only when they name one — this writes to `~/.aula/config.json`. Pass the
-exact displayed names (or the id shown when two
-calendars share a name), never a list position, which may point at something
-else on a later read. `set` states the whole answer: it reads what you name
-and stops reading everything else, so pass every calendar that should be read,
-not only a new one.
-
-It reports how many appointments each newly added calendar holds in the
-window the overview reads. Pass that back to the user, and say so if one comes
-back empty when they expected otherwise.
-
-Nothing is read until a calendar is named here, and this can be done at any
-time — it is not tied to setup.
+| Left off                     | Turn it on later    |
+| ---------------------------- | ------------------- |
+| A private link for the phone | `aula publish`      |
+| Morning and evening updates  | `aula schedule`     |
+| Their own calendar           | `aula calendars`    |
+| What matters to them         | `aula remember "…"` |
 
 ## Debugging
 
@@ -279,12 +370,12 @@ time — it is not tied to setup.
   missing (step 0). Install it, then re-run `schedule` so the new path is
   baked in.
 - **Exit code 2 from a read command** — the login expired. Log in again
-  (step 2).
+  (step 3).
 - **Exit code 2 from `login` itself** — that attempt failed. Read the message
   and fix its cause; retrying blindly risks CAP008.
 - **`Could not start the local login page`** — `login` has no other surface:
   the username is typed there and the approval is shown there. The user has to
-  run `aula login` themselves on that machine (step 2).
+  run `aula login` themselves on that machine (step 3).
 - **The login gave up waiting** — nobody answered the page in time. Nothing
   reached MitID, so there is no session left over: run `aula login` again once
   the user is ready.
