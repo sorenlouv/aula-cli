@@ -46,7 +46,7 @@ import {
   resolveConfiguredSelection,
 } from './calendar/selection.ts';
 import { AulaApiError, AulaAuthError, AulaClient, CALENDAR_MAX_SPAN_DAYS } from './client.ts';
-import { readConfig, updateConfig } from './config.ts';
+import { briefSlots, readConfig, updateConfig } from './config.ts';
 import {
   buildDigest,
   collectAlbums,
@@ -77,7 +77,7 @@ import { deployArtifact, readTarget, setTarget } from './brief/deploy.ts';
 import { explain } from './brief/rank.ts';
 import { cmd } from './runtime.ts';
 import { ClaudeMissingError } from './llm/claude.ts';
-import { BRIEF_DIR, loadState, recordDeploy, saveState, todayIsComplete } from './brief/state.ts';
+import { BRIEF_DIR, loadState, recordDeploy, saveState, slotIsComplete } from './brief/state.ts';
 import { runDoctor } from './doctor.ts';
 import { AulaSessionError, EXIT, UsageError } from './errors.ts';
 import { fmt, openInBrowser } from './io.ts';
@@ -95,6 +95,7 @@ import { parseSkillTarget, runInstallSkill } from './install-skill.ts';
 import { buildVersion } from './runtime.ts';
 import { runSchedule } from './schedule.ts';
 import { coordinateScheduledBrief } from './scheduled-brief.ts';
+import { currentSlotStart } from './slots.ts';
 import { SUPPORTED_WIDGET_IDS, type WeekPlan } from './integrations/index.ts';
 import { addLocalDays, isoDate, localIsoDate } from './integrations/types.ts';
 import type { CommonFile, Contact, ThreadDetail } from './types.ts';
@@ -123,8 +124,9 @@ Everyday:
                                beside the school's own events
   calendars set <name> [...]   Read exactly these, by displayed name
   calendars set none           Read none of them
-  schedule [--at HH:MM]        Generate the overview automatically every weekday,
-                               retrying through the morning if the Mac was asleep
+  schedule [--at HH:MM,...]    Generate the overview automatically every day at
+                               06:00 and 18:00, catching up within minutes of a
+                               wake if the machine was off or asleep
   schedule --remove            Stop generating it automatically
   remember "<ønske>"           Teach the overview what matters to you — a sender
                                to always highlight, something you never need
@@ -143,7 +145,7 @@ Options for new:
   --no-open                    Do not open the page (a pipe or scheduler never opens)
   --no-llm                     Danish rules only — skip the model calls
   --no-deploy                  Do not update the hosted copy this run
-  --catch-up                   Do nothing if today's overview is already complete
+  --catch-up                   Do nothing if this slot's overview is already complete
                                (every scheduled trigger passes this)
   --explain                    Print model priority, date placement and sources
   --pdf, --png                 Also write a PDF / PNG
@@ -169,8 +171,8 @@ type them:
   tasks / assignments / reminders / homework
                                Homework, per vendor and combined
   refresh-stepup               Restore step-up so sensitive threads read again
-  scheduled-run                What the morning schedule starts: waits through
-                               sleep, then generates the overview
+  scheduled-run                What the schedule starts: waits through sleep,
+                               then generates the overview if this slot needs one
   doctor                       Call every endpoint and report status + timing
   cache status|clear           Inspect or drop the response cache
   raw <method> [k=v ...]       Any un-wrapped Aula read method
@@ -278,17 +280,20 @@ async function main(): Promise<number> {
   if (command === 'remember') return runRemember(positionals);
   if (command === 'preferences') return runPreferences(positionals);
   if (command === 'forget') return runForget(positionals[0]);
-  // The scheduler's retries: a morning that already went right costs nothing,
-  // not even a login check — this is answered from the state file alone.
+  // The scheduler's retries and its wake-up heartbeat: a slot that already
+  // went right costs nothing, not even a login check — this is answered from
+  // the state file alone. Deliberately `slotIsComplete` and not
+  // `slotIsSettled`: a spent retry window is the coordinator's business, and
+  // when it decides an attempt is warranted this must not refuse it.
   if (command === 'new' && values['catch-up'] === true) {
     const state = loadState();
-    if (todayIsComplete(state)) {
+    if (slotIsComplete(state, currentSlotStart(new Date(), briefSlots()))) {
       return emit({ skipped: true, lastRun: state.lastRun ?? null }, asText, (r) => {
         const at = r.lastRun ? new Date(r.lastRun.at) : null;
         const when = at
           ? at.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' })
           : '';
-        return `Dagens oversigt er allerede komplet${when ? ` (kl. ${when})` : ''} — intet at gøre.`;
+        return `Oversigten er allerede opdateret${when ? ` (kl. ${when})` : ''} — intet at gøre.`;
       });
     }
   }

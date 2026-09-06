@@ -1,9 +1,10 @@
 # `aula new` — the daily overview
 
 Built and running. `bun src/cli.ts new` writes a self-contained HTML page to
-`~/.aula/brief/`; `aula schedule` runs it weekdays at 06:30 and retries through
-the morning. PDF and PNG exist behind `--pdf`/`--png` but the scheduled run
-produces HTML only. The hosted copy is off unless `aula publish` configures it.
+`~/.aula/brief/`; `aula schedule` runs it every day at 06:00 and 18:00, retries
+through the slot, and catches up shortly after a wake if the machine missed
+one. PDF and PNG exist behind `--pdf`/`--png` but the scheduled run produces
+HTML only. The hosted copy is off unless `aula publish` configures it.
 
 The goal is not "Aula, but nicer" — it is that not opening Aula stops costing
 anything. See [GOALS.md](GOALS.md).
@@ -514,10 +515,17 @@ count of thirteen attempts, which only holds while attempts are quick — at a
 ten-minute extraction timeout, two timeouts plus the wait between them is a
 thirty-five-minute attempt, and thirteen of those is a seven-hour morning.
 
-Every generation passes `--catch-up`; `state.json`'s `lastRun.complete` stops
-retries after a complete run. Retryable fetch failures, model/deploy degradation
-and any rendered invariant violation keep it false. Persistent problems remain
-visible in *Datastatus*.
+Every generation passes `--catch-up`, which is what makes both the retries and
+the quarter-hourly wake-up heartbeat free: `slotIsComplete` compares
+`state.json`'s `lastRun` against the start of the slot the clock is in and
+answers from that one file, without opening a socket. Retryable fetch failures,
+model/deploy degradation and any rendered invariant violation keep `complete`
+false. Persistent problems remain visible in *Datastatus*.
+
+A spent window is written down too, as `exhaustedSlot`. Without it the
+heartbeat that exists to restart the coordinator would hand a permanent failure
+a fresh three hours every fifteen minutes until the next slot — the nine-hour
+morning the window was introduced to prevent.
 
 ## Risks
 

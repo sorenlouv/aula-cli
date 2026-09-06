@@ -7,13 +7,19 @@
  * macOS suspends it with the machine and resumes it on the next wake. The
  * expensive child starts only on AC or in a full graphical wake, and only that
  * child is wrapped in caffeinate.
+ *
+ * It is also started by the wake-up heartbeat, several times an hour, whether
+ * or not a slot has just begun — so the first thing it does is ask whether the
+ * slot the clock is in is settled, and the overwhelmingly common answer sends
+ * it home before it has opened a socket.
  */
 
 import { join } from 'node:path';
-import { loadState, todayIsComplete } from './brief/state.ts';
-import { localIsoDate } from './integrations/types.ts';
+import { loadState, recordExhausted, saveState, slotIsSettled } from './brief/state.ts';
+import { briefSlots } from './config.ts';
 import { cliInvocation, isCompiled } from './runtime.ts';
 import { RETRY_EVERY_MINUTES, RETRY_FOR_MINUTES } from './schedule.ts';
+import { clock, currentSlotStart, type Slot } from './slots.ts';
 import { errorMessage } from './validation.ts';
 
 const REPO = join(import.meta.dir, '..');
@@ -48,6 +54,13 @@ export const INCOMPLETE_RETRY_MS = RETRY_EVERY_MINUTES * 60_000;
  * start, which is what lets it stay a duration without punishing the case this
  * coordinator exists for: a DarkWake defer polls without starting it, so a Mac
  * that wakes at noon still gets the full window from noon.
+ *
+ * Because it starts on first use rather than at the slot time, the window
+ * cannot be recomputed by a later process — so a coordinator that spends one
+ * writes the fact to the state file before exiting. Otherwise the wake-up
+ * heartbeat, which exists to restart exactly this process, would hand a
+ * permanent failure a fresh three hours every quarter of an hour until the
+ * next slot.
  */
 export const RETRY_WINDOW_MS = RETRY_FOR_MINUTES * 60_000;
 
@@ -82,7 +95,11 @@ export function shouldDeferForDarkWake(state: MacPowerState): boolean {
 
 export type ScheduledBriefDependencies = {
   now: () => Date;
-  isComplete: (now: Date) => boolean;
+  slots: () => Slot[];
+  /** Nothing left to attempt for this slot: it succeeded, or its window is spent. */
+  isSettled: (slotStart: Date) => boolean;
+  /** Remember that this slot's retry window is spent, so a restart honours it. */
+  markExhausted: (slotStart: Date) => void;
   powerState: () => MacPowerState;
   runBrief: () => Promise<number>;
   wait: (milliseconds: number) => Promise<void>;
@@ -91,7 +108,16 @@ export type ScheduledBriefDependencies = {
 
 const defaults: ScheduledBriefDependencies = {
   now: () => new Date(),
-  isComplete: (now) => todayIsComplete(loadState(), now),
+  slots: briefSlots,
+  isSettled: (slotStart) => slotIsSettled(loadState(), slotStart),
+  markExhausted: (slotStart) => {
+    // Re-read rather than reusing the state this process loaded hours ago: the
+    // brief runs it spawned have written their own outcomes to the same file
+    // since, and writing back a stale copy would undo them.
+    const state = loadState();
+    recordExhausted(state, slotStart);
+    saveState(state);
+  },
   powerState: readMacPowerState,
   runBrief: async () => {
     const child = Bun.spawn([CAFFEINATE, '-i', '-s', ...cliInvocation(), ...RUN_ARGS], {
@@ -109,27 +135,34 @@ const defaults: ScheduledBriefDependencies = {
 };
 
 export type ScheduledBriefOutcome = {
-  status: 'complete' | 'day-ended' | 'retries-exhausted';
+  status: 'complete' | 'slot-ended' | 'retries-exhausted';
   attempts: number;
 };
 
 /**
  * Wait through DarkWake, then retry incomplete runs until one succeeds, the
- * declared window's attempts run out, or the local day ends.
+ * declared window runs out, or the clock leaves the slot this started in.
+ *
+ * Leaving the slot ends the process rather than rolling into the next one:
+ * launchd runs one instance of a label at a time, so a coordinator still alive
+ * at 18:00 would be the reason the evening's calendar trigger was dropped.
  */
 export async function coordinateScheduledBrief(
   overrides: Partial<ScheduledBriefDependencies> = {},
 ): Promise<ScheduledBriefOutcome> {
   const deps = { ...defaults, ...overrides };
-  const day = localIsoDate(deps.now());
+  const slots = deps.slots();
+  const slotStart = currentSlotStart(deps.now(), slots);
   let attempts = 0;
   let wasDeferred = false;
   let windowOpenedAt: number | null = null;
 
   for (;;) {
     const now = deps.now();
-    if (localIsoDate(now) !== day) return { status: 'day-ended', attempts };
-    if (deps.isComplete(now)) return { status: 'complete', attempts };
+    if (currentSlotStart(now, slots).getTime() !== slotStart.getTime()) {
+      return { status: 'slot-ended', attempts };
+    }
+    if (deps.isSettled(slotStart)) return { status: 'complete', attempts };
 
     const power = deps.powerState();
     if (shouldDeferForDarkWake(power)) {
@@ -156,8 +189,10 @@ export async function coordinateScheduledBrief(
     }
 
     const after = deps.now();
-    if (localIsoDate(after) !== day) return { status: 'day-ended', attempts };
-    if (deps.isComplete(after)) return { status: 'complete', attempts };
+    if (currentSlotStart(after, slots).getTime() !== slotStart.getTime()) {
+      return { status: 'slot-ended', attempts };
+    }
+    if (deps.isSettled(slotStart)) return { status: 'complete', attempts };
     // Would the next attempt start after the window closes? Asked before the
     // wait rather than after it, so a spent budget ends the process now instead
     // of sleeping a quarter of an hour to discover the same thing.
@@ -165,10 +200,11 @@ export async function coordinateScheduledBrief(
       after.getTime() - (windowOpenedAt ?? after.getTime()) + INCOMPLETE_RETRY_MS >
       RETRY_WINDOW_MS
     ) {
+      deps.markExhausted(slotStart);
       // The run's own notes are already in this log — stderr is inherited — so
       // this line says what the scheduler decided, not what went wrong.
       deps.log(
-        `Scheduled brief gave up after ${attempts} attempts in ${RETRY_FOR_MINUTES} minutes; see the notes above. Tomorrow's schedule tries again.`,
+        `Scheduled brief gave up on the ${clock({ hour: slotStart.getHours(), minute: slotStart.getMinutes() })} overview after ${attempts} attempts in ${RETRY_FOR_MINUTES} minutes; see the notes above. The next slot tries again.`,
       );
       return { status: 'retries-exhausted', attempts };
     }

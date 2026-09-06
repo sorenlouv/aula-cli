@@ -121,6 +121,32 @@ fallback sources.
 
 ## Non-obvious behaviour
 
+- **The schedule's unit is a slot, not a day.** `aula schedule` installs 06:00
+  and 18:00, every day of the week, and `slots.ts` defines the half-open
+  interval each one owns — 06:00 until 18:00, then 18:00 until 06:00. Every
+  instant belongs to exactly one, which is what gives a laptop opened at 14:00
+  something to ask about. The ledger check was `todayIsComplete` while there
+  was one run a day; at 18:00 that read the morning's `complete: true` and the
+  evening overview could never have existed.
+- **The plist has two triggers, and the second one is why the page stays
+  fresh.** `StartCalendarInterval` fires at the slot times exactly;
+  `StartInterval` plus `RunAtLoad` is the wake-up heartbeat, and launchd starts
+  an overdue interval the moment the Mac wakes. Calendar entries alone leave a
+  machine that was shut across a slot with no trigger until the next one —
+  which, together with a `Weekday` of 1–5 on all sixty-five of them, is how the
+  hosted page came to sit two days stale every weekend. The heartbeat is
+  affordable only because `--catch-up` answers a settled slot from one file
+  read without opening a socket; do not add work before that check.
+- **A spent retry window is written to `state.json` as `exhaustedSlot`.** The
+  coordinator's three hours start at the first attempt that *ran*, so a Mac
+  that wakes at noon still gets all of them — which means a later process
+  cannot recompute the window and has to be told. Without it the heartbeat
+  hands a permanent failure three fresh hours every fifteen minutes until the
+  next slot. It is anchored to the slot rather than kept on `lastRun`, so it
+  expires by itself and no later run can clear it.
+- **The slot times are in `~/.aula/config.json` as well as in the plist.** A
+  plist cannot be asked what it says, and the run a heartbeat starts has to
+  know which slot it is in. `aula schedule` writes both, config first.
 - **Two caches, and `cache status` reports both.** Remote *responses* — Aula,
   the vendor weekly plans and the Google Calendar reads — share one TTL'd
   `ResponseCache` in `~/.aula/cache/responses`; the model's *layout* is cached
