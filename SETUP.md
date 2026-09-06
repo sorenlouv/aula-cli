@@ -206,10 +206,11 @@ the times, `--remove` to stop. On macOS this installs a launchd agent, on
 Windows a Scheduled Task; on Linux it prints cron lines to install by hand.
 
 **The machine does not have to be on.** A laptop asleep at 06:00 is the normal
-case, not the exception. The job waits for a real wake rather than burning its
-trigger on a Power Nap, retries through the slot, and — if the machine was shut
-or shut down across the whole slot — catches up within about fifteen minutes of
-being opened again. The user never has to remember to leave it running.
+case, not the exception. macOS starts a missed slot the next time the machine
+wakes, and a machine that was switched off runs one when it is logged back in;
+in both cases the job then waits for a real wake rather than burning its trigger
+on a Power Nap, and retries through the slot. The user never has to remember to
+leave it running.
 
 On macOS the agent runs with a fixed `PATH` — launchd hands it no copy of
 your shell's — so the schedule bakes in where `claude` lives, and whichever of
@@ -228,7 +229,7 @@ been speaking:
 > Your overview is at **[the URL from step 6]**. Bookmark it — on your phone
 > too. It updates itself every morning at 06:00 and every evening at 18:00,
 > weekends included, so it is always current, and you never need to open Claude
-> Code to read it. If your machine is off or asleep when that happens it
+> Code to read it. If your machine is off or asleep when that happens, it
 > catches up shortly after you open it again. You will need to be signed in to
 > claude.ai to see it; it is private to your account.
 
