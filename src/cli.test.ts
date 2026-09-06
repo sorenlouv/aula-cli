@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { cmd } from './runtime.ts';
+import { currentSlotStart } from './slots.ts';
 import { installFakeClaude } from './testing/fake-claude.ts';
 
 // Bun's test runner otherwise defaults to UTC while the child CLI process uses
@@ -682,7 +683,7 @@ test('a failed publish leaves no url behind', () => {
   assert.equal(existsSync(join(box.dir, 'config.json')), false);
 });
 
-test('new --catch-up does nothing — not even a request — once the day is complete', () => {
+test('new --catch-up does nothing — not even a request — once this slot is complete', () => {
   const box = sandbox();
   mkdirSync(join(box.dir, 'brief'), { recursive: true });
   const today = new Date();
@@ -693,8 +694,34 @@ test('new --catch-up does nothing — not even a request — once the day is com
   );
   const result = box.run('new', '--catch-up', '--text');
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /allerede komplet/);
+  assert.match(result.stdout, /allerede opdateret/);
   assert.deepEqual(result.requests, []);
+});
+
+/**
+ * The regression that left the family's hosted page two days stale. The check
+ * used to be `todayIsComplete`, so the 18:00 run read the 06:00 run's
+ * `complete: true`, decided the day was covered and generated nothing —
+ * the evening overview could never have existed.
+ *
+ * Stamped one minute before whatever slot the clock is in right now, so the
+ * assertion means the same thing whatever time of day the suite runs at.
+ */
+test('new --catch-up regenerates when the complete run belongs to the previous slot', () => {
+  const box = sandbox();
+  mkdirSync(join(box.dir, 'brief'), { recursive: true });
+  const previousSlot = new Date(currentSlotStart(new Date()).getTime() - 60_000);
+  const day = `${previousSlot.getFullYear()}-${String(previousSlot.getMonth() + 1).padStart(2, '0')}-${String(previousSlot.getDate()).padStart(2, '0')}`;
+  writeFileSync(
+    join(box.dir, 'brief', 'state.json'),
+    JSON.stringify({
+      seen: {},
+      lastRun: { day, at: previousSlot.toISOString(), complete: true },
+    }),
+  );
+  const result = box.run('new', '--catch-up', '--no-llm', '--no-deploy', '--no-open');
+  assert.equal(result.code, 0, result.stderr);
+  assert.ok(result.requests.length > 0, 'the new slot should be generated');
 });
 
 test('new --catch-up runs when the last run was incomplete', () => {

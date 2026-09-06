@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import {
   coordinateScheduledBrief,
   DEFER_POLL_MS,
@@ -7,7 +7,8 @@ import {
   shouldDeferForDarkWake,
   type MacPowerState,
 } from './scheduled-brief.ts';
-import { scheduleTimes } from './schedule.ts';
+import { RETRY_EVERY_MINUTES, RETRY_FOR_MINUTES } from './schedule.ts';
+import { DEFAULT_SLOTS } from './slots.ts';
 
 describe('shouldDeferForDarkWake', () => {
   test('defers only a positively identified battery DarkWake', () => {
@@ -20,6 +21,18 @@ describe('shouldDeferForDarkWake', () => {
 
 describe('coordinateScheduledBrief', () => {
   const morning = new Date(2026, 7, 25, 6, 30);
+  // Every case pins the schedule: these tests must not change meaning because
+  // the machine running them has `aula schedule --at` set to something else.
+  const slots = () => DEFAULT_SLOTS;
+  /**
+   * Always stubbed, never defaulted. The real one writes to `~/.aula`, and
+   * `bun test src/` stays out of the user's own install entirely.
+   */
+  let exhausted: Date[] = [];
+  const markExhausted = (slotStart: Date) => exhausted.push(slotStart);
+  beforeEach(() => {
+    exhausted = [];
+  });
 
   test('waits through DarkWake, then runs once after a full wake', async () => {
     const power: MacPowerState[] = [
@@ -33,7 +46,9 @@ describe('coordinateScheduledBrief', () => {
 
     const outcome = await coordinateScheduledBrief({
       now: () => morning,
-      isComplete: () => complete,
+      slots,
+      markExhausted,
+      isSettled: () => complete,
       powerState: () => power.shift() ?? { source: 'battery', fullWake: true },
       runBrief: async () => {
         runs += 1;
@@ -62,7 +77,9 @@ describe('coordinateScheduledBrief', () => {
 
     const outcome = await coordinateScheduledBrief({
       now: () => morning,
-      isComplete: () => runs === 2,
+      slots,
+      markExhausted,
+      isSettled: () => runs === 2,
       powerState: () => ({ source: 'ac', fullWake: false }),
       runBrief: async () => {
         runs += 1;
@@ -90,7 +107,9 @@ describe('coordinateScheduledBrief', () => {
 
     const outcome = await coordinateScheduledBrief({
       now: () => new Date(clock),
-      isComplete: () => false,
+      slots,
+      markExhausted,
+      isSettled: () => false,
       powerState: () => ({ source: 'ac', fullWake: true }),
       runBrief: async () => {
         runs += 1;
@@ -107,13 +126,16 @@ describe('coordinateScheduledBrief', () => {
     // the launchd slots `scheduleTimes` writes for the same window — the two
     // derive from the same constants and this is what keeps them saying the
     // same thing.
-    const slots = scheduleTimes({ hour: 6, minute: 30 }).length;
-    expect(outcome).toEqual({ status: 'retries-exhausted', attempts: slots });
-    expect(runs).toBe(slots);
+    const allowed = 1 + RETRY_FOR_MINUTES / RETRY_EVERY_MINUTES;
+    expect(outcome).toEqual({ status: 'retries-exhausted', attempts: allowed });
+    expect(runs).toBe(allowed);
     // One wait fewer than attempts: the last failure gives up rather than
     // sleeping through a quarter hour it has no intention of using.
-    expect(waits).toEqual(Array(slots - 1).fill(INCOMPLETE_RETRY_MS));
-    expect(logs.at(-1)).toContain('gave up');
+    expect(waits).toEqual(Array(allowed - 1).fill(INCOMPLETE_RETRY_MS));
+    expect(logs.at(-1)).toContain('gave up on the 06:00 overview');
+    // Written down, or the wake-up heartbeat starts a fresh three hours a
+    // quarter of an hour from now, and again after that, until 18:00.
+    expect(exhausted).toEqual([new Date(2026, 7, 25, 6, 0)]);
   });
 
   test('a slow run spends the window in wall-clock time, not in attempts', async () => {
@@ -126,7 +148,9 @@ describe('coordinateScheduledBrief', () => {
 
     const outcome = await coordinateScheduledBrief({
       now: () => new Date(clock),
-      isComplete: () => false,
+      slots,
+      markExhausted,
+      isSettled: () => false,
       powerState: () => ({ source: 'ac', fullWake: true }),
       runBrief: async () => {
         runs += 1;
@@ -161,7 +185,9 @@ describe('coordinateScheduledBrief', () => {
 
     const outcome = await coordinateScheduledBrief({
       now: () => new Date(clock),
-      isComplete: () => runs === 1,
+      slots,
+      markExhausted,
+      isSettled: () => runs === 1,
       powerState: () => power.shift() ?? { source: 'ac', fullWake: true },
       runBrief: async () => {
         runs += 1;
@@ -177,14 +203,21 @@ describe('coordinateScheduledBrief', () => {
     expect(outcome).toEqual({ status: 'complete', attempts: 1 });
   });
 
-  test('stops instead of generating yesterday after the local day changes', async () => {
-    const nextDay = new Date(2026, 7, 26, 0, 1);
-    const times = [morning, morning, nextDay];
+  /**
+   * launchd runs one instance of a label at a time, so a coordinator still
+   * alive at 18:00 is the reason the evening's own trigger is dropped. It ends
+   * at the boundary and lets the next slot start its own.
+   */
+  test('stops at the slot boundary rather than rolling into the next slot', async () => {
+    const evening = new Date(2026, 7, 25, 18, 0);
+    const times = [morning, morning, evening];
     let runs = 0;
 
     const outcome = await coordinateScheduledBrief({
-      now: () => times.shift() ?? nextDay,
-      isComplete: () => false,
+      now: () => times.shift() ?? evening,
+      slots,
+      markExhausted,
+      isSettled: () => false,
       powerState: () => ({ source: 'battery', fullWake: false }),
       runBrief: async () => {
         runs += 1;
@@ -194,7 +227,32 @@ describe('coordinateScheduledBrief', () => {
       log: () => {},
     });
 
-    expect(outcome).toEqual({ status: 'day-ended', attempts: 0 });
+    expect(outcome).toEqual({ status: 'slot-ended', attempts: 0 });
+    expect(runs).toBe(0);
+  });
+
+  /**
+   * What the heartbeat costs when there is nothing to do — which is almost
+   * every time it fires. A settled slot must not reach `runBrief` at all: the
+   * page is rebuilt twice a day, not ninety-six times.
+   */
+  test('a settled slot returns without running anything', async () => {
+    let runs = 0;
+    const outcome = await coordinateScheduledBrief({
+      now: () => morning,
+      slots,
+      markExhausted,
+      isSettled: () => true,
+      powerState: () => ({ source: 'ac', fullWake: true }),
+      runBrief: async () => {
+        runs += 1;
+        return 0;
+      },
+      wait: async () => {},
+      log: () => {},
+    });
+
+    expect(outcome).toEqual({ status: 'complete', attempts: 0 });
     expect(runs).toBe(0);
   });
 });

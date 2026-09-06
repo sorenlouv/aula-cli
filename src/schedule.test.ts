@@ -6,75 +6,83 @@ import {
   agentPath,
   buildPlist,
   cronLines,
+  HEARTBEAT_MINUTES,
   parseAt,
   programs,
-  RETRY_EVERY_MINUTES,
-  RETRY_FOR_MINUTES,
-  scheduleTimes,
   schtasksCreateArgs,
 } from './schedule.ts';
+import { DEFAULT_SLOTS } from './slots.ts';
 
 describe('parseAt', () => {
-  test('defaults to the 06:30 weekday-morning slot', () => {
-    expect(parseAt(undefined)).toEqual({ hour: 6, minute: 30 });
+  test('defaults to the morning and evening pair', () => {
+    expect(parseAt(undefined)).toEqual(DEFAULT_SLOTS);
   });
 
-  test('accepts a 24h time, with or without a leading zero', () => {
-    expect(parseAt('7:05')).toEqual({ hour: 7, minute: 5 });
-    expect(parseAt('19:00')).toEqual({ hour: 19, minute: 0 });
+  test('accepts one time or a list of them', () => {
+    expect(parseAt('7:05')).toEqual([{ hour: 7, minute: 5 }]);
+    expect(parseAt('19:00,06:00')).toEqual([
+      { hour: 6, minute: 0 },
+      { hour: 19, minute: 0 },
+    ]);
   });
 
-  test('rejects what a clock cannot show', () => {
+  // The format error is raised deep in the parser; what reaches the user has
+  // to be a UsageError, or a mistyped flag prints a stack as if it were a bug.
+  test('an unusable time is a usage error, not a crash', () => {
     for (const bad of ['25:00', '06:60', 'kl-syv', '6.30', '630']) {
       expect(() => parseAt(bad)).toThrow(/--at wants/);
     }
   });
 });
 
-describe('scheduleTimes', () => {
-  test('the run, then a retry every 15 minutes for three hours', () => {
-    const times = scheduleTimes({ hour: 6, minute: 30 });
-    expect(times[0]).toEqual({ hour: 6, minute: 30 });
-    expect(times[1]).toEqual({ hour: 6, minute: 45 });
-    expect(times.at(-1)).toEqual({ hour: 9, minute: 30 });
-    expect(times).toHaveLength(1 + RETRY_FOR_MINUTES / RETRY_EVERY_MINUTES);
-  });
-
-  test('stops at midnight rather than wrapping into another weekday', () => {
-    const times = scheduleTimes({ hour: 23, minute: 30 });
-    expect(times.map((t) => `${t.hour}:${t.minute}`)).toEqual(['23:30', '23:45']);
-  });
-});
-
 describe('buildPlist', () => {
   const plist = buildPlist({
-    at: { hour: 6, minute: 30 },
+    slots: DEFAULT_SLOTS,
     program: ['/opt/homebrew/bin/bun', '/repo/src/cli.ts', 'scheduled-run'],
     path: '/opt/homebrew/bin:/usr/bin',
     logPath: '/tmp/launchd.log',
   });
 
-  test('runs the wake-aware coordinator through bun, weekdays only', () => {
+  test('runs the wake-aware coordinator through bun', () => {
     expect(plist).toContain('<string>/opt/homebrew/bin/bun</string>');
     expect(plist).toContain('<string>scheduled-run</string>');
     // The coordinator holds no sleep assertion; only the child it starts does.
     expect(plist).not.toContain('<string>/usr/bin/caffeinate</string>');
-    // Weekdays 1-5, one calendar entry per weekday per time — weekends stay quiet.
-    const times = scheduleTimes({ hour: 6, minute: 30 }).length;
-    expect(plist.match(/<key>Weekday<\/key>/g)).toHaveLength(5 * times);
-    expect(plist).not.toContain('<key>Weekday</key><integer>0</integer>');
-    expect(plist).not.toContain('<key>Weekday</key><integer>6</integer>');
+  });
+
+  /**
+   * The regression this file exists to keep from coming back. Every one of the
+   * sixty-five calendar entries the previous version wrote carried a `Weekday`
+   * of 1 through 5, so the overview was simply never generated on a Saturday
+   * or a Sunday, and the family's hosted page sat two days stale every single
+   * weekend. A dict with no `Weekday` key fires every day.
+   */
+  test('one calendar entry per slot, every day of the week', () => {
+    expect(plist).not.toContain('<key>Weekday</key>');
+    expect(plist.match(/<key>Hour<\/key>/g)).toHaveLength(DEFAULT_SLOTS.length);
     expect(plist).toContain(
-      '<key>Hour</key><integer>6</integer><key>Minute</key><integer>30</integer>',
+      '<key>Hour</key><integer>6</integer><key>Minute</key><integer>0</integer>',
     );
     expect(plist).toContain(
-      '<key>Hour</key><integer>9</integer><key>Minute</key><integer>30</integer>',
+      '<key>Hour</key><integer>18</integer><key>Minute</key><integer>0</integer>',
     );
+  });
+
+  /**
+   * The calendar entries alone cannot serve a laptop that was shut or shut
+   * down over a slot: there is no trigger left until the next one. launchd
+   * starts an overdue `StartInterval` as soon as the machine wakes, and
+   * `RunAtLoad` covers the machine that was switched off entirely, so between
+   * them every return to life is a chance to catch up.
+   */
+  test('carries the wake-up heartbeat as well as the exact times', () => {
+    expect(plist).toContain(`<key>StartInterval</key><integer>${HEARTBEAT_MINUTES * 60}</integer>`);
+    expect(plist).toContain('<key>RunAtLoad</key><true/>');
   });
 
   test('bakes brief knobs into the agent, XML-escaped', () => {
     const withEnv = buildPlist({
-      at: { hour: 6, minute: 30 },
+      slots: DEFAULT_SLOTS,
       program: ['/opt/homebrew/bin/bun', '/repo/src/cli.ts', 'scheduled-run'],
       path: '/usr/bin',
       logPath: '/tmp/launchd.log',
@@ -113,7 +121,7 @@ describe('buildPlist', () => {
   /** The compiled shape: one argv entry and a subcommand. */
   test('a binary runs itself, with no working directory and no interpreter', () => {
     const compiled = buildPlist({
-      at: { hour: 6, minute: 30 },
+      slots: DEFAULT_SLOTS,
       program: ['/Users/x/.local/bin/aula', 'scheduled-run'],
       path: '/Users/x/.local/bin:/usr/bin',
       logPath: '/tmp/launchd.log',
@@ -160,17 +168,25 @@ describe('agentPath', () => {
 });
 
 describe('schtasksCreateArgs', () => {
-  test('a weekday-only task with a zero-padded start time, repeating through the retry window', () => {
+  /**
+   * Task Scheduler has no list of calendar times, so the heartbeat is the whole
+   * schedule: a daily task from the first slot, repeating all day. Which
+   * firings do anything is decided the same way it is on macOS — by the slot
+   * the clock is in and whether it already has an overview.
+   */
+  test('a daily task that repeats through the whole day, every day', () => {
     const args = schtasksCreateArgs({
-      at: { hour: 6, minute: 5 },
+      slots: [
+        { hour: 6, minute: 5 },
+        { hour: 18, minute: 0 },
+      ],
       program: ['C:\\bun\\bun.exe', 'C:\\repo\\src\\cli.ts', 'new', '--text', '--catch-up'],
     });
-    expect(args).toContain('/SC');
-    expect(args[args.indexOf('/SC') + 1]).toBe('WEEKLY');
-    expect(args[args.indexOf('/D') + 1]).toBe('MON,TUE,WED,THU,FRI');
+    expect(args[args.indexOf('/SC') + 1]).toBe('DAILY');
+    expect(args).not.toContain('/D');
     expect(args[args.indexOf('/ST') + 1]).toBe('06:05');
-    expect(args[args.indexOf('/RI') + 1]).toBe(String(RETRY_EVERY_MINUTES));
-    expect(args[args.indexOf('/DU') + 1]).toBe('03:00');
+    expect(args[args.indexOf('/RI') + 1]).toBe(String(HEARTBEAT_MINUTES));
+    expect(args[args.indexOf('/DU') + 1]).toBe('24:00');
     const tr = args[args.indexOf('/TR') + 1] ?? '';
     expect(tr).toContain('"C:\\bun\\bun.exe"');
     expect(tr).toContain('new --text --catch-up');
@@ -180,7 +196,7 @@ describe('schtasksCreateArgs', () => {
   // be, or schtasks reads the whole string as one program name.
   test('quotes the executable but not the flags', () => {
     const args = schtasksCreateArgs({
-      at: { hour: 6, minute: 30 },
+      slots: DEFAULT_SLOTS,
       program: ['C:\\Program Files\\aula.exe', 'new', '--text', '--catch-up'],
     });
     const tr = args[args.indexOf('/TR') + 1] ?? '';
@@ -201,8 +217,9 @@ describe('programs', () => {
     expect(direct.slice(0, invocation.length)).toEqual(invocation);
   });
 
-  // The scheduled run must stay idempotent: --catch-up is what makes the retry
-  // lines free once the morning has already succeeded.
+  // The scheduled run must stay idempotent: --catch-up is what makes both the
+  // retries and the quarter-hourly heartbeat free once this slot has already
+  // succeeded. Without it the heartbeat would rebuild the page all day.
   test('every scheduled invocation passes --catch-up', () => {
     expect(programs().direct).toContain('--catch-up');
   });
@@ -222,39 +239,44 @@ describe('programs', () => {
 
 describe('cronLines', () => {
   const CLAUDE = '/Users/x/.local/bin/claude';
+  const heartbeat = () => cronLines(DEFAULT_SLOTS, CLAUDE).at(-1) ?? '';
 
-  test('the run, then quarter-hour retries for three hours, weekdays only, all with --catch-up', () => {
-    const lines = cronLines({ hour: 6, minute: 30 }, CLAUDE);
+  test('an every-day heartbeat, with --catch-up deciding whether it does anything', () => {
+    const lines = cronLines(DEFAULT_SLOTS, CLAUDE);
     expect(lines).toHaveLength(3);
-    expect(lines[1]).toMatch(/^30 6 \* \* 1-5 .* new --text --catch-up$/);
-    expect(lines[2]).toMatch(/^\*\/15 7-9 \* \* 1-5 .* --catch-up$/);
+    expect(lines[1]).toContain('06:00, 18:00');
+    expect(heartbeat()).toMatch(/^\*\/15 \* \* \* \* .* new --text --catch-up$/);
+  });
+
+  /**
+   * cron, unlike launchd and Task Scheduler, starts a second copy of a job
+   * while the first is still running. A quarter-hourly heartbeat into a brief
+   * that occasionally takes longer than a quarter of an hour is exactly that
+   * case, so the printed line holds a lock.
+   */
+  test('the heartbeat cannot overlap itself', () => {
+    expect(heartbeat()).toContain('flock -n ');
   });
 
   /**
    * cron's own PATH is roughly `/usr/bin:/bin`, and the brief is written by
-   * spawning `claude` by name. Without this line the job runs every weekday
-   * and fails every weekday, reporting it only to the local mail spool.
+   * spawning `claude` by name. Without this line the job runs every day and
+   * fails every day, reporting it only to the local mail spool.
    */
   test('leads with a PATH assignment that can find claude', () => {
-    const [path = ''] = cronLines({ hour: 6, minute: 30 }, CLAUDE);
+    const [path = ''] = cronLines(DEFAULT_SLOTS, CLAUDE);
     expect(path.startsWith('PATH=')).toBe(true);
     expect(path).toContain('/Users/x/.local/bin');
   });
 
   /**
    * cron runs with a bare PATH, so a bare `bun` in the command resolves to
-   * nothing and the line fails silently every weekday. Both the interpreter
-   * and the entry point are absolute for that reason.
+   * nothing and the line fails silently every day. Both the interpreter and the
+   * entry point are absolute for that reason.
    */
   test('names its interpreter and entry point absolutely', () => {
-    const [, run = ''] = cronLines({ hour: 6, minute: 30 }, CLAUDE);
-    const command = run.replace(/^\S+ \S+ \S+ \S+ \S+ /, '');
-    expect(command.startsWith('/') || command.startsWith('cd /')).toBe(true);
+    const command = heartbeat().replace(/^\S+ \S+ \S+ \S+ \S+ flock -n \S+ /, '');
+    expect(command.startsWith('/')).toBe(true);
     expect(command).not.toMatch(/(^| )bun /);
-  });
-
-  test('no retry line when the run is in the last hour of the day', () => {
-    // PATH plus the single run.
-    expect(cronLines({ hour: 23, minute: 30 }, CLAUDE)).toHaveLength(2);
   });
 });

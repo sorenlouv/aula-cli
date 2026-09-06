@@ -1,5 +1,5 @@
 /**
- * `aula schedule` — generate the overview automatically every weekday morning.
+ * `aula schedule` — generate the overview automatically, morning and evening.
  *
  * Each platform gets its native "run this for the logged-in user" mechanism:
  * a launchd agent on macOS, a Task Scheduler task on Windows. Linux is cron,
@@ -18,7 +18,7 @@
  * everything else here takes the argv it produces and does not care which
  * shape it got.
  *
- * **A laptop is asleep at 06:30.** That is the normal case. macOS Power Nap can
+ * **A laptop is asleep at 06:00.** That is the normal case. macOS Power Nap can
  * start a calendar job during a short battery DarkWake, where `caffeinate -s`
  * is not honoured. Starting Aula and Claude there consumes the trigger but
  * cannot finish the brief.
@@ -26,21 +26,40 @@
  * The launchd job therefore starts the coordinator, a cheap process that waits
  * without a sleep assertion. It is suspended with the Mac and resumes on the
  * next wake; only a full wake or AC power starts the expensive child under
- * caffeinate. Calendar retries remain as crash recovery.
+ * caffeinate.
+ *
+ * **Two triggers, not one.** The calendar entries fire at the slot times
+ * exactly, which is what makes a brief that is ready at 06:00 rather than at
+ * some point after it. The heartbeat — `StartInterval`, plus `RunAtLoad` for a
+ * Mac that was switched off rather than asleep — fires whether or not a slot
+ * has just passed, and launchd starts an overdue interval the moment the
+ * machine wakes. That is the trigger for the case the calendar cannot cover: a
+ * laptop opened at 14:00 has had no calendar entry since dawn and would
+ * otherwise show yesterday's brief until the evening.
+ *
+ * A heartbeat only works because arriving is cheap. Every scheduled invocation
+ * passes `--catch-up`, and `slotIsSettled` answers from the state file without
+ * opening a socket, so the overwhelmingly common heartbeat — the one where
+ * this slot's brief is already written — costs one file read and an exit.
+ *
+ * launchd runs one instance of a label at a time, so a heartbeat that lands
+ * while the coordinator is still retrying is dropped rather than doubled.
  */
 
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { BRIEF_DIR } from './brief/state.ts';
+import { updateConfig } from './config.ts';
 import { formatRemedy, UsageError } from './errors.ts';
 import { claudeMissingRemedy } from './llm/claude.ts';
 import { cliInvocation, cmd } from './runtime.ts';
+import { clock, formatSlots, parseSlots, type Slot, SlotFormatError } from './slots.ts';
 
 const LABEL = 'com.aula-cli.brief';
 const TASK_NAME = 'aula-cli-brief';
 
-/** The scheduled command. `--catch-up` is what makes the retries below free. */
+/** The scheduled command. `--catch-up` is what makes the heartbeat below free. */
 const RUN_ARGS = ['new', '--text', '--catch-up'];
 
 /**
@@ -73,34 +92,27 @@ export function programs(): {
 export const RETRY_EVERY_MINUTES = 15;
 export const RETRY_FOR_MINUTES = 180;
 
-export type At = { hour: number; minute: number };
-
-export function parseAt(raw: string | undefined): At {
-  const value = raw ?? '06:30';
-  const match = /^(\d{1,2}):(\d{2})$/.exec(value);
-  const hour = Number(match?.[1]);
-  const minute = Number(match?.[2]);
-  if (!match || hour > 23 || minute > 59) {
-    throw new UsageError(`--at wants a 24h clock time like 06:30 (got "${value}").`);
-  }
-  return { hour, minute };
-}
-
-const pad = (n: number) => String(n).padStart(2, '0');
-export const clock = (at: At) => `${pad(at.hour)}:${pad(at.minute)}`;
-
 /**
- * The main time plus the retries that follow it, stopping at midnight rather
- * than wrapping into a different weekday. Exported for tests.
+ * How often the scheduler asks whether the current slot still owes a brief.
+ *
+ * The same fifteen minutes as the retry interval, and for the same reason:
+ * it is the shortest wait that cannot overlap two model runs, and it bounds
+ * how stale the page can be after the machine comes back — a Mac opened at any
+ * moment has its overview building within the quarter hour.
  */
-export function scheduleTimes(at: At): At[] {
-  const times: At[] = [];
-  for (let offset = 0; offset <= RETRY_FOR_MINUTES; offset += RETRY_EVERY_MINUTES) {
-    const total = at.hour * 60 + at.minute + offset;
-    if (total >= 24 * 60) break;
-    times.push({ hour: Math.floor(total / 60), minute: total % 60 });
+export const HEARTBEAT_MINUTES = RETRY_EVERY_MINUTES;
+
+export function parseAt(raw: string | undefined): Slot[] {
+  try {
+    return parseSlots(raw);
+  } catch (err) {
+    if (err instanceof SlotFormatError) {
+      throw new UsageError(
+        `--at wants 24h clock times like 06:00 or 06:00,18:00 (${err.message}).`,
+      );
+    }
+    throw err;
   }
-  return times;
 }
 
 /**
@@ -130,7 +142,7 @@ const xmlEscape = (value: string) =>
 /**
  * The brief knobs travel into the agent the same way PATH does: launchd
  * starts with a bare environment, so an `export AULA_BRIEF_EFFORT=high` in a
- * shell profile would silently never reach the 06:30 run. Anything set when
+ * shell profile would silently never reach the 06:00 run. Anything set when
  * `aula schedule` runs is baked in; re-run `aula schedule` to change it.
  * `AULA_TOKEN_KEY` is deliberately NOT baked — the plist is plaintext, and
  * writing the key there would undo the point of keeping it out of the
@@ -147,20 +159,26 @@ const BAKED_ENV = [
   'AULA_CACHE_TTL',
 ];
 
-/** The launchd agent, weekdays only. Exported for tests. */
+/**
+ * The launchd agent: every day, at each slot, plus the wake-up heartbeat.
+ * Exported for tests.
+ *
+ * A `StartCalendarInterval` dict with no `Weekday` key fires every day of the
+ * week. The previous version wrote one dict per weekday per retry — sixty-five
+ * of them, every single one carrying `Weekday` 1 through 5 — which is why
+ * nothing was generated on a Saturday or a Sunday.
+ */
 export function buildPlist(opts: {
-  at: At;
+  slots: Slot[];
   /** Argv the agent runs — see `programs()`. */
   program: string[];
   path: string;
   logPath: string;
   env?: Record<string, string>;
 }): string {
-  const entry = (weekday: number, at: At) =>
-    `    <dict><key>Weekday</key><integer>${weekday}</integer>` +
-    `<key>Hour</key><integer>${at.hour}</integer>` +
-    `<key>Minute</key><integer>${at.minute}</integer></dict>`;
-  const times = scheduleTimes(opts.at);
+  const entry = (slot: Slot) =>
+    `    <dict><key>Hour</key><integer>${slot.hour}</integer>` +
+    `<key>Minute</key><integer>${slot.minute}</integer></dict>`;
   const program = opts.program;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -181,8 +199,10 @@ ${Object.entries(opts.env ?? {})
   </dict>
   <key>StartCalendarInterval</key>
   <array>
-${[1, 2, 3, 4, 5].flatMap((weekday) => times.map((at) => entry(weekday, at))).join('\n')}
+${opts.slots.map(entry).join('\n')}
   </array>
+  <key>StartInterval</key><integer>${HEARTBEAT_MINUTES * 60}</integer>
+  <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>${opts.logPath}</string>
   <key>StandardErrorPath</key><string>${opts.logPath}</string>
   <key>ProcessType</key><string>Background</string>
@@ -192,20 +212,21 @@ ${[1, 2, 3, 4, 5].flatMap((weekday) => times.map((at) => entry(weekday, at))).jo
 }
 
 /**
- * The Task Scheduler creation arguments, weekdays only, repeating through the
- * same retry window (`/RI` every N minutes, `/DU` for how long). Exported for
- * tests.
+ * The Task Scheduler creation arguments. Exported for tests.
+ *
+ * Task Scheduler has no equivalent of launchd's list of calendar times, so the
+ * heartbeat is the whole schedule here: a daily task starting at the first slot
+ * and repeating every `HEARTBEAT_MINUTES` for a full day. Which of those firings
+ * does anything is decided the same way it is on macOS — by the slot the clock
+ * is in and whether it already has a brief.
  */
-export function schtasksCreateArgs(opts: { at: At; program: string[] }): string[] {
-  const hours = Math.floor(RETRY_FOR_MINUTES / 60);
-  const minutes = RETRY_FOR_MINUTES % 60;
+export function schtasksCreateArgs(opts: { slots: Slot[]; program: string[] }): string[] {
+  const first = opts.slots[0] ?? { hour: 6, minute: 0 };
   return [
     '/Create',
     '/F',
     '/SC',
-    'WEEKLY',
-    '/D',
-    'MON,TUE,WED,THU,FRI',
+    'DAILY',
     '/TN',
     TASK_NAME,
     '/TR',
@@ -216,33 +237,37 @@ export function schtasksCreateArgs(opts: { at: At; program: string[] }): string[
       .map((arg, index) => (index === 0 || arg.includes(' ') ? `"${arg}"` : arg))
       .join(' '),
     '/ST',
-    clock(opts.at),
+    clock(first),
     '/RI',
-    String(RETRY_EVERY_MINUTES),
+    String(HEARTBEAT_MINUTES),
     '/DU',
-    `${pad(hours)}:${pad(minutes)}`,
+    '24:00',
   ];
 }
 
 /**
- * The cron equivalent: a `PATH` assignment, the run, then retries on the
- * quarter hours through the following three hours. Exported for tests.
+ * The cron equivalent: a `PATH` assignment, then the heartbeat. Exported for
+ * tests.
  *
  * The `PATH=` line is not decoration. cron starts jobs with a PATH of roughly
  * `/usr/bin:/bin`, and the brief is written by spawning `claude` *by name*, so
- * without it every weekday run gets as far as looking for `claude`, fails, and
- * says so only to the local mail spool. crontab reads leading `NAME=value`
- * lines as environment for the entries beneath them, so one line fixes it.
+ * without it every run gets as far as looking for `claude`, fails, and says so
+ * only to the local mail spool. crontab reads leading `NAME=value` lines as
+ * environment for the entries beneath them, so one line fixes it.
+ *
+ * `flock -n` is the other load-bearing part: cron, unlike launchd and Task
+ * Scheduler, will happily start a second copy of a job while the first is still
+ * running, and a heartbeat that fires every quarter of an hour into a brief
+ * that occasionally takes longer than that would do exactly that.
  */
-export function cronLines(at: At, claude: string): string[] {
+export function cronLines(slots: Slot[], claude: string): string[] {
   const { direct } = programs();
   const command = direct.map((arg) => (arg.includes(' ') ? `"${arg}"` : arg)).join(' ');
-  const from = at.hour + 1;
-  const to = Math.min(23, at.hour + RETRY_FOR_MINUTES / 60);
+  const lock = join(BRIEF_DIR, 'schedule.lock');
   return [
     `PATH=${agentPath(claude)}`,
-    `${at.minute} ${at.hour} * * 1-5 ${command}`,
-    ...(from <= to ? [`*/${RETRY_EVERY_MINUTES} ${from}-${to} * * 1-5 ${command}`] : []),
+    `# ${formatSlots(slots)} — the slot the clock is in decides whether a firing does anything`,
+    `*/${HEARTBEAT_MINUTES} * * * * flock -n ${lock} ${command}`,
   ];
 }
 
@@ -252,25 +277,27 @@ function sh(argv: string[]): { ok: boolean; err: string } {
 }
 
 export function runSchedule(opts: { remove: boolean; at?: string }): number {
-  const at = parseAt(opts.at);
+  const slots = parseAt(opts.at);
   switch (process.platform) {
     case 'darwin':
-      return opts.remove ? removeDarwin() : installDarwin(at);
+      return opts.remove ? removeDarwin() : installDarwin(slots);
     case 'win32':
-      return opts.remove ? removeWindows() : installWindows(at);
+      return opts.remove ? removeWindows() : installWindows(slots);
     default: {
       if (opts.remove) {
+        rememberSlots(undefined);
         console.error(
           'No scheduler integration for this platform — remove the lines with: crontab -e',
         );
       } else {
         const claude = resolveClaude();
         if (!claude) return 1;
+        rememberSlots(slots);
         console.error(
-          'No scheduler integration for this platform. The cron equivalent (the run, then',
+          'No scheduler integration for this platform. The cron equivalent (a quarter-hourly',
         );
-        console.error('the retries that do nothing once the day is complete):');
-        for (const line of cronLines(at, claude)) console.error(`  ${line}`);
+        console.error('heartbeat that does nothing once the current slot has its overview):');
+        for (const line of cronLines(slots, claude)) console.error(`  ${line}`);
       }
       return 0;
     }
@@ -281,16 +308,23 @@ function plistPath(): string {
   return join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`);
 }
 
-function retryNote(at: At): string {
-  const last = scheduleTimes(at).at(-1) ?? at;
-  return `retrying every ${RETRY_EVERY_MINUTES} min until ${clock(last)} while the day's overview is incomplete`;
+/**
+ * Put the times where every other process can read them.
+ *
+ * The scheduler bakes them into a plist, but a plist cannot be asked what it
+ * says, and the run that a heartbeat starts has to know which slot it is in
+ * before it can decide whether to do anything. Config is the only surface both
+ * sides share.
+ */
+function rememberSlots(slots: Slot[] | undefined): void {
+  updateConfig({ briefSchedule: slots?.map(clock) });
 }
 
 /**
  * Where `claude` is, or null after explaining why there is nowhere.
  *
  * Every scheduled run writes the brief with `claude`, so installing the job
- * without it buys the user a 06:30 alarm that dies on ENOENT and reports it
+ * without it buys the user a 06:00 alarm that dies on ENOENT and reports it
  * only to a log file nobody reads. The old code was quieter than that: it
  * dropped `claude` from the baked PATH and installed anyway, which looks
  * exactly like success. Better to refuse now, while somebody is watching.
@@ -302,12 +336,12 @@ function resolveClaude(): string | null {
   const claude = Bun.which('claude');
   if (claude) return claude;
   // The same remedy the run itself raises, so a user who hits this at install
-  // time and a user who hits it at 06:30 are told the same thing.
+  // time and a user who hits it at 06:00 are told the same thing.
   console.error(formatRemedy(claudeMissingRemedy(cmd('schedule'))));
   return null;
 }
 
-function installDarwin(at: At): number {
+function installDarwin(slots: Slot[]): number {
   const uid = process.getuid?.();
   if (uid === undefined) {
     console.error('Could not determine the user id.');
@@ -326,10 +360,13 @@ function installDarwin(at: At): number {
   );
   mkdirSync(dirname(plist), { recursive: true });
   mkdirSync(BRIEF_DIR, { recursive: true });
+  // Before the agent, so the run that `RunAtLoad` starts a moment from now
+  // reads the times it was just installed with rather than the previous ones.
+  rememberSlots(slots);
   writeFileSync(
     plist,
     buildPlist({
-      at,
+      slots,
       program: coordinator,
       logPath,
       path: agentPath(claude),
@@ -344,7 +381,10 @@ function installDarwin(at: At): number {
     console.error(`launchctl bootstrap failed: ${loaded.err}`);
     return 1;
   }
-  console.log(`Installed — every weekday at ${clock(at)}, ${retryNote(at)}.`);
+  console.log(`Installed — every day at ${formatSlots(slots)}, ${retryNote()}.`);
+  console.log(
+    `  Missed a slot because the Mac was off or asleep? It catches up within ${HEARTBEAT_MINUTES} min of waking.`,
+  );
   console.log(
     '  On macOS, model work waits for a full wake or AC power, then holds the Mac awake.',
   );
@@ -364,31 +404,36 @@ function installDarwin(at: At): number {
   return 0;
 }
 
+function retryNote(): string {
+  return `retrying every ${RETRY_EVERY_MINUTES} min for up to ${RETRY_FOR_MINUTES / 60} h while a slot's overview is incomplete`;
+}
+
 function removeDarwin(): number {
   const uid = process.getuid?.();
   const wasLoaded = uid !== undefined && sh(['launchctl', 'bootout', `gui/${uid}/${LABEL}`]).ok;
   const hadPlist = existsSync(plistPath());
   if (hadPlist) rmSync(plistPath());
-  console.log(
-    wasLoaded || hadPlist ? 'The weekday schedule is removed.' : 'No schedule was installed.',
-  );
+  rememberSlots(undefined);
+  console.log(wasLoaded || hadPlist ? 'The schedule is removed.' : 'No schedule was installed.');
   return 0;
 }
 
-function installWindows(at: At): number {
+function installWindows(slots: Slot[]): number {
   // Windows tasks inherit PATH from the registry, so `claude` does not need
-  // baking — but a `claude` that is not installed at all still fails at 06:30.
+  // baking — but a `claude` that is not installed at all still fails at 06:00.
   if (!resolveClaude()) return 1;
   // No coordinator on Windows: Task Scheduler has its own wake handling, so
   // the task runs the brief directly.
   const { direct } = programs();
-  const created = sh(['schtasks', ...schtasksCreateArgs({ at, program: direct })]);
+  rememberSlots(slots);
+  const created = sh(['schtasks', ...schtasksCreateArgs({ slots, program: direct })]);
   if (!created.ok) {
     console.error(`schtasks failed: ${created.err}`);
     return 1;
   }
+  console.log(`Installed — every day at ${formatSlots(slots)}, as Scheduled Task "${TASK_NAME}".`);
   console.log(
-    `Installed — every weekday at ${clock(at)}, ${retryNote(at)}, as Scheduled Task "${TASK_NAME}".`,
+    `  The task itself wakes every ${HEARTBEAT_MINUTES} min and does nothing unless the current slot still owes an overview.`,
   );
   console.log(`  output: ${BRIEF_DIR}`);
   console.log('  remove: aula schedule --remove');
@@ -398,6 +443,7 @@ function installWindows(at: At): number {
 
 function removeWindows(): number {
   const removed = sh(['schtasks', '/Delete', '/TN', TASK_NAME, '/F']);
-  console.log(removed.ok ? 'The weekday schedule is removed.' : 'No schedule was installed.');
+  rememberSlots(undefined);
+  console.log(removed.ok ? 'The schedule is removed.' : 'No schedule was installed.');
   return 0;
 }
