@@ -16,6 +16,7 @@
  *   FAKE_CLAUDE_RESULT_JSON  the `result` field for `ok`, already JSON-encoded (default "OK")
  *   FAKE_CLAUDE_LOG          append one line per call (the argv), and count calls from it
  *                            `<log>.results` may hold one JSON result per call
+ *   FAKE_CLAUDE_CWD_LOG      append one line per call: the directory it was started in
  *
  * `stall` sleeps as a child of the script, so killing the script leaves an
  * orphan holding the stdout pipe — the exact hostage situation spawnClaude is
@@ -30,6 +31,9 @@ import { join } from 'node:path';
 const SCRIPT = `#!/bin/sh
 # One line per call, whatever the prompt contains, so the log doubles as a counter.
 if [ -n "$FAKE_CLAUDE_LOG" ]; then printf '%s' "$*" | tr '\\n' ' ' >> "$FAKE_CLAUDE_LOG"; printf '\\n' >> "$FAKE_CLAUDE_LOG"; fi
+# Where it was started, which is the whole subject of claude.test.ts: a session
+# inherits its working directory as a project, so who chooses it matters.
+if [ -n "$FAKE_CLAUDE_CWD_LOG" ]; then pwd >> "$FAKE_CLAUDE_CWD_LOG"; fi
 n=0
 if [ -n "$FAKE_CLAUDE_LOG" ]; then n=$(wc -l < "$FAKE_CLAUDE_LOG" | tr -d ' '); fi
 mode="\${FAKE_CLAUDE_MODE:-ok}"

@@ -1,0 +1,5 @@
+# `src/testing/test-setup.ts` points $AULA_DIR at a scratch directory before the
+# first test module loads, so no test can reach the real ~/.aula. See that file
+# for why it has to be a preload and not something a test does for itself.
+[test]
+preload = ["./src/testing/test-setup.ts"]

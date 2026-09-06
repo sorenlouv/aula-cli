@@ -6,9 +6,38 @@
  * request path.
  */
 
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { AULA_DIR } from '../auth.ts';
 import { formatRemedy, type Remedy } from '../errors.ts';
 import { cmd } from '../runtime.ts';
 import { isRecord } from '../validation.ts';
+
+/**
+ * The working directory every `claude` subprocess is given: empty, ours, and
+ * deliberately boring.
+ *
+ * `claude` treats its working directory as a project — it looks around, and its
+ * file tools resolve against it. Inherited, that directory is whatever the
+ * parent happened to have, and the parent is usually not a person choosing one:
+ *
+ * - the launchd agent sets no `WorkingDirectory` on purpose (nothing *aula*
+ *   reads is relative), and launchd's default is `/`, so every scheduled model
+ *   call was opening a session whose project was the entire boot volume. macOS
+ *   then asked, in the family's face, for `aula` to be given the Photos
+ *   library, the Music library, Desktop, Documents and Downloads — none of
+ *   which this tool has any use for. `~/.claude/projects/-` had accumulated
+ *   sixty-eight such sessions before anybody noticed.
+ * - run by hand, it is the user's shell directory, so `aula new` from inside
+ *   some unrelated checkout rooted the session in *that* project instead.
+ *
+ * Neither is a decision anyone made, and both are worse than the obvious
+ * answer. A directory of our own, kept empty, has nothing to look around at.
+ * It is set here rather than in the plist because this fixes the interactive
+ * case too, and because this is the only place that knows a `claude` is being
+ * started.
+ */
+const CLAUDE_CWD = join(AULA_DIR, 'cwd');
 
 type ModelPurpose = 'brief' | 'repair' | 'transport';
 
@@ -150,8 +179,13 @@ export async function spawnClaude(
   const startedAt = performance.now();
   // A thunk rather than an inline call so the `'pipe'` literals survive
   // inference — `ReturnType<typeof Bun.spawn>` widens them and loses the readers.
+  // Recreated rather than assumed: `cache clear` and a hand-tidied `~/.aula`
+  // both remove empty directories, and a missing cwd makes the spawn fail with
+  // an ENOENT that reads exactly like a missing `claude`.
+  mkdirSync(CLAUDE_CWD, { recursive: true, mode: 0o700 });
   const spawn = () =>
     Bun.spawn(['claude', ...args], {
+      cwd: CLAUDE_CWD,
       stdin: opts.stdin === undefined ? 'ignore' : new TextEncoder().encode(opts.stdin),
       stdout: 'pipe',
       stderr: 'pipe',

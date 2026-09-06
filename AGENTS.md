@@ -121,6 +121,29 @@ fallback sources.
 
 ## Non-obvious behaviour
 
+- **Every `claude` subprocess is started in `~/.aula/cwd`, an empty directory
+  of our own.** `claude` treats its working directory as a project, and an
+  inherited one is a decision nobody made: under launchd it was `/`, so every
+  scheduled model call opened a session rooted at the boot volume, and macOS
+  asked the family to approve *aula* for their Photos library, Music library,
+  Desktop and Documents. Run by hand it was whatever checkout the user's shell
+  was in. `spawnClaude` sets it, rather than the plist, because that fixes the
+  interactive case too. The directory must stay empty — that is what makes it
+  boring — and `src/llm/claude.test.ts` fails if anything writes there.
+- **`--allowedTools` pre-approves; `--tools` is what removes a tool.** Measured
+  twice now: an allow-list alone still let a session read any file. `--tools`
+  strips the *built-in* set only — every tool of every connected MCP server
+  stays in the list regardless, so a calendar read is offered Gmail's
+  `send_message` and Drive's `share_file`. They are not pre-approved, so a
+  headless run cannot call one, but `connector.ts` also denies the Google
+  Calendar connector's four write tools by name, because a read-only promise
+  kept only by the prompt is not kept. A bare `mcp__` prefix denies nothing;
+  `--disallowedTools` matches real server and tool names only.
+- **`bunfig.toml` preloads `src/testing/test-setup.ts`, which points `$AULA_DIR`
+  at a scratch directory.** "Tests never touch `~/.aula`" used to be kept by
+  convention — every test passed an explicit path — and the first code to derive
+  a path itself broke it on the first run. `AULA_DIR` is resolved at module load,
+  so this cannot be done from inside a test file.
 - **The schedule's unit is a slot, not a day.** `aula schedule` installs 06:00
   and 18:00, every day of the week, and `slots.ts` defines the half-open
   interval each one owns — 06:00 until 18:00, then 18:00 until 06:00. Every

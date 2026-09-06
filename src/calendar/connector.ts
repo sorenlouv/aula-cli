@@ -55,6 +55,27 @@ const SERVER_MATCH = /google\s*calendar/i;
 const TOOL_PREFIX = 'mcp__claude_ai_Google_Calendar__';
 
 /**
+ * The connector's mutating half, denied by name.
+ *
+ * This tool reads calendars; it has no business creating, moving, deleting or
+ * RSVPing to an appointment, and the connector offers all four. Aula gets the
+ * same treatment one layer down in `assertReadOnly`, and for the same reason:
+ * a read-only promise that is only kept by the prompt is not kept.
+ *
+ * Named rather than pattern-matched because `--disallowedTools` matches a real
+ * server or tool name and nothing else — a bare `mcp__` prefix was measured to
+ * deny nothing at all. So this list has to be revisited if the connector grows
+ * a new way to write; `expectedCalls` below is the backstop that notices a call
+ * we did not ask for, whatever its name.
+ */
+const WRITE_TOOLS = [
+  `${TOOL_PREFIX}create_event`,
+  `${TOOL_PREFIX}delete_event`,
+  `${TOOL_PREFIX}update_event`,
+  `${TOOL_PREFIX}respond_to_event`,
+];
+
+/**
  * The connector is not connected for this user.
  *
  * Its own error, because it is the one failure with a cure the user can act on
@@ -201,6 +222,26 @@ async function attemptTool(
     [
       '-p',
       prompt,
+      // `--tools` is what removes the built-in set — Read, Write, Bash, Glob and
+      // the rest — which `--allowedTools` alone does not: deploy.ts measured
+      // that an allow-list on its own still left the agent able to read any
+      // file. Here that was not theoretical. These sessions inherited a working
+      // directory of `/`, so a session rooted at the boot volume was being
+      // handed other people's calendar text with the file tools present, and
+      // macOS was asking the family to approve `aula` for their Photos and
+      // Music libraries. `spawnClaude` now supplies a cwd of its own; this is
+      // the other half.
+      //
+      // It does not restrict MCP tools: measured, `--tools` leaves every tool
+      // of every connected server in the list — Gmail's `send_message` and
+      // Drive's `share_file` among them. They are not pre-approved, so a
+      // headless run cannot call them, but `--disallowedTools` takes the
+      // reachable half off the table rather than trusting that.
+      '--tools',
+      'ToolSearch',
+      name,
+      '--disallowedTools',
+      ...WRITE_TOOLS,
       // ToolSearch as well: MCP tools are deferred in headless runs, so without
       // it the model can never reach the one tool it is allowed to call.
       '--allowedTools',
