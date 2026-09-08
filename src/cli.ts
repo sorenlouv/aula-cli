@@ -911,20 +911,30 @@ async function runCalendars(positionals: string[]): Promise<number> {
           `Then run \`${cmd('calendars')}\` again.`,
         ].join('\n'),
       );
-      return 1;
+      // 5, the fleet's "setup required — do not retry unchanged". This was 1,
+      // which every sibling reads as "a source is down, retry later" — and an
+      // agent looping the morning brief on a missing connector retries a state
+      // that no amount of waiting changes. Nothing here is fixed except by a
+      // person clicking Connect.
+      return EXIT.SETUP;
     }
     if (err instanceof CalendarSelectionError) {
+      // 2: the name came off the command line and is wrong or ambiguous, which
+      // is the definition of a usage error. It shared exit 1 with an outage.
       console.error(err.message);
-      return 1;
+      return EXIT.USAGE;
     }
     // Already a full remedy naming the dependency and how to install it —
     // prefixing it would bury the headline `doctor` and the skill read first.
     if (err instanceof ClaudeMissingError) {
+      // 5 as well, and for the same reason: a missing program is still missing
+      // on the next attempt. `claudeMissingRemedy` says as much in prose; the
+      // exit code should not contradict it.
       console.error(err.message);
-      return 1;
+      return EXIT.SETUP;
     }
     console.error(`Could not ask Claude for your calendars: ${errorMessage(err)}`);
-    return 1;
+    return EXIT.ERROR;
   }
 }
 

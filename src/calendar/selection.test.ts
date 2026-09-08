@@ -57,6 +57,34 @@ describe('calendar selection', () => {
     expect(resolveCalendarSelection(choices, ['b@example.com'])[0]?.id).toBe('b@example.com');
   });
 
+  /**
+   * The caller is an agent copying a name out of a checkbox question it wrote
+   * for a parent, and the round trip through a person is where case and
+   * whitespace get lost. `No calendar named "privat"` about a calendar sitting
+   * in the list directly above taught nobody anything.
+   */
+  test('case and stray whitespace do not make a calendar disappear', () => {
+    const choices = calendarChoices([], [{ id: 'p@example.com', summary: 'Privat' }]);
+    expect(resolveCalendarSelection(choices, ['privat'])[0]?.id).toBe('p@example.com');
+    expect(resolveCalendarSelection(choices, ['  Privat '])[0]?.id).toBe('p@example.com');
+    expect(resolveCalendarSelection(choices, ['P@EXAMPLE.COM'])[0]?.id).toBe('p@example.com');
+  });
+
+  /** Loosening the match must not let it start guessing. */
+  test('an exact name beats a case-insensitive one, and ambiguity is still refused', () => {
+    const cased = calendarChoices(
+      [],
+      [
+        { id: 'lower', summary: 'privat' },
+        { id: 'upper', summary: 'Privat' },
+      ],
+    );
+    expect(resolveCalendarSelection(cased, ['Privat'])[0]?.id).toBe('upper');
+    expect(resolveCalendarSelection(cased, ['privat'])[0]?.id).toBe('lower');
+    expect(() => resolveCalendarSelection(cased, ['PRIVAT'])).toThrow('More than one calendar');
+    expect(() => resolveCalendarSelection(cased, ['   '])).toThrow('No calendar named');
+  });
+
   test('narrowing by saved ids needs no connector listing', () => {
     const configured = [
       { id: 'family', name: 'Family' },

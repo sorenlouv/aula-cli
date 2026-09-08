@@ -8,8 +8,19 @@ process.env.TZ = 'Europe/Copenhagen';
 import { toPersonalSourceItem } from '../brief/collect.ts';
 import { overviewWindow } from '../brief/dates.ts';
 import { localIsoDate } from '../integrations/types.ts';
+import type { ResponseCache } from '../cache.ts';
 import { parseCalendarsPayload, parseEventsPayload, parseStream } from './connector.ts';
-import { calendarWindow, toPersonalEvent } from './index.ts';
+import { calendarWindow, loadPersonalEvents, rfc3339, toPersonalEvent } from './index.ts';
+
+/** In-memory stand-in, so a cache test never touches the real ~/.aula. */
+function fakeCache(): ResponseCache {
+  const store = new Map<string, unknown>();
+  return {
+    get: (namespace: string, key: unknown) => store.get(`${namespace} ${JSON.stringify(key)}`),
+    set: (namespace: string, key: unknown, value: unknown) =>
+      store.set(`${namespace} ${JSON.stringify(key)}`, value),
+  } as unknown as ResponseCache;
+}
 
 const CAL = { id: 'far@eksempel.dk', name: 'Familien' };
 
@@ -99,9 +110,54 @@ describe('reading one connector event', () => {
     expect(moved?.startTime).toBe('15:00');
   });
 
-  test('malformed entries fail the calendar instead of looking absent', () => {
+  test('malformed entries throw instead of looking absent', () => {
     expect(() => toPersonalEvent(null, CAL)).toThrow('ikke var et objekt');
     expect(() => toPersonalEvent({ summary: 'no times' }, CAL)).toThrow('uden id');
+  });
+});
+
+/**
+ * Everything here is driven through a primed cache rather than the connector,
+ * so the shaping loop is exercised without a `claude` subprocess — the cache
+ * stores the *raw* connector answer precisely so this is possible.
+ */
+describe('reading a calendar that is partly unreadable', () => {
+  const from = new Date(2026, 7, 27);
+  const to = new Date(2026, 8, 10);
+
+  function loadWith(raw: unknown[]) {
+    const cache = fakeCache();
+    cache.set('google-calendar', { calendarId: CAL.id, from: rfc3339(from), to: rfc3339(to) }, raw);
+    return loadPersonalEvents([CAL], { from, to }, cache);
+  }
+
+  /**
+   * The regression. `toPersonalEvent` throws, and the throw used to escape to
+   * the per-calendar catch — so one appointment with a shape this code cannot
+   * read cost the family the whole fortnight, reported as "the calendar could
+   * not be read". A new field shape from Google reaching one recurring
+   * appointment would have done it.
+   */
+  test('one unreadable appointment costs one appointment, not the fortnight', async () => {
+    const load = await loadWith([TIMED, { summary: 'no id' }, ALL_DAY]);
+    expect(load.events.map((event) => event.title)).toEqual(['Ferie', 'Tandlæge']);
+    expect(load.warnings).toHaveLength(1);
+    expect(load.warnings[0]).toContain('1 aftale(r)');
+    expect(load.notConnected).toBe(false);
+  });
+
+  /** One line, however many are broken: the first already says everything. */
+  test('a wholly unreadable calendar warns once rather than per appointment', async () => {
+    const load = await loadWith([{ summary: 'a' }, { summary: 'b' }, { summary: 'c' }]);
+    expect(load.events).toEqual([]);
+    expect(load.warnings).toHaveLength(1);
+    expect(load.warnings[0]).toContain('3 aftale(r)');
+  });
+
+  test('a clean calendar says nothing at all', async () => {
+    const load = await loadWith([TIMED, ALL_DAY]);
+    expect(load.events).toHaveLength(2);
+    expect(load.warnings).toEqual([]);
   });
 });
 
@@ -256,10 +312,42 @@ describe('connector payload contracts', () => {
     ).toThrow('ugyldig kalender');
   });
 
-  test('pagination is refused so a partial fortnight cannot look complete', () => {
-    expect(() => parseEventsPayload({ events: [], nextPageToken: 'page-2' })).toThrow(
-      'flere sider',
+  /**
+   * A `nextPageToken` used to be fatal here — a busy shared calendar lost its
+   * whole fortnight rather than its 251st appointment. The parser now reports
+   * the token and `listAllPages` follows it; what must never happen is a token
+   * being *dropped*, which is what makes a truncated fortnight look quiet.
+   */
+  test('a next page is reported rather than discarded or fatal', () => {
+    expect(parseEventsPayload({ events: [], nextPageToken: 'page-2' })).toEqual({
+      items: [],
+      nextPageToken: 'page-2',
+    });
+    expect(parseEventsPayload({ events: [], nextPageToken: '' })).toEqual({
+      items: [],
+      nextPageToken: null,
+    });
+    expect(parseEventsPayload({ events: [] })).toEqual({ items: [], nextPageToken: null });
+  });
+
+  test('a non-string next page is a contract break, not an absent one', () => {
+    expect(() => parseEventsPayload({ events: [], nextPageToken: 7 })).toThrow(
+      'ugyldig nextPageToken',
     );
-    expect(parseEventsPayload({ events: [], nextPageToken: '' })).toEqual([]);
+  });
+
+  /**
+   * The silent half of the same bug. `list_calendars` never looked at its own
+   * pagination and the connector's default page is 100, so a long calendar list
+   * lost its tail — and the loss surfaced two commands later as `calendars set`
+   * refusing a name that plainly exists.
+   */
+  test('the calendar listing reports its next page too', () => {
+    expect(
+      parseCalendarsPayload({
+        calendars: [{ id: 'family', summary: 'Familie' }],
+        nextPageToken: 'page-2',
+      }).nextPageToken,
+    ).toBe('page-2');
   });
 });

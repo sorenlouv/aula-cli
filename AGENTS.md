@@ -208,6 +208,37 @@ fallback sources.
   `failed`, `disconnected`.** `needs-auth` is the lapsed Google grant — the one
   state where "reconnect it" is the right advice — and it used to fall past the
   status check and come back as `list_events blev aldrig kaldt`.
+- **Both connector reads are paginated, and each page is a whole `claude`
+  subprocess.** `listAllPages` follows up to four. `list_events` used to ask for
+  250 and treat a `nextPageToken` as fatal, so a busy shared calendar lost its
+  fortnight rather than its 251st appointment; `list_calendars` never read the
+  field at all and the connector's default page is 100, so a long calendar list
+  silently lost its tail — which surfaced two commands later as `calendars set`
+  refusing a name that plainly exists. Ask for `pageSize` explicitly.
+- **A partial calendar is partial, never empty.** `loadPersonalEvents` catches
+  per calendar *and* per event: one appointment whose shape this code cannot
+  read used to escape to the per-calendar catch and cost the family the whole
+  fortnight, reported as an unreadable calendar. The per-event warning is one
+  line with a count, not one line per event — a wholly unreadable calendar would
+  otherwise write two hundred `Datastatus` lines onto the page.
+- **The calendar session's read-only promise is kept by an allow-list, not only
+  by `--disallowedTools`.** `attemptTool` rejects a session that called anything
+  beyond the one tool it asked for plus `ToolSearch`. `WRITE_TOOLS` is still
+  named by name because that is all `--disallowedTools` matches, but it goes
+  stale the moment the connector grows a fifth way to write; the allow-list does
+  not. The module header promised this check under the name `expectedCalls` for
+  a long time before it existed.
+- **`doctor` reads the configured calendars for real.** A lapsed connector
+  otherwise passes every Aula check, accepts `aula schedule`, and drops the
+  calendar half of the brief at 06:00 with nobody watching — and a page with no
+  appointments on it is indistinguishable from a quiet fortnight. It warns
+  rather than fails (every Aula read still works), skips when no calendar is
+  configured, and names a configured calendar that answered with nothing,
+  because that is what a wrong id looks like.
+- **A missing connector is exit 5, not 1.** "Setup required — do not retry
+  unchanged": no amount of waiting connects a connector. A wrong calendar name
+  is exit 2. Both used to be 1, which the fleet reads as "a source is down,
+  retry later".
 - **Two caches, and `cache status` reports both.** Remote *responses* — Aula,
   the vendor weekly plans and the Google Calendar reads — share one TTL'd
   `ResponseCache` in `~/.aula/cache/responses`; the model's *layout* is cached

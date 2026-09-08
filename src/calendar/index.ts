@@ -10,6 +10,10 @@
  * be read must not cost the family the other one, and must never look like a
  * fortnight with nothing in it. Every failure comes back as a warning the brief
  * turns into a `Datastatus` line.
+ *
+ * The same rule holds one level down, per *event* — see the loop below. The
+ * two together are what make a partial answer partial rather than empty, which
+ * is the only honest thing a calendar reader can be.
  */
 
 import { ResponseCache } from '../cache.ts';
@@ -73,10 +77,31 @@ export async function loadPersonalEvents(
           opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {},
         ),
       );
+      // Per event, for the same reason the loop around it is per calendar: one
+      // appointment this code cannot read must not cost the family the other
+      // two hundred. It used to — `toPersonalEvent` throws, and the throw
+      // escaped to the catch below, which drops the whole calendar's fortnight
+      // and reports it as unreadable. The failure mode that made this worth
+      // fixing is a *new* field shape from Google reaching one recurring
+      // appointment: the calendar looks broken rather than the event.
+      //
+      // The count is deliberately not a per-event line. A calendar whose events
+      // are all unreadable would otherwise write two hundred Datastatus lines
+      // onto the parent's page, and the first one already says everything.
       const calendarEvents: PersonalEvent[] = [];
+      const unreadable: string[] = [];
       for (const item of raw) {
-        const event = toPersonalEvent(item, calendar);
-        if (event) calendarEvents.push(event);
+        try {
+          const event = toPersonalEvent(item, calendar);
+          if (event) calendarEvents.push(event);
+        } catch (err) {
+          unreadable.push(errorMessage(err));
+        }
+      }
+      if (unreadable.length > 0) {
+        warnings.push(
+          `${unreadable.length} aftale(r) i «${calendar.name}» kunne ikke læses: ${unreadable[0]}`,
+        );
       }
       events.push(...calendarEvents);
     } catch (err) {
