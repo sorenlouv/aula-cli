@@ -21,8 +21,15 @@
  * every per-endpoint timing meaningless, and the timings are half the value.
  */
 
+import {
+  calendarWindow,
+  loadPersonalEvents,
+  type CalendarLoad,
+  type CalendarRef,
+} from './calendar/index.ts';
 import { AulaClient } from './client.ts';
 import { startOfDay } from './cli-helpers.ts';
+import { readConfig } from './config.ts';
 import { CLAUDE_INSTALL_COMMAND } from './llm/claude.ts';
 import { cmd } from './runtime.ts';
 import { buildFamily, integrationContext, type Family } from './family.ts';
@@ -85,6 +92,69 @@ export function claudeCliCheck(
       };
 }
 
+/**
+ * Can the configured calendars actually be read?
+ *
+ * The same argument as `claudeCliCheck` one step further along. A machine whose
+ * Google Calendar connector has lapsed passes every Aula check, accepts
+ * `aula schedule`, and then drops the calendar half of the brief at 06:00 with
+ * nobody watching — the parent sees a page with no appointments on it, which is
+ * indistinguishable from a quiet fortnight. This is the check that turns that
+ * into something a person can be told on a weekday afternoon.
+ *
+ * Skipped, not failed, when no calendar is configured: an installation where
+ * nobody named one reads nobody's calendar, and that is the documented default
+ * rather than a fault. A connector that is missing while calendars *are*
+ * configured warns rather than fails, for the same reason `claudeCliCheck`
+ * does — every Aula read still works, and failing the run would overstate it.
+ *
+ * `read` is a parameter so the check is testable without a `claude` subprocess.
+ */
+export async function calendarConnectorCheck(
+  calendars: CalendarRef[],
+  read: (calendars: CalendarRef[], window: { from: Date; to: Date }) => Promise<CalendarLoad>,
+  now = new Date(),
+): Promise<CheckOutcome<CalendarLoad | null>> {
+  if (calendars.length === 0) {
+    return {
+      value: null,
+      status: 'skip',
+      detail: `no calendars configured — \`${cmd('calendars')}\` lists them`,
+    };
+  }
+  const load = await read(calendars, calendarWindow(now));
+  const named = calendars.map((calendar) => calendar.name).join(', ');
+  const detail = `${calendars.length} calendar(s) (${named}): ${load.events.length} appointment(s)`;
+  if (load.warnings.length > 0) {
+    return {
+      value: load,
+      status: 'warn',
+      detail,
+      note: load.notConnected
+        ? `Google Calendar is not connected in Claude — run \`${cmd('calendars')}\` for the fix. ` +
+          'The overview will show no appointments at all until it is.'
+        : load.warnings.join('; '),
+    };
+  }
+  // A configured calendar that answers with nothing is the failure this whole
+  // command exists to catch: it looks exactly like a quiet fortnight.
+  const empty = calendars.filter(
+    (calendar) => !load.events.some((event) => event.calendarId === calendar.id),
+  );
+  return {
+    value: load,
+    detail,
+    ...(empty.length > 0
+      ? {
+          status: 'warn' as const,
+          note:
+            `read fine but empty: ${empty.map((calendar) => calendar.name).join(', ')} — ` +
+            'expected if they really are empty, a wrong calendar if not',
+        }
+      : {}),
+  };
+}
+
 export async function runDoctor(
   client: AulaClient,
   opts: { asText: boolean; days: number },
@@ -94,7 +164,17 @@ export async function runDoctor(
 
   // ---------------------------------------------------------- local tooling
 
-  await run('claude CLI', async () => claudeCliCheck(Bun.which));
+  const claude = await run('claude CLI', async () => claudeCliCheck(Bun.which));
+
+  // Only worth asking when there is a `claude` to ask it through; without one
+  // this would fail for a reason the check above has already reported.
+  await run('Google Calendar connector', async () =>
+    claude
+      ? await calendarConnectorCheck(readConfig().calendars ?? [], (calendars, window) =>
+          loadPersonalEvents(calendars, window),
+        )
+      : { value: null, status: 'skip' as const, detail: 'no `claude` to reach the connector' },
+  );
 
   // --------------------------------------------------------------- identity
 

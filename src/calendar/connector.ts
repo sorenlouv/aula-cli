@@ -88,8 +88,11 @@ const TOOL_PREFIX = 'mcp__claude_ai_Google_Calendar__';
  * Named rather than pattern-matched because `--disallowedTools` matches a real
  * server or tool name and nothing else — a bare `mcp__` prefix was measured to
  * deny nothing at all. So this list has to be revisited if the connector grows
- * a new way to write; `expectedCalls` below is the backstop that notices a call
- * we did not ask for, whatever its name.
+ * a new way to write, and that is exactly why it is not the only guard:
+ * `attemptTool` rejects a session that called anything outside the one tool it
+ * asked for plus ToolSearch, which needs revisiting for nothing. That check is
+ * what this comment used to promise under the name `expectedCalls`, and it did
+ * not exist — a call to another tool was filtered out and discarded in silence.
  */
 const WRITE_TOOLS = [
   `${TOOL_PREFIX}create_event`,
@@ -132,12 +135,34 @@ export type ConnectorCalendar = {
   accessRole?: string;
 };
 
+/**
+ * The page this asks for, and how many it will follow.
+ *
+ * Each page is a whole `claude` subprocess — 8–9s — so `MAX_PAGES` is a real
+ * budget rather than a formality. 250 is the connector's documented maximum
+ * for both listings, and asking for it explicitly is what keeps `list_calendars`
+ * off the default of 100.
+ */
+const PAGE_SIZE = 250;
+const MAX_PAGES = 4;
+
+/** One page of a paginated connector answer: the rows, and where to continue. */
+type Page<T> = { items: T[]; nextPageToken: string | null };
+
+/** `nextPageToken` is optional, but a non-string one is a contract break. */
+function pageToken(payload: Record<string, unknown>, tool: string): string | null {
+  const token = payload.nextPageToken;
+  if (token === undefined || token === null) return null;
+  if (typeof token !== 'string') throw new Error(`${tool} gav en ugyldig nextPageToken`);
+  return token.length > 0 ? token : null;
+}
+
 /** A valid JSON reply is not necessarily a valid connector reply. */
-export function parseCalendarsPayload(payload: unknown): ConnectorCalendar[] {
+export function parseCalendarsPayload(payload: unknown): Page<ConnectorCalendar> {
   if (!isRecord(payload) || !Array.isArray(payload.calendars)) {
     throw new Error('list_calendars svarede uden en calendars-liste');
   }
-  return payload.calendars.map((raw, index) => {
+  const items = payload.calendars.map((raw, index) => {
     if (!isRecord(raw) || typeof raw.id !== 'string' || !raw.id.trim()) {
       throw new Error(`list_calendars gav en ugyldig kalender på plads ${index + 1}`);
     }
@@ -152,30 +177,61 @@ export function parseCalendarsPayload(payload: unknown): ConnectorCalendar[] {
       ...(typeof raw.accessRole === 'string' ? { accessRole: raw.accessRole } : {}),
     };
   });
+  return { items, nextPageToken: pageToken(payload, 'list_calendars') };
 }
 
 /** Events are shaped later, but the envelope itself is a strict contract. */
-export function parseEventsPayload(payload: unknown): unknown[] {
+export function parseEventsPayload(payload: unknown): Page<unknown> {
   if (!isRecord(payload) || !Array.isArray(payload.events)) {
     throw new Error('list_events svarede uden en events-liste');
   }
-  if (payload.nextPageToken !== undefined && typeof payload.nextPageToken !== 'string') {
-    throw new Error('list_events gav en ugyldig nextPageToken');
+  return { items: payload.events, nextPageToken: pageToken(payload, 'list_events') };
+}
+
+/**
+ * Every page of one listing, or a complaint.
+ *
+ * Both of this module's reads are paginated and neither used to say so.
+ * `list_events` asked for 250 and treated a `nextPageToken` as fatal — "perioden
+ * er for lang" — so a busy shared calendar lost its whole fortnight rather than
+ * its 251st appointment. `list_calendars` never read the field at all, and the
+ * connector's default page is 100: an account with more calendars than that
+ * silently lost the tail, and the loss surfaced two commands later as
+ * `calendars set` reporting `No calendar named "…"` for one that plainly
+ * exists. Silent truncation in the *discovery* path is the worse of the two,
+ * because nothing downstream can tell a calendar that was cut off from one the
+ * user chose not to tick.
+ *
+ * Running out of pages is still an error rather than a shrug, for the reason
+ * the original check existed: a truncated fortnight must never pass for a
+ * quiet one.
+ */
+async function listAllPages<T>(
+  tool: string,
+  baseArgs: Record<string, unknown>,
+  parse: (payload: unknown) => Page<T>,
+  opts: { timeoutMs: number },
+): Promise<T[]> {
+  const items: T[] = [];
+  let token: string | null = null;
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const args: Record<string, unknown> = token ? { ...baseArgs, pageToken: token } : baseArgs;
+    const instruction = `Kald ${tool} med præcis dette JSON-objekt som argument: ${JSON.stringify(args)}`;
+    const parsed = parse(await callTool(tool, args, instruction, opts));
+    items.push(...parsed.items);
+    if (!parsed.nextPageToken) return items;
+    token = parsed.nextPageToken;
   }
-  if (typeof payload.nextPageToken === 'string' && payload.nextPageToken.length > 0) {
-    throw new Error('kalenderen gav flere sider end der blev læst — perioden er for lang');
-  }
-  return payload.events;
+  throw new Error(`${tool} gav flere end ${MAX_PAGES} sider — perioden er for lang`);
 }
 
 /** Calendars the connector can see. The whole of the setup flow's discovery. */
 export async function listCalendars(
   opts: { timeoutMs?: number } = {},
 ): Promise<ConnectorCalendar[]> {
-  const payload = await callTool('list_calendars', {}, 'Kald list_calendars uden argumenter.', {
+  return await listAllPages('list_calendars', { pageSize: PAGE_SIZE }, parseCalendarsPayload, {
     timeoutMs: opts.timeoutMs ?? TIMEOUT_MS,
   });
-  return parseCalendarsPayload(payload);
 }
 
 /** Raw events for one calendar over one window. Shaping is `index.ts`'s job. */
@@ -185,14 +241,12 @@ export async function listEvents(
   endTime: string,
   opts: { timeoutMs?: number } = {},
 ): Promise<unknown[]> {
-  const args = { calendarId, startTime, endTime, pageSize: 250 };
-  const payload = await callTool(
+  return await listAllPages(
     'list_events',
-    args,
-    `Kald list_events med præcis dette JSON-objekt som argument: ${JSON.stringify(args)}`,
+    { calendarId, startTime, endTime, pageSize: PAGE_SIZE },
+    parseEventsPayload,
     { timeoutMs: opts.timeoutMs ?? TIMEOUT_MS },
   );
-  return parseEventsPayload(payload);
 }
 
 // --------------------------------------------------------------- transport
@@ -339,6 +393,22 @@ async function attemptTool(
   if (run.code !== 0 && stream.calls.length === 0) {
     const detail = run.stderr.trim() || run.stdout.trim().slice(0, 200) || '(ingen fejltekst)';
     throw new Error(`claude -p afsluttede med ${run.code}: ${detail}`);
+  }
+
+  // The backstop this module's header has promised all along and never had:
+  // the comment on WRITE_TOOLS pointed at an `expectedCalls` that was never
+  // written, and the code below only ever *filtered* for the tool it wanted —
+  // so a call to anything else was discarded in silence rather than refused.
+  // The deny list is by name and has to be revisited whenever the connector
+  // grows a way to write; this needs revisiting for nothing, because it names
+  // what is allowed instead. ToolSearch is on the list because a deferred MCP
+  // tool cannot be reached without it.
+  const unexpected = stream.calls.filter(
+    (call) => call.name !== name && call.name !== 'ToolSearch',
+  );
+  if (unexpected.length > 0) {
+    const named = [...new Set(unexpected.map((call) => call.name))].join(', ');
+    throw new Error(`sessionen kaldte værktøjer, der ikke blev bedt om: ${named}`);
   }
 
   const calls = stream.calls.filter((call) => call.name === name);

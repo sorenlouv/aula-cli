@@ -14,7 +14,10 @@
  *   FAKE_CLAUDE_MODE         ok | error | denied | stall | stall-ignore-term | stall-then-ok |
  *                            structured-then-stall | structured-unconfirmed-stall | stream
  *   FAKE_CLAUDE_STREAM_FILE  for `stream`: a file of NDJSON copied to stdout verbatim, so a
- *                            caller can hand `parseStream`'s reader a whole session
+ *                            caller can hand `parseStream`'s reader a whole session.
+ *                            `<file>.<n>` overrides it for the nth call (needs
+ *                            FAKE_CLAUDE_LOG, which is what counts calls) — that is how a
+ *                            paginated read is scripted, page 2 being its own process
  *   FAKE_CLAUDE_RESULT_JSON  the `result` field for `ok`, already JSON-encoded (default "OK")
  *   FAKE_CLAUDE_LOG          append one line per call (the argv), and count calls from it
  *                            `<log>.results` may hold one JSON result per call
@@ -63,7 +66,13 @@ if [ "$mode" = "stall-then-ok" ]; then
 fi
 case "$mode" in
   stream)
-    if [ -n "$FAKE_CLAUDE_STREAM_FILE" ] && [ -f "$FAKE_CLAUDE_STREAM_FILE" ]; then
+    # \`<file>.<n>\` serves a different session to the nth call, which is what a
+    # paginated read needs: page 2 is a separate \`claude\` process asking with a
+    # pageToken. Falls back to the base file, so the single-session case stays a
+    # single file. Numbering needs FAKE_CLAUDE_LOG, which is what counts calls.
+    if [ -n "$FAKE_CLAUDE_STREAM_FILE" ] && [ -f "$FAKE_CLAUDE_STREAM_FILE.$n" ]; then
+      cat "$FAKE_CLAUDE_STREAM_FILE.$n"
+    elif [ -n "$FAKE_CLAUDE_STREAM_FILE" ] && [ -f "$FAKE_CLAUDE_STREAM_FILE" ]; then
       cat "$FAKE_CLAUDE_STREAM_FILE"
     fi
     ;;

@@ -626,15 +626,124 @@ test('calendar connector discovery and fetch failures are explicit non-zero resu
   // against the connector's own startup looked like, and asserting the
   // conclusion sent people to reconnect something already connected.
   const missing = sandboxWithClaude('ok').run('calendars');
-  assert.equal(missing.code, 1);
+  // 5, the fleet's "setup required — do not retry unchanged". This was 1,
+  // which every sibling reads as "a source is down, retry later", so an agent
+  // driving the fleet would loop on a state that only a person can change.
+  assert.equal(missing.code, 5);
   assert.match(missing.stderr, /reported no MCP servers at all/);
   assert.doesNotMatch(missing.stderr, /^Google Calendar is not connected/m);
   assert.match(missing.stderr, /Settings.*Connectors.*Google Calendar/s);
 
+  // A `claude` that ran and failed is the opposite case: something is down and
+  // retrying is exactly the right advice, so it keeps exit 1.
   const failed = sandboxWithClaude('error').run('calendars');
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /Could not ask Claude for your calendars/);
   assert.match(failed.stderr, /Not logged in/);
+});
+
+/**
+ * A sandbox whose `claude` answers one scripted connector session per call.
+ *
+ * The `ok` fake cannot do this: it emits a `result` envelope with no `init`
+ * line and no tool call, which is a *broken* connector. Everything below the
+ * "is it connected" branch — resolving a name, saving it, reading the receipt
+ * back — therefore had no end-to-end coverage at all.
+ */
+function sandboxWithConnector(sessions: unknown[][]) {
+  const box = sandboxWithClaude('stream');
+  const file = join(box.dir, 'session.ndjson');
+  const write = (path: string, lines: unknown[]) =>
+    writeFileSync(path, lines.map((line) => JSON.stringify(line)).join('\n'));
+  sessions.forEach((lines, index) => write(`${file}.${index + 1}`, lines));
+  write(file, sessions.at(-1) ?? []);
+  box.env.FAKE_CLAUDE_STREAM_FILE = file;
+  box.env.FAKE_CLAUDE_LOG = join(box.dir, 'claude-calls.log');
+  writeFileSync(box.env.FAKE_CLAUDE_LOG, '');
+  return box;
+}
+
+const CONNECTED = {
+  type: 'system',
+  subtype: 'init',
+  mcp_servers: [{ name: 'claude.ai Google Calendar', status: 'connected' }],
+};
+
+/** One scripted connector call: the tool_use we expect, and its payload. */
+const connectorCall = (tool: string, input: unknown, payload: unknown) => [
+  CONNECTED,
+  {
+    type: 'assistant',
+    message: {
+      content: [
+        { type: 'tool_use', id: 'tu_1', name: `mcp__claude_ai_Google_Calendar__${tool}`, input },
+      ],
+    },
+  },
+  {
+    type: 'user',
+    message: {
+      content: [{ type: 'tool_result', tool_use_id: 'tu_1', content: JSON.stringify(payload) }],
+    },
+  },
+];
+
+const CALENDARS = connectorCall(
+  'list_calendars',
+  { pageSize: 250 },
+  {
+    calendars: [
+      { id: 'familien@eksempel.dk', summary: 'Familien' },
+      { id: 'arbejde@eksempel.dk', summary: 'Arbejde' },
+    ],
+  },
+);
+
+test('calendars lists what the connector sees and marks what is read', () => {
+  const box = sandboxWithConnector([CALENDARS]);
+  const listed = box.run('calendars');
+  assert.equal(listed.code, 0, listed.stderr);
+  assert.match(listed.stdout, /"Familien"/);
+  assert.match(listed.stdout, /"Arbejde"/);
+  assert.match(listed.stdout, /reads none of them yet/);
+});
+
+test('a calendar name that is wrong is a usage error, not an outage', () => {
+  const box = sandboxWithConnector([CALENDARS]);
+  const wrong = box.run('calendars', 'set', 'Nothing like it');
+  // 2, not 1: the name came off the command line. It used to share exit 1 with
+  // "Aula is down", which is the one reading that makes an agent retry.
+  assert.equal(wrong.code, 2);
+  assert.match(wrong.stderr, /No calendar named "Nothing like it"/);
+});
+
+test('a name that differs only in case still names its calendar', () => {
+  const box = sandboxWithConnector([CALENDARS]);
+  // Already selected, so `set` settles without the receipt read a newly started
+  // calendar triggers — the subject here is resolution, not the receipt.
+  writeFileSync(
+    join(box.dir, 'config.json'),
+    JSON.stringify({ calendars: [{ id: 'familien@eksempel.dk', name: 'Familien' }] }),
+  );
+  // The agent is copying this out of a checkbox question a person answered,
+  // which is where the case and the spaces go. `No calendar named "familien"`
+  // about a calendar in the list directly above taught nobody anything.
+  const set = box.run('calendars', 'set', '  familien ');
+  assert.equal(set.code, 0, set.stderr);
+  assert.match(set.stdout, /Already reading "Familien"/);
+});
+
+test('dropping a saved calendar needs no connector at all', () => {
+  const box = sandboxWithClaude('ok');
+  writeFileSync(
+    join(box.dir, 'config.json'),
+    JSON.stringify({ calendars: [{ id: 'familien@eksempel.dk', name: 'Familien' }] }),
+  );
+  const none = box.run('calendars', 'set', 'none');
+  assert.equal(none.code, 0, none.stderr);
+  assert.match(none.stdout, /Stopped reading "Familien"/);
+  // The whole point: unticking must keep working while the connector does not.
+  assert.equal(none.stderr, '');
 });
 
 test('publish creates the artifact, saves its url to config.json, and records the deploy', () => {

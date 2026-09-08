@@ -240,9 +240,20 @@ being read, so when the user asks to add one, pass the ones already marked too.
 
 Show the list and let the user choose; never pick for them. Use exact displayed
 names, or the displayed id where names collide — never a numbered position from
-an earlier live listing. Claude's Google Calendar connector is the only route
-there is, so if it is not connected or a read fails, say so rather than reaching
-for an alternative or treating it as an empty fortnight.
+an earlier live listing. Case and surrounding spaces are forgiven, an exact name
+always wins, and two calendars that differ only in case are refused rather than
+guessed at. Claude's Google Calendar connector is the only route there is, so if
+it is not connected or a read fails, say so rather than reaching for an
+alternative or treating it as an empty fortnight.
+
+**Exit 5 means the connector is not connected — do not retry it.** Only a person
+clicking Connect changes that, so hand them the steps it printed and move on;
+looping the command is what exit 1 is for. Exit 2 is a calendar name that does
+not match, which one `aula calendars` and a corrected name fixes.
+
+`aula doctor` reads the configured calendars for real and reports what came
+back, including a configured calendar that answered with nothing — worth running
+before promising the user their appointments will appear tomorrow morning.
 
 In a model-enabled overview, each appointment in the fixed next-14-day window
 is a source in the same model relevance pass as the Aula posts. Missing model

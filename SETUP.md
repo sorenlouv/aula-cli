@@ -294,11 +294,18 @@ It reports how many appointments each newly added calendar holds in the
 window the overview reads. Pass that back to the user, and say so if one comes
 back empty when they expected otherwise.
 
-**If it says Google Calendar is not connected**, it prints the few clicks —
-Claude → Settings → Connectors → Google Calendar → Connect. Hand those to the
-user and wait: there is no API key or calendar-link alternative. If they would
+**If it says Google Calendar is not connected** (exit 5), it prints the few
+clicks — Claude → Settings → Connectors → Google Calendar → Connect. Hand those
+to the user and wait: there is no API key or calendar-link alternative, and
+re-running the command changes nothing until they have clicked. If they would
 rather not do it now, move on. `aula calendars` works at any time, nothing else
 in the setup depends on it, and step 11 reminds them.
+
+The command also prints what the session actually reported, above those clicks.
+Read it before handing the clicks over: it distinguishes a connector that is
+genuinely absent from the account from one that is connected but has lost its
+Google grant, and from a session that got no connector list at all — which is
+what `ANTHROPIC_API_KEY` set in the environment does, silently.
 
 ## 7. The first overview
 

@@ -7,8 +7,10 @@
  */
 
 import { describe, expect, test } from 'bun:test';
+import type { CalendarLoad } from './calendar/index.ts';
 import type { AulaClient } from './client.ts';
-import { claudeCliCheck, runDoctor } from './doctor.ts';
+import { calendarConnectorCheck, claudeCliCheck, runDoctor } from './doctor.ts';
+import { localIsoDate } from './integrations/types.ts';
 
 /** Just enough client for the two identity checks and the report header. */
 function stubClient(over: Partial<Record<'getProfiles' | 'getProfileContext', () => unknown>>) {
@@ -101,5 +103,90 @@ describe('claudeCliCheck', () => {
     expect(claude).toBeDefined();
     expect(claude.status === 'ok' || claude.status === 'warn').toBe(true);
     expect(code).toBe(0);
+  });
+});
+
+describe('calendarConnectorCheck', () => {
+  const FAMILY = { id: 'familien@eksempel.dk', name: 'Familien' };
+  const ARBEJDE = { id: 'arbejde@eksempel.dk', name: 'Arbejde' };
+  const event = (calendarId: string) => ({ calendarId }) as CalendarLoad['events'][number];
+
+  const load = (over: Partial<CalendarLoad> = {}): CalendarLoad => ({
+    events: [],
+    warnings: [],
+    notConnected: false,
+    ...over,
+  });
+
+  test('no configured calendar is a skip, because that is the documented default', async () => {
+    const outcome = await calendarConnectorCheck([], async () => load());
+
+    expect(outcome.status).toBe('skip');
+    expect(outcome.detail).toContain('no calendars configured');
+  });
+
+  /**
+   * The whole reason this check exists. A lapsed connector passes every Aula
+   * check, accepts `aula schedule`, and then drops the calendar half of the
+   * brief at 06:00 with nobody watching — and a page with no appointments on
+   * it is indistinguishable from a quiet fortnight.
+   */
+  test('a missing connector warns with the command that fixes it', async () => {
+    const outcome = await calendarConnectorCheck([FAMILY], async () =>
+      load({ notConnected: true, warnings: ['Google Kalender blev ikke læst'] }),
+    );
+
+    expect(outcome.status).toBe('warn');
+    expect(outcome.note).toContain('not connected');
+    expect(outcome.note).toContain('calendars');
+  });
+
+  test('a calendar that reads fine but is empty is called out by name', async () => {
+    const outcome = await calendarConnectorCheck([FAMILY, ARBEJDE], async () =>
+      load({ events: [event(FAMILY.id)] }),
+    );
+
+    // Not a failure — it may really be empty — but the one thing a silent pass
+    // would hide is precisely a calendar configured against the wrong id.
+    expect(outcome.status).toBe('warn');
+    expect(outcome.note).toContain('Arbejde');
+    expect(outcome.note).not.toContain('Familien');
+  });
+
+  test('both calendars answering is a plain pass with the counts', async () => {
+    const outcome = await calendarConnectorCheck([FAMILY, ARBEJDE], async () =>
+      load({ events: [event(FAMILY.id), event(ARBEJDE.id)] }),
+    );
+
+    expect(outcome.status).toBeUndefined(); // defaults to ok
+    expect(outcome.detail).toContain('2 appointment(s)');
+    expect(outcome.note).toBeUndefined();
+  });
+
+  test('a per-calendar warning is reported rather than swallowed', async () => {
+    const outcome = await calendarConnectorCheck([FAMILY], async () =>
+      load({ events: [event(FAMILY.id)], warnings: ['1 aftale(r) i «Familien» kunne ikke læses'] }),
+    );
+
+    expect(outcome.status).toBe('warn');
+    expect(outcome.note).toContain('kunne ikke læses');
+  });
+
+  test('it asks for the same fortnight the overview reads', async () => {
+    let asked: { from: Date; to: Date } | undefined;
+    await calendarConnectorCheck(
+      [FAMILY],
+      async (_calendars, window) => {
+        asked = window;
+        return load();
+      },
+      new Date(2026, 8, 8, 14, 30),
+    );
+
+    // Local midnight to local midnight, which is also what makes the read a
+    // cache hit rather than a fresh pair of subprocesses.
+    expect(asked?.from.getHours()).toBe(0);
+    expect(asked && localIsoDate(asked.from)).toBe('2026-09-08');
+    expect(asked && localIsoDate(asked.to)).toBe('2026-09-22');
   });
 });
