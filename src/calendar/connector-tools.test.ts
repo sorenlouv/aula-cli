@@ -27,6 +27,8 @@ beforeAll(() => {
 afterEach(() => {
   delete process.env.FAKE_CLAUDE_LOG;
   delete process.env.FAKE_CLAUDE_MODE;
+  delete process.env.FAKE_CLAUDE_ENV_LOG;
+  delete process.env.FAKE_CLAUDE_ENV_KEYS;
 });
 
 afterAll(() => {
@@ -47,6 +49,26 @@ async function argvOfOneCall(): Promise<string> {
   process.env.FAKE_CLAUDE_LOG = log;
   await listCalendars({ timeoutMs: 20_000 }).catch(() => undefined);
   return readFileSync(log, 'utf8');
+}
+
+/**
+ * The named variables every `claude` a `listCalendars` starts was given — one
+ * entry per call, because the fake's envelope is one this code rejects and the
+ * retry is therefore also exercised. A variable that has to be set has to be
+ * set on the retry too.
+ */
+async function envOfEveryCall(keys: string[]): Promise<string[]> {
+  const dir = mkdtempSync(join(tmpdir(), 'aula-env-log-'));
+  dirs.push(dir);
+  const log = join(dir, 'env.log');
+  writeFileSync(log, '');
+  process.env.FAKE_CLAUDE_ENV_LOG = log;
+  process.env.FAKE_CLAUDE_ENV_KEYS = keys.join(' ');
+  await listCalendars({ timeoutMs: 20_000 }).catch(() => undefined);
+  return readFileSync(log, 'utf8')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
 }
 
 describe('the calendar session’s tool surface', () => {
@@ -89,5 +111,20 @@ describe('the calendar session’s tool surface', () => {
   test('does not pretend to have restricted the other connectors', async () => {
     const argv = await argvOfOneCall();
     expect(argv).not.toContain('--strict-mcp-config');
+  });
+
+  /**
+   * The regression, and the only one of these assertions that is about the
+   * environment rather than argv — which is why it went unnoticed. A claude.ai
+   * connector is fetched from the account at startup and connected
+   * fire-and-forget, so the session's tool list is normally assembled before
+   * the calendar tool exists. Measured: six runs in seven reported
+   * `mcp_servers: []` and never called the tool, and `aula calendars` reported
+   * a connector the user had already connected as missing.
+   */
+  test('waits for the claude.ai connectors instead of racing them', async () => {
+    const calls = await envOfEveryCall(['MCP_CONNECTION_NONBLOCKING']);
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls).toEqual(calls.map(() => 'MCP_CONNECTION_NONBLOCKING=false'));
   });
 });

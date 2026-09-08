@@ -620,9 +620,15 @@ function sandboxWithClaude(mode: string, result?: string) {
 }
 
 test('calendar connector discovery and fetch failures are explicit non-zero results', () => {
+  // The fake answers with a `result` envelope and no `init` line, so the
+  // session reported no servers at all. That is the one branch that must not
+  // be stated as "Google Calendar is not connected": it is also what a race
+  // against the connector's own startup looked like, and asserting the
+  // conclusion sent people to reconnect something already connected.
   const missing = sandboxWithClaude('ok').run('calendars');
   assert.equal(missing.code, 1);
-  assert.match(missing.stderr, /Google Calendar is not connected in Claude/);
+  assert.match(missing.stderr, /reported no MCP servers at all/);
+  assert.doesNotMatch(missing.stderr, /^Google Calendar is not connected/m);
   assert.match(missing.stderr, /Settings.*Connectors.*Google Calendar/s);
 
   const failed = sandboxWithClaude('error').run('calendars');

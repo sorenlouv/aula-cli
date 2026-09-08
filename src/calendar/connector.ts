@@ -51,6 +51,29 @@ const TIMEOUT_MS = 120_000;
 /** How the connector's server announces itself in the session's `init` line. */
 const SERVER_MATCH = /google\s*calendar/i;
 
+/**
+ * The one environment variable that decides whether this module works at all.
+ *
+ * A claude.ai connector is not configured on disk: the CLI fetches the account's
+ * server list from `api.anthropic.com/v1/mcp_servers` at startup and then opens
+ * a proxy connection per server. By default that whole leg is fire-and-forget —
+ * the debug log says `[MCP] claude.ai connectors running fully async
+ * (nonblocking)` — and the session assembles its tool list and its `init`
+ * envelope without waiting for it. Measured on this machine: the fetch lands
+ * about 380ms after startup and the connections 15ms after that, which is
+ * comfortably *after* the prompt has already been built. Six runs out of seven
+ * therefore reported `mcp_servers: []` and no calendar tool, and the seventh
+ * won the race and worked — which is exactly the shape of a bug that reads as
+ * "the connector is not connected" while `claude mcp list` says it is.
+ *
+ * `MCP_CONNECTION_NONBLOCKING=false` makes the CLI await that leg instead. It
+ * costs the ~400ms the fetch takes and turns a race into a guarantee. It is set
+ * here rather than in `spawnClaude` because this is the only caller that has an
+ * MCP server to wait for; the brief's own `claude` calls use no connector and
+ * should not buy a network round-trip they will not read.
+ */
+const CONNECTOR_ENV = { MCP_CONNECTION_NONBLOCKING: 'false' };
+
 /** Tool names are the server name with everything non-alphanumeric flattened. */
 const TOOL_PREFIX = 'mcp__claude_ai_Google_Calendar__';
 
@@ -81,9 +104,23 @@ const WRITE_TOOLS = [
  * Its own error, because it is the one failure with a cure the user can act on
  * — and the only one the setup command turns into instructions rather than a
  * complaint.
+ *
+ * Two audiences, so two strings. `message` is Danish because it becomes a
+ * `Datastatus` line on the parent's page; `observed` is English because it is
+ * read by the agent running `aula calendars`, which is the same split
+ * `SETUP.md` makes. It says what the session actually reported rather than
+ * what we concluded from it, because the three routes here — no server list at
+ * all, a list without ours, a server that will not authenticate — have three
+ * different cures and used to be printed with one.
  */
 export class CalendarNotConnectedError extends Error {
   override readonly name = 'CalendarNotConnectedError';
+  constructor(
+    message: string,
+    readonly observed: string,
+  ) {
+    super(message);
+  }
 }
 
 export type ConnectorCalendar = {
@@ -174,9 +211,11 @@ async function callTool(
   instruction: string,
   opts: { timeoutMs: number },
 ): Promise<unknown> {
-  // A transient gets exactly one fresh process. Measured: the session's `init`
-  // envelope reports an empty server list on roughly one run in three, and
-  // without a retry that fraction of mornings would lose the calendar.
+  // A transient gets exactly one fresh process. The empty server list this
+  // guards against used to be the *normal* outcome rather than a transient —
+  // see `CONNECTOR_ENV`, which is the actual fix — and a retry could not help,
+  // because a second process lost the same race. It stays because the fetch it
+  // now waits for is a network call that can still fail on its own.
   let last: Error | undefined;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
@@ -190,7 +229,11 @@ async function callTool(
     }
   }
   if (last instanceof CalendarToolUnavailableError) {
-    throw new CalendarNotConnectedError('Google Kalender er ikke forbundet i Claude.');
+    throw new CalendarNotConnectedError(
+      'Google Kalender er ikke forbundet i Claude.',
+      'The claude session reported no MCP servers at all, twice. That is not the same as ' +
+        'Google Calendar being absent from the list — the account server list never arrived.',
+    );
   }
   throw last ?? new Error(`${tool} fejlede`);
 }
@@ -252,7 +295,7 @@ async function attemptTool(
       '--verbose',
       ...modelEffortArgs('transport'),
     ],
-    { timeoutMs: opts.timeoutMs },
+    { timeoutMs: opts.timeoutMs, env: CONNECTOR_ENV },
   );
 
   if (run.timedOut) {
@@ -263,16 +306,34 @@ async function attemptTool(
 
   const stream = parseStream(run.stdout);
   // Only a *populated* server list that lacks ours is evidence of absence. An
-  // empty one means the session had not registered its servers yet when the
-  // envelope was written — saying "not connected" on that would send somebody
-  // off to connect a connector they already have.
+  // empty one means the session never got an account server list at all — the
+  // fetch failed, or `ANTHROPIC_API_KEY` in the environment took precedence
+  // over the claude.ai login and disabled connectors wholesale. Saying "not
+  // connected" on that would send somebody off to connect a connector they
+  // already have, which is precisely the wrong-diagnosis this module keeps
+  // walking into.
   const calendarServer = stream.servers.find((server) => SERVER_MATCH.test(server.name));
   if (stream.servers.length > 0 && !calendarServer) {
-    throw new CalendarNotConnectedError('Google Kalender er ikke forbundet i Claude.');
+    const named = stream.servers.map((server) => server.name).join(', ');
+    throw new CalendarNotConnectedError(
+      'Google Kalender er ikke forbundet i Claude.',
+      `The claude session listed its connectors and Google Calendar was not among them: ${named}.`,
+    );
   }
-  if (calendarServer?.status && /failed|error|disconnected/i.test(calendarServer.status)) {
+  // `needs-auth` is in this list because it is the failure the user can
+  // actually act on and the one this check exists for: the connector is
+  // configured, its OAuth grant has lapsed, and reconnecting it is the cure.
+  // Without it that state fell through to the generic branch below and came
+  // back as "list_events blev aldrig kaldt" — true, and useless. The status
+  // vocabulary the CLI emits is `connected`, `pending`, `needs-auth`, `failed`
+  // and `disconnected`; only the first two are worth proceeding on.
+  if (
+    calendarServer?.status &&
+    /needs-auth|failed|error|disconnected/i.test(calendarServer.status)
+  ) {
     throw new CalendarNotConnectedError(
       `Google Kalender-forbindelsen i Claude svarer ${calendarServer.status}.`,
+      `The Google Calendar connector is configured but reports "${calendarServer.status}".`,
     );
   }
   if (run.code !== 0 && stream.calls.length === 0) {

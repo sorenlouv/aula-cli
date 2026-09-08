@@ -12,11 +12,20 @@
  * serves a whole test file:
  *
  *   FAKE_CLAUDE_MODE         ok | error | denied | stall | stall-ignore-term | stall-then-ok |
- *                            structured-then-stall | structured-unconfirmed-stall
+ *                            structured-then-stall | structured-unconfirmed-stall | stream
+ *   FAKE_CLAUDE_STREAM_FILE  for `stream`: a file of NDJSON copied to stdout verbatim, so a
+ *                            caller can hand `parseStream`'s reader a whole session
  *   FAKE_CLAUDE_RESULT_JSON  the `result` field for `ok`, already JSON-encoded (default "OK")
  *   FAKE_CLAUDE_LOG          append one line per call (the argv), and count calls from it
  *                            `<log>.results` may hold one JSON result per call
  *   FAKE_CLAUDE_CWD_LOG      append one line per call: the directory it was started in
+ *   FAKE_CLAUDE_ENV_LOG      append one line per call: `NAME=value` for each space-separated
+ *                            name in FAKE_CLAUDE_ENV_KEYS, and nothing else. The calendar
+ *                            connector's whole correctness rests on one such variable and
+ *                            argv cannot see it; the named-keys restriction is so that a
+ *                            failed assertion prints that variable rather than the
+ *                            developer's whole environment.
+ *   FAKE_CLAUDE_ENV_KEYS     which names FAKE_CLAUDE_ENV_LOG records
  *
  * `stall` sleeps as a child of the script, so killing the script leaves an
  * orphan holding the stdout pipe — the exact hostage situation spawnClaude is
@@ -34,6 +43,18 @@ if [ -n "$FAKE_CLAUDE_LOG" ]; then printf '%s' "$*" | tr '\\n' ' ' >> "$FAKE_CLA
 # Where it was started, which is the whole subject of claude.test.ts: a session
 # inherits its working directory as a project, so who chooses it matters.
 if [ -n "$FAKE_CLAUDE_CWD_LOG" ]; then pwd >> "$FAKE_CLAUDE_CWD_LOG"; fi
+# One line per call, holding only the variables the caller named. Never the
+# whole environment: a failing assertion prints what it received, and this
+# process inherits the parent's — which on a developer's machine carries session
+# tokens and paths that have no business in a public repository's CI log.
+if [ -n "$FAKE_CLAUDE_ENV_LOG" ]; then
+  line=""
+  for key in $FAKE_CLAUDE_ENV_KEYS; do
+    eval "value=\\\${$key-}"
+    line="$line$key=$value "
+  done
+  printf '%s\\n' "$line" >> "$FAKE_CLAUDE_ENV_LOG"
+fi
 n=0
 if [ -n "$FAKE_CLAUDE_LOG" ]; then n=$(wc -l < "$FAKE_CLAUDE_LOG" | tr -d ' '); fi
 mode="\${FAKE_CLAUDE_MODE:-ok}"
@@ -41,6 +62,11 @@ if [ "$mode" = "stall-then-ok" ]; then
   if [ "$n" -le 1 ]; then mode=stall; else mode=ok; fi
 fi
 case "$mode" in
+  stream)
+    if [ -n "$FAKE_CLAUDE_STREAM_FILE" ] && [ -f "$FAKE_CLAUDE_STREAM_FILE" ]; then
+      cat "$FAKE_CLAUDE_STREAM_FILE"
+    fi
+    ;;
   stall)
     sleep 10
     ;;
