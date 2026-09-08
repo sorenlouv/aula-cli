@@ -183,6 +183,31 @@ fallback sources.
 - **The slot times are in `~/.aula/config.json` as well as in the plist.** A
   plist cannot be asked what it says, and the run a heartbeat starts has to
   know which slot it is in. `aula schedule` writes both, config first.
+- **The calendar session must be told to wait for its own connector:
+  `MCP_CONNECTION_NONBLOCKING=false`.** A claude.ai connector is not configured
+  on disk — the CLI fetches the account's server list from
+  `api.anthropic.com/v1/mcp_servers` at startup and connects each one — and by
+  default that whole leg is fire-and-forget (`[MCP] claude.ai connectors running
+  fully async (nonblocking)` in `claude --debug-file`). The session's tool list
+  and its `init` envelope are assembled without it. Measured here: the fetch
+  lands ~380ms in, the prompt long before that, and six runs in seven reported
+  `mcp_servers: []` and never called the tool. `aula calendars` therefore told a
+  user with Google Calendar connected that it was not connected, while
+  `claude mcp list` said `✔ Connected` — the seventh run won the race and
+  worked, which is what kept it looking intermittent. `connector.ts` sets the
+  variable; nothing else needs it, and the brief's own `claude` calls should not
+  buy the round-trip. **`mcp_servers: []` in an `init` line is not evidence that
+  a connector is missing** — it is equally the account list never having
+  arrived, which `ANTHROPIC_API_KEY` in the environment also causes by taking
+  precedence over the claude.ai login.
+- **MCP tools are deferred in a headless run, so a prompt that forbids other
+  tools must exempt `ToolSearch`.** The session lists an MCP tool's name and
+  withholds its schema until `ToolSearch` asks for it, so "call no other tools"
+  forbade the only route to the tool it was demanding.
+- **A connector's `status` vocabulary is `connected`, `pending`, `needs-auth`,
+  `failed`, `disconnected`.** `needs-auth` is the lapsed Google grant — the one
+  state where "reconnect it" is the right advice — and it used to fall past the
+  status check and come back as `list_events blev aldrig kaldt`.
 - **Two caches, and `cache status` reports both.** Remote *responses* — Aula,
   the vendor weekly plans and the Google Calendar reads — share one TTL'd
   `ResponseCache` in `~/.aula/cache/responses`; the model's *layout* is cached

@@ -888,15 +888,25 @@ async function runCalendars(positionals: string[]): Promise<number> {
     return sub === undefined ? await showCalendars() : await setCalendars(refs);
   } catch (err) {
     if (err instanceof UsageError) throw err;
+    // The observed reason comes first, then the cure. This block used to assert
+    // "not connected" flatly, whatever `attemptTool` had actually seen — and
+    // when the real cause was a race against the connector's own startup, it
+    // sent somebody to Settings to connect a connector already sitting there
+    // marked Connected. A wrong diagnosis stated confidently is worse than a
+    // vague one: it spends the reader's time proving the tool wrong.
     if (err instanceof CalendarNotConnectedError) {
       console.error(
         [
-          'Google Calendar is not connected in Claude yet.',
+          err.observed,
           '',
-          'Connect it once and there is nothing else to set up — it also reads',
-          'calendars other people have shared with you, which a calendar link cannot:',
+          'If it is not connected, connecting it is all there is to set up — it also',
+          'reads calendars other people have shared with you, which a link cannot:',
           '',
           '  Claude  →  Settings  →  Connectors  →  Google Calendar  →  Connect',
+          '',
+          'If Claude already lists it as connected, `claude mcp list` says what the',
+          'CLI itself can see; ANTHROPIC_API_KEY in the environment takes precedence',
+          'over the claude.ai login and hides every connector.',
           '',
           `Then run \`${cmd('calendars')}\` again.`,
         ].join('\n'),

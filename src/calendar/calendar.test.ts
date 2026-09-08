@@ -229,10 +229,13 @@ describe('reading the tool call off the stream', () => {
   });
 
   test('an empty server list is not evidence that the connector is missing', () => {
-    // Measured: the init envelope reports `mcp_servers: []` on roughly one run
-    // in three, written before the session had registered them. Reading that
-    // as "not connected" sends somebody off to connect a connector they
-    // already have — and would do it on a third of mornings. Only a populated
+    // Measured, and the estimate this comment used to carry — "one run in
+    // three" — was far too kind: with the connectors connecting
+    // fire-and-forget it was six in seven, and the cause was a race rather
+    // than a transient. `CONNECTOR_ENV` is what closes it. The rule here
+    // outlives the fix, because an empty list is still what an unreachable
+    // account server list looks like, and reading it as "not connected" sends
+    // somebody off to connect a connector they already have. Only a populated
     // list without ours counts as absence; see `attemptTool`.
     const line = JSON.stringify({ type: 'system', subtype: 'init', mcp_servers: [] });
     expect(parseStream(line).servers).toEqual([]);
