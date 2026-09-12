@@ -16,7 +16,13 @@
  */
 
 import { localIsoDate } from '../integrations/types.ts';
-import { findRecurringWeekdays, nextRecurringDate, overviewWindow } from './dates.ts';
+import {
+  buildDateSupport,
+  findRecurringWeekdays,
+  nextRecurringDate,
+  overviewWindow,
+  recurrenceWeekdayOf,
+} from './dates.ts';
 import { extractHits } from './rules.ts';
 import type {
   BriefInput,
@@ -119,24 +125,6 @@ function placementOf(
   if (actionableNow) return 'action';
   if (!date) return 'undated';
   return date > overviewThrough ? 'future' : 'upcoming';
-}
-
-/**
- * A recurrence is presentation metadata only when the card and one of its own
- * sources agree on the weekday. That keeps a source's unrelated weekly routine
- * from turning another card into a recurring one.
- */
-function recurrenceWeekdayOf(card: Card, sources: SourceItem[]): number | null {
-  const cardDays = new Set(findRecurringWeekdays(`${card.title}\n${card.summary}`));
-  const sourceDays = new Set(
-    sources.flatMap((source) => findRecurringWeekdays(`${source.title}\n${source.text}`)),
-  );
-  const shared = [...cardDays].filter((day) => sourceDays.has(day));
-  if (shared.length === 1) return shared[0] ?? null;
-  if (!card.recurring) return null;
-  const datedWeekday = card.date ? new Date(`${card.date}T00:00:00`).getDay() : null;
-  const candidates = [...sourceDays].filter((day) => datedWeekday === null || day === datedWeekday);
-  return candidates.length === 1 ? (candidates[0] ?? null) : null;
 }
 
 function displayedCardDate(card: Card, recurrenceWeekday: number | null, today: string) {
@@ -246,9 +234,12 @@ export function rank(
         : modelCards;
 
   const { through: overviewThrough } = overviewWindow(input.today);
+  // The same evidence the validator read; a recurrence badge is presentation
+  // metadata only when the card and one of its own sources agree on the day.
+  const support = buildDateSupport(input);
   const ranked: RankedCard[] = chosen.map((card) => {
     const sources = card.sourceKeys.map((key) => itemByKey.get(key)!);
-    const recurrenceWeekday = recurrenceWeekdayOf(card, sources);
+    const recurrenceWeekday = recurrenceWeekdayOf(card, card.sourceKeys, support);
     const date = displayedCardDate(card, recurrenceWeekday, input.today);
     return {
       ...card,

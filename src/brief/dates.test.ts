@@ -7,6 +7,7 @@ import {
   findRecurringWeekdays,
   nextRecurringDate,
   overviewWindow,
+  recurrenceWeekdayOf,
   unsupportedDateClaims,
 } from './dates.ts';
 import type { BriefInput, SourceItem } from './types.ts';
@@ -157,6 +158,58 @@ describe('recurring weekdays', () => {
   test('projects to the weekday on or after the brief day', () => {
     expect(nextRecurringDate(1, '2026-08-24')).toBe('2026-08-24');
     expect(nextRecurringDate(4, '2026-08-24')).toBe('2026-08-27');
+  });
+});
+
+describe('the timetable as recurrence evidence', () => {
+  // Today is Thursday 13 August; PE sits on the Thursday of this week's plan
+  // and next week's, swimming on one Wednesday only.
+  const plan = (key: string, title: string, at: string, text = '') =>
+    sourceItem({ key, kind: 'plan', title, text, at });
+  const thisThursday = plan('plan:w33:thu', 'Idræt / 1B', '2026-08-13T08:00:00', 'Vi er i hallen.');
+  const nextThursday = plan('plan:w34:thu', 'Idræt / 1B', '2026-08-20T08:00:00', 'Husk tøj.');
+  const oneOff = plan('plan:w33:wed', 'Svømning', '2026-08-12T10:00:00');
+  const support = buildDateSupport(input([thisThursday, nextThursday, oneOff]));
+
+  test('a slot the same subject occupies in two weeks is a routine; a one-off slot is not', () => {
+    expect([...support.perSource.get(thisThursday.key)!.recurringWeekdays]).toEqual([4]);
+    expect([...support.perSource.get(nextThursday.key)!.recurringWeekdays]).toEqual([4]);
+    expect(support.perSource.get(oneOff.key)!.recurringWeekdays.size).toBe(0);
+    // The next occurrence is grounded by this week's entry alone, as "om
+    // torsdagen" in prose would ground it; the one-off licenses nothing.
+    expect(dueAtSupported('2026-08-20', thisThursday.key, support)).toBe(true);
+    expect(dueAtSupported('2026-08-27', thisThursday.key, support)).toBe(true);
+    expect(dueAtSupported('2026-08-19', oneOff.key, support)).toBe(false);
+  });
+
+  test('a recurring card takes the single routine its sources agree on, fitted to its date', () => {
+    const card = {
+      title: 'Husk idrætstøj',
+      summary: 'Hallen.',
+      date: '2026-08-20',
+      recurring: true,
+    };
+    expect(recurrenceWeekdayOf(card, [thisThursday.key], support)).toBe(4);
+    // A Thursday routine on a Monday date is a disagreement, not a badge.
+    expect(recurrenceWeekdayOf({ ...card, date: '2026-08-17' }, [thisThursday.key], support)).toBe(
+      null,
+    );
+    expect(recurrenceWeekdayOf(card, [oneOff.key], support)).toBeNull();
+    // Not marked recurring, and no prose to agree on: no badge either.
+    expect(recurrenceWeekdayOf({ ...card, recurring: false }, [thisThursday.key], support)).toBe(
+      null,
+    );
+  });
+
+  test('prose the card and its source share wins, and only where they share it', () => {
+    const post = item('post:1', 'Vi løber om mandagen og svømmer hver fredag.');
+    const s = buildDateSupport(input([post, oneOff]));
+    const card = { title: 'Løbetøj', summary: 'Løb om mandagen.', date: null, recurring: false };
+    expect(recurrenceWeekdayOf(card, ['post:1'], s)).toBe(1);
+    // The source's other routine does not attach to a card that never names it.
+    expect(recurrenceWeekdayOf({ ...card, summary: 'Husk tasken.' }, ['post:1'], s)).toBeNull();
+    // A weekday only the card mentions is not evidence.
+    expect(recurrenceWeekdayOf(card, [oneOff.key], s)).toBeNull();
   });
 });
 

@@ -18,8 +18,8 @@ import { join } from 'node:path';
 import {
   buildDateSupport,
   dueAtSupported,
-  findRecurringWeekdays,
   overviewWindow,
+  recurrenceWeekdayOf,
   unsupportedDateClaims,
 } from './dates.ts';
 import { BRIEF_DIR } from './state.ts';
@@ -265,23 +265,12 @@ function validateExtractionDetailed(input: BriefInput, parsed: unknown): Validat
       continue;
     }
     const recurring = raw.recurring === true;
-    if (recurring) {
-      const cardDays = new Set(findRecurringWeekdays(`${title}\n${summary}`));
-      const sourceDays = new Set(
-        sourceKeys.flatMap((key) => {
-          const source = items.get(key)!;
-          return findRecurringWeekdays(`${source.title}\n${source.text}`);
-        }),
-      );
-      const cardSourceDays = [...cardDays].filter((day) => sourceDays.has(day));
-      const datedWeekday = date ? parseIsoDateParts(date)?.weekday : undefined;
-      const candidates = (cardSourceDays.length > 0 ? cardSourceDays : [...sourceDays]).filter(
-        (day) => datedWeekday === undefined || day === datedWeekday,
-      );
-      if (candidates.length !== 1) {
-        problems.push(`${label}: recurring har ikke én fast ugedag i kortets kilder`);
-        continue;
-      }
+    if (
+      recurring &&
+      recurrenceWeekdayOf({ title, summary, date, recurring }, sourceKeys, support) === null
+    ) {
+      problems.push(`${label}: recurring har ikke én fast ugedag i kortets kilder`);
+      continue;
     }
     const children = Array.isArray(raw.children)
       ? raw.children

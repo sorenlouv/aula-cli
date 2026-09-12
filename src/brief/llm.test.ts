@@ -377,6 +377,48 @@ describe('validateExtraction', () => {
     expect(result.problems.some((problem) => problem.includes('recurring'))).toBe(true);
   });
 
+  test('a routine read off two weeks of the timetable grounds a recurring card', () => {
+    // PE on the Thursday of this week's plan and next week's. The model cites
+    // this week's entry and a thread that never says "om torsdagen", and dates
+    // the card on next Thursday — which the timetable, not any sentence, supports.
+    const thisWeek = sourceItem({
+      key: 'plan:w33:thu',
+      kind: 'plan',
+      title: 'Idræt / Myretuen',
+      text: 'Vi er i hallen. Husk idrætstøj og håndklæde.',
+      at: '2026-08-13T08:00:00',
+    });
+    const nextWeek = sourceItem({ ...thisWeek, key: 'plan:w34:thu', at: '2026-08-20T08:00:00' });
+    const thread = sourceItem({
+      key: 'thread:7',
+      kind: 'thread',
+      title: 'Idræt torsdag',
+      text: 'Ingen idrætstøj i morgen, vi skal til trafikevent.',
+      at: '2026-08-12T14:00:00+00:00',
+    });
+    const timetable = { ...input, items: [SOURCE, POST_2, DENTIST, thisWeek, nextWeek, thread] };
+    const routine = {
+      ...good,
+      title: 'Husk idrætstøj til Viggo om torsdagen',
+      summary: 'Idræt er i hallen hver uge; tøj, indesko og håndklæde med.',
+      date: '2026-08-20',
+      sourceKeys: ['plan:w33:thu', 'thread:7'],
+    };
+
+    const result = validateExtraction(timetable, answer({ cards: [routine] }));
+
+    expect(result.problems).toEqual([]);
+    expect(result.cards[0]).toMatchObject({ date: '2026-08-20', recurring: true });
+    // One week of plan is a one-off: the thread's "torsdag" still grounds the
+    // date, but nothing asserts a routine, so the recurring card is refused.
+    const oneWeek = validateExtraction(
+      { ...timetable, items: [SOURCE, POST_2, DENTIST, thisWeek, thread] },
+      answer({ cards: [routine] }),
+    );
+    expect(oneWeek.cards).toEqual([]);
+    expect(oneWeek.problems.some((problem) => problem.includes('recurring'))).toBe(true);
+  });
+
   test('a timestamp is not a date', () => {
     const result = validateExtraction(
       input,

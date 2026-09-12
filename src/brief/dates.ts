@@ -19,7 +19,7 @@
 import { isoWeekString, localIsoDate } from '../integrations/types.ts';
 import { isValidCalendarDate, parseIsoDateParts } from '../validation.ts';
 import { extractDates } from './rules.ts';
-import type { BriefInput } from './types.ts';
+import type { BriefInput, Card, SourceItem } from './types.ts';
 
 /** Indexed as `Date#getDay()`: Sunday first. */
 export const DA_WEEKDAYS = ['søndag', 'mandag', 'tirsdag', 'onsdag', 'torsdag', 'fredag', 'lørdag'];
@@ -270,6 +270,12 @@ type SourceDates = {
   weekdays: Set<number>;
   dates: Set<string>;
   weeks: Set<string>;
+  /**
+   * Weekdays the source asserts as a weekly routine: recurring prose ("om
+   * torsdagen"), or — for a weekly-plan entry — its own slot, when the same
+   * subject sits on that weekday in another week's plan too.
+   */
+  recurringWeekdays: Set<number>;
 };
 
 export type DateSupport = {
@@ -305,6 +311,74 @@ const supportsDateClaim = (dates: Set<string>, claim: Extract<DateClaim, { kind:
     );
   });
 
+/**
+ * The weekday of a weekly-plan entry counts as a routine only when the same
+ * subject occupies that weekday in at least one other week's plan.
+ *
+ * A plan is the timetable: PE on Thursday in this week's plan and again in
+ * next week's *is* "idræt om torsdagen", whether or not any sentence says so.
+ * The model reads it that way and writes the routine card; before this the
+ * validator accepted a routine only from prose, so the card was rejected for
+ * a date the timetable plainly supported. One week alone is a one-off, and
+ * stays one — a single entry must not license the same weekday for the next
+ * two months.
+ */
+function planRoutineWeekdays(items: SourceItem[]): Map<string, number> {
+  const slots = new Map<string, Map<number, Set<string>>>();
+  const subjectOf = (item: SourceItem) => item.title.trim().toLocaleLowerCase('da-DK');
+  for (const item of items) {
+    if (item.kind !== 'plan' || !item.at) continue;
+    const day = isoDate(item.at);
+    if (!day) continue;
+    const bySubject = slots.get(subjectOf(item)) ?? new Map<number, Set<string>>();
+    const weeks = bySubject.get(day.weekday) ?? new Set<string>();
+    weeks.add(isoWeekString(asLocalDate(day)));
+    bySubject.set(day.weekday, weeks);
+    slots.set(subjectOf(item), bySubject);
+  }
+  const routine = new Map<string, number>();
+  for (const item of items) {
+    if (item.kind !== 'plan' || !item.at) continue;
+    const day = isoDate(item.at);
+    if (!day) continue;
+    if ((slots.get(subjectOf(item))?.get(day.weekday)?.size ?? 0) >= 2) {
+      routine.set(item.key, day.weekday);
+    }
+  }
+  return routine;
+}
+
+/**
+ * The weekday a card recurs on, or null.
+ *
+ * The one reader of recurrence evidence, shared by the validator (a card
+ * marked `recurring` must have exactly one) and the ranker (which projects the
+ * next occurrence and draws the badge). It used to be written twice, each
+ * slightly differently, which is how a card could pass validation and then
+ * render without the badge that says its date is a projection.
+ *
+ * A weekday the card's own prose names is preferred, and only where one of
+ * its sources asserts the same routine; failing that, a card the model marked
+ * recurring may take the single routine its sources agree on. Either way it
+ * has to fit the card's date: a Thursday routine on a Monday date is a card
+ * whose text and date disagree, which is a rejection, not a badge.
+ */
+export function recurrenceWeekdayOf(
+  card: Pick<Card, 'title' | 'summary' | 'date' | 'recurring'>,
+  sourceKeys: string[],
+  support: DateSupport,
+): number | null {
+  const cardDays = new Set(findRecurringWeekdays(`${card.title}\n${card.summary}`));
+  const sourceDays = new Set(
+    sourceKeys.flatMap((key) => [...(support.perSource.get(key)?.recurringWeekdays ?? [])]),
+  );
+  const shared = [...cardDays].filter((day) => sourceDays.has(day));
+  const pool = shared.length > 0 ? shared : card.recurring ? [...sourceDays] : [];
+  const datedWeekday = card.date ? parseIsoDateParts(card.date)?.weekday : undefined;
+  const candidates = pool.filter((day) => datedWeekday === undefined || day === datedWeekday);
+  return candidates.length === 1 ? (candidates[0] ?? null) : null;
+}
+
 /** Everything the sources, their timestamps, and today can vouch for. */
 export function buildDateSupport(input: BriefInput): DateSupport {
   const support: DateSupport = {
@@ -335,6 +409,7 @@ export function buildDateSupport(input: BriefInput): DateSupport {
   }
   const week = Number(/-W(\d{1,2})$/.exec(input.isoWeek)?.[1]);
   if (Number.isFinite(week)) support.weeks.add(week);
+  const routines = planRoutineWeekdays(input.items);
 
   for (const item of input.items) {
     const text = `${item.title}\n${item.text}`;
@@ -342,7 +417,15 @@ export function buildDateSupport(input: BriefInput): DateSupport {
       weekdays: new Set(),
       dates: new Set(),
       weeks: new Set(),
+      recurringWeekdays: new Set(findRecurringWeekdays(text)),
     };
+    const routine = routines.get(item.key);
+    if (routine !== undefined) {
+      // The slot is a weekday assertion in its own right, so the next
+      // occurrence is grounded the way "om torsdagen" would ground it.
+      per.recurringWeekdays.add(routine);
+      per.weekdays.add(routine);
+    }
     const at = item.at ? isoDate(item.at) : null;
     const reference = at ?? todayParsed;
     for (const claim of findDateClaims(text)) {
