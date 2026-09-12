@@ -108,6 +108,27 @@ describe('findDateClaims', () => {
     expect(findDateClaims('Hallen er åben kl. 9.05.')).toEqual([]);
   });
 
+  test('a written month does not read the tail of a numeric date', () => {
+    // The joint birthday for the children born in July and August is on the
+    // 19th of September; there is no 9th of July here to reject a card over.
+    const claims = findDateClaims('Fællesfødselsdag 19/9 Juli/august-børnene holder fest.');
+    expect(claims).toEqual([{ kind: 'date', month: 9, day: 19, raw: '19/9' }]);
+    expect(findDateClaims('Frist d. 9 juli.')).toContainEqual({
+      kind: 'date',
+      month: 7,
+      day: 9,
+      raw: '9 juli',
+    });
+  });
+
+  test('a range of two numeric dates is two dates, not one with a year', () => {
+    expect(findDateClaims('Ferie 8/9-11/9.')).toEqual([
+      { kind: 'date', month: 9, day: 8, raw: '8/9' },
+      { kind: 'date', month: 9, day: 11, raw: '11/9' },
+    ]);
+    expect(findDateClaims('Ferie 8/9–11/9.').map((c) => c.raw)).toEqual(['8/9', '11/9']);
+  });
+
   test('does not treat impossible calendar dates as evidence', () => {
     expect(findDateClaims('Møde 31/2 og tur 31. april.')).toEqual([]);
     expect(findDateClaims('Skuddag 29/2.')).toContainEqual({

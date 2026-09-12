@@ -246,9 +246,11 @@ export function extractDates(sentence: string, today: Date): string[] {
 
   // "1. september 2026", "25.august", "d. 24. august", "d. 18 sep".
   // A dot may stand in for the whitespace; one of them is required so a word
-  // ending in digits is not mistaken for a date.
+  // ending in digits is not mistaken for a date. The day may not be the tail
+  // of a numeric date — "19/9 juli/august-børnene" is not the 9th of July —
+  // and `dates.ts` reads claims with the same guard.
   const named = new RegExp(
-    `\\b(\\d{1,2})(?:\\.\\s*|\\s+)(${MONTH_PATTERN})\\.?(?:\\s+(\\d{4}))?`,
+    `(?<![\\d/])\\b(\\d{1,2})(?:\\.\\s*|\\s+)(${MONTH_PATTERN})\\.?(?:\\s+(\\d{4}))?`,
     'gi',
   );
   for (const match of sentence.matchAll(named)) {
@@ -260,8 +262,9 @@ export function extractDates(sentence: string, today: Date): string[] {
     push(new Date(year, month - 1, day));
   }
 
-  // "18/9", "d. 18/9-2026", "18.9.2026"
-  const numeric = /\b(\d{1,2})[./](\d{1,2})(?:[./-](\d{2,4}))?\b/g;
+  // "18/9", "d. 18/9-2026", "18.9.2026" — but "8/9-11/9" is two dates, and
+  // the year must not eat the second one's day.
+  const numeric = /\b(\d{1,2})[./](\d{1,2})(?:[./-](\d{2,4})(?![./]\d))?\b/g;
   for (const match of sentence.matchAll(numeric)) {
     const day = Number(match[1]);
     const month = Number(match[2]);

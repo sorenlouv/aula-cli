@@ -58,6 +58,15 @@ describe('extractDates', () => {
     expect(extractDates('Møde 18.9.2027', TODAY)).toEqual(['2027-09-18']);
   });
 
+  test('a hyphenated range of two numeric dates is two dates, not one in 2011', () => {
+    expect(extractDates('Ferie 8/9-11/9', TODAY)).toEqual(['2026-09-08', '2026-09-11']);
+    expect(extractDates('Møde 26/8-2026', TODAY)).toEqual(['2026-08-26']);
+  });
+
+  test('a written month after a numeric date is not a second date', () => {
+    expect(extractDates('Fest 19/9 juli/august-børnene', TODAY)).toEqual(['2026-09-19']);
+  });
+
   test('dotted day.month, but not a clock time', () => {
     expect(extractDates('Vores første møde efter sommerferien den 17.9', TODAY)).toEqual([
       '2026-09-17',

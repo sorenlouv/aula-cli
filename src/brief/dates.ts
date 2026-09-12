@@ -136,11 +136,21 @@ const ENGLISH_WEEKDAY_TO_DAY: Record<string, number> = {
   friday: 5,
   saturday: 6,
 };
-const NUMERIC_DATE_RE = /\b(\d{1,2})[./](\d{1,2})(?:[./-](\d{2,4}))?\b/g;
+// The optional year must not swallow the start of the next date in a range:
+// "8/9-11/9" is two dates, not the 8th of September 2011. Each of these
+// patterns has a twin in `rules.ts`; a claim only one side can read is a card
+// rejected for quoting its own source.
+const NUMERIC_DATE_RE = /\b(\d{1,2})[./](\d{1,2})(?:[./-](\d{2,4})(?![./]\d))?\b/g;
 // Full names first so "september" is not eaten by "sep".
 const MONTH_ALT =
   'januar|februar|marts|april|maj|juni|juli|august|september|oktober|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|okt|nov|dec';
-const NAMED_DATE_RE = new RegExp(`\\b(\\d{1,2})\\.?\\s*(${MONTH_ALT})\\b(?:\\s+(\\d{4}))?`, 'gi');
+// A written month may not read the tail of a numeric date: "19/9 juli/august-
+// børnene" names the 19th of September and the children born in July, never
+// the 9th of July. That exact phrase cost the most important card of a week.
+const NAMED_DATE_RE = new RegExp(
+  `(?<![\\d/])\\b(\\d{1,2})\\.?\\s*(${MONTH_ALT})\\b(?:\\s+(\\d{4}))?`,
+  'gi',
+);
 // "24. til 28. august" / "24.-28. august": the start day never stands next to
 // the month name, so it needs its own pattern.
 const RANGE_START_RE = new RegExp(
