@@ -165,7 +165,10 @@ describe('recurring Aula cards', () => {
     const instructions = extractionInstructions(INPUT);
 
     expect(dateDescription).toContain('næste forekomst på eller efter today');
-    expect(dateDescription).toContain('Null kun når hverken dato eller fast ugedag findes');
+    // A task with no deadline is open, not history: the day it was announced
+    // is not its date.
+    expect(dateDescription).toContain('en opgave uden frist har date null');
+    expect(dateDescription).toContain('Null kun når hverken frist, dag eller fast ugedag findes');
     expect(recurringDescription).toContain('True kun når kortet er en fast ugentlig aftale');
     expect(instructions).toContain('læses oversigten på selve ugedagen');
     expect(instructions).toContain('ikke en uge senere og ikke null');

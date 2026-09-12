@@ -307,6 +307,33 @@ describe('rank: personal appointments in the shared timeline', () => {
     });
   });
 
+  test('an appointment that began yesterday and has not ended is today, not history', () => {
+    const sleepover = item({
+      key: 'cal:far@eksempel.dk:sleepover:2026-08-12T14:00:00+02:00',
+      kind: 'personal',
+      title: 'Overnatning i børnehaven',
+      at: '2026-08-12T14:00:00',
+      endsAt: '2026-08-13T15:00:00',
+      audience: 'family',
+    });
+    const finished = item({
+      ...sleepover,
+      key: 'cal:far@eksempel.dk:sleepover:2026-08-10T14:00:00+02:00',
+      at: '2026-08-10T14:00:00',
+      endsAt: '2026-08-11T15:00:00',
+    });
+    const brief = rank(input([sleepover, finished]), { model: [], rules: [], hidden: [] });
+
+    const [ongoing, past] = brief.personalEvents;
+    expect(ongoing).toMatchObject({
+      sourceKey: sleepover.key,
+      date: '2026-08-13',
+      placement: 'upcoming',
+    });
+    expect(ongoing?.reasons).toContain('ongoing since 2026-08-12 → today');
+    expect(past).toMatchObject({ sourceKey: finished.key, date: '2026-08-10', placement: 'past' });
+  });
+
   test('irrelevant appointments are hidden; missing verdicts fail open', () => {
     const hidden = rank(input([DENTIST]), {
       model: [],

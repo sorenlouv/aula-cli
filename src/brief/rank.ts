@@ -320,7 +320,15 @@ export function rank(
       hiddenKeys.add(source.key);
       continue;
     }
-    const date = source.at?.slice(0, 10) || null;
+    const startDay = source.at?.slice(0, 10) || null;
+    const endDay = source.endsAt?.slice(0, 10) || startDay;
+    // An appointment that began before today and has not ended — a sleepover
+    // from yesterday afternoon to this afternoon — is today's, not history's.
+    // Read off its start alone it landed under *Tidligere* while it was still
+    // going on.
+    const ongoing =
+      startDay !== null && endDay !== null && startDay < input.today && endDay >= input.today;
+    const date = ongoing ? input.today : startDay;
     // Production collection uses this same boundary. Keep the guard here so a
     // stale cache or hand-built input still cannot put a later appointment on
     // the page — and name it explicitly so that defensive path cannot look like
@@ -347,6 +355,7 @@ export function rank(
     };
     if (event.modelRank !== null) event.reasons.push(`calendar model rank:${event.modelRank}`);
     else event.reasons.push('calendar verdict missing → shown');
+    if (ongoing) event.reasons.push(`ongoing since ${startDay} → today`);
     event.reasons.push(`placement:${event.placement}`);
     personalEvents.push(event);
     hiddenKeys.delete(source.key);
