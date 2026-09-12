@@ -30,6 +30,12 @@ moment a new name enters the family's life, and never move a term out of it
 into a tracked file. It lives here, gitignored, because that is the only way a
 denylist of real names can exist in a public repo.
 
+`bun run scan:private` (`scripts/private-data-scan.ts`) checks every tracked
+file against it — whole words, case-insensitive, a Danish genitive -s allowed —
+and prints only the file and line, never the term. It finds the list from a
+worktree too. Run it before committing anything that touched a fixture, a
+test, a doc or an example; it cannot run in CI, where the list does not exist.
+
 Runtime data (tokens, cookies, the response cache, downloaded attachments and
 generated briefs) does not live here at all; it lives in `~/.aula`, outside the
 repository entirely.

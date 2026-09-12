@@ -32,6 +32,7 @@
     "lint": "oxlint",
     "lint:types": "oxlint --type-aware",
     "lint:fix": "oxlint --fix",
+    "scan:private": "bun scripts/private-data-scan.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/browser",
     "typecheck:watch": "tsc --noEmit --watch --preserveWatchOutput",
     "typecheck:watch:browser": "tsc --noEmit --watch --preserveWatchOutput -p src/browser"

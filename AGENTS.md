@@ -81,7 +81,10 @@ to a crash. `parseCommandLine` wraps it.
   real people in the class. Fixtures and docs use the fictional Eksempelsen
   family with `eksempel.dk` values; anything real goes in the gitignored
   `data/`. Add to the list the moment a new real name appears, and never move a
-  term out of it into a tracked file.
+  term out of it into a tracked file. `bun run scan:private` checks every
+  tracked file against the list (from a worktree too) and prints file and line
+  only; run it before committing anything that touched a fixture, a test, a doc
+  or an example.
 - **Preferences are the model's to read.** The model interprets the prose in
   `preferences.md` and returns a typed relevance verdict; ranking code acts on
   that verdict. Do not parse preference wording in code.
