@@ -159,6 +159,13 @@ export type DigestOptions = {
   days: number;
   limit?: number;
   isoWeek: string;
+  /**
+   * The ISO weeks whose vendor plans are read; `[isoWeek]` when absent. The
+   * brief passes this week and the next, because its timeline runs to the end
+   * of next week and a Friday-evening reader wants Thursday's *husk idrætstøj*
+   * from the plan the teacher has just published.
+   */
+  planWeeks?: string[];
   child?: string;
   now?: Date;
   /**
@@ -235,10 +242,14 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
     // The vendors are third parties and go down independently of Aula. A dead
     // weekly-plan API must not cost the user their messages and calendar, so the
     // digest degrades to a warning rather than failing.
-    readManyPlans(client, family, [...CAPABILITIES], {
-      isoWeek: opts.isoWeek,
-      ...(opts.child ? { child: opts.child } : {}),
-    }),
+    Promise.all(
+      (opts.planWeeks ?? [opts.isoWeek]).map((isoWeek) =>
+        readManyPlans(client, family, [...CAPABILITIES], {
+          isoWeek,
+          ...(opts.child ? { child: opts.child } : {}),
+        }),
+      ),
+    ).then((weeks) => weeks.flat()),
   ]);
   const events = calendarRead.value;
   const presence = presenceRead.value;

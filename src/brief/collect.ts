@@ -8,7 +8,13 @@ import type { AulaClient } from './../client.ts';
 import { calendarWindow, loadPersonalEvents, type PersonalEvent } from '../calendar/index.ts';
 import { ResponseCache } from '../cache.ts';
 import { readConfig } from '../config.ts';
-import { addLocalDays, localIsoDate, type WeekPlan } from '../integrations/types.ts';
+import {
+  addLocalDays,
+  isoWeekToMonday,
+  localIsoDate,
+  weekOffset,
+  type WeekPlan,
+} from '../integrations/types.ts';
 import { buildDigest, collectAlbums, type ChildGroups, loadGroups } from './../digest.ts';
 import { resolveFamily } from './../family.ts';
 import { loadPreferences } from './../preferences.ts';
@@ -29,6 +35,21 @@ export type CollectOptions = {
 
 /** How far back the brief reads. Every source in that window reaches the model. */
 export const HISTORY_DAYS = 60;
+
+/**
+ * The weeks whose vendor plans the brief reads: the week it is made in and the
+ * one after, matching the timeline's horizon (`overviewWindow`).
+ *
+ * It used to be this week alone, which on a Friday evening is five days of
+ * plan already behind the reader and none of the week they are about to
+ * start. The gap showed as a rejected card: the model knew from two threads
+ * that PE is on Thursdays and wrote *husk idrætstøj om torsdagen* for next
+ * Thursday, and nothing in the input could ground that date — while the
+ * teacher's plan for that very day said exactly that.
+ */
+export function planWeeksFor(isoWeek: string): string[] {
+  return [isoWeek, weekOffset(1, isoWeekToMonday(isoWeek))];
+}
 
 /**
  * How narrowly a piece of content was addressed.
@@ -131,7 +152,13 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
   const family = await resolveFamily(client);
 
   const [digest, groupsRead, albumsRead] = await Promise.all([
-    buildDigest(client, { days: opts.days, isoWeek: opts.isoWeek, family, now }),
+    buildDigest(client, {
+      days: opts.days,
+      isoWeek: opts.isoWeek,
+      planWeeks: planWeeksFor(opts.isoWeek),
+      family,
+      now,
+    }),
     recoverOptional(
       loadGroups(client, family.children),
       [] as ChildGroups[],

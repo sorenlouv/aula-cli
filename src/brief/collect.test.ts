@@ -1,6 +1,11 @@
 import { expect, test } from 'bun:test';
 import type { WeekPlan } from '../integrations/types.ts';
-import { sourcesFromPlans } from './collect.ts';
+import { planWeeksFor, sourcesFromPlans } from './collect.ts';
+
+test('the brief reads the plan for this week and the next, across a year end', () => {
+  expect(planWeeksFor('2026-W37')).toEqual(['2026-W37', '2026-W38']);
+  expect(planWeeksFor('2027-W52')).toEqual(['2027-W52', '2028-W01']);
+});
 
 test('weekly-plan capabilities keep distinct keys and every task field', () => {
   const plans: WeekPlan[] = [
