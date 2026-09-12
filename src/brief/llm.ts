@@ -91,7 +91,27 @@ export type ExtractResult = {
   childSummaries: Record<string, string>;
   /** Aula source keys the model kept off the page. Listed in the muted foot. */
   hidden: string[];
+  /**
+   * What made part of the answer unusable: a card refused, a verdict missing
+   * or duplicated, the shape wrong. Any of these keeps the run incomplete —
+   * the scheduler tries again — and the answer out of the cache.
+   */
   problems: string[];
+  /**
+   * Model prose that was dropped while the decision it decorated survived: an
+   * ungrounded topline or child line, or a calendar verdict's summary. Named
+   * in *Datastatus*, never a reason to spend another model call. These used
+   * to be problems, and one invented "8/9-11" in a verdict's summary kept a
+   * whole day of scheduled runs retrying a five-minute extraction to no end.
+   */
+  warnings: string[];
+  /**
+   * Sources cited by cards that were refused, or null when the card list
+   * itself could not be read. The rules fallback fills in for exactly these
+   * (see `rank`): a partial answer is not a reason to distrust the omissions
+   * the model did make.
+   */
+  rejectedSourceKeys: string[] | null;
   /** Numeric request/transport metadata for the private developer log. */
   telemetry?: ExtractionTelemetry;
 };
@@ -111,6 +131,7 @@ export type ExtractionTelemetry = {
   };
   initialProblemCount: number;
   finalProblemCount: number;
+  finalWarningCount: number;
 };
 
 const EMPTY: ExtractResult = {
@@ -120,6 +141,8 @@ const EMPTY: ExtractResult = {
   childSummaries: {},
   hidden: [],
   problems: [],
+  warnings: [],
+  rejectedSourceKeys: null,
 };
 
 type ValidationResult = ExtractResult & { repairCandidates: CardRepairCandidate[] };
@@ -132,11 +155,15 @@ type ValidationResult = ExtractResult & { repairCandidates: CardRepairCandidate[
  * whether the fixed-length personal verdict list names every appointment once.
  * A card's `date` must be supported by at least one of its sources; a date
  * named in its title, summary or reason must be supported by at least one of
- * them too. A card or verdict that fails is dropped and reported.
+ * them too. A card that fails is dropped and reported as a problem.
  *
- * The topline and the per-child lines are checked against every source at
- * once (they are about the week, not one card) and dropped on failure; the
- * page has a plain fallback for each.
+ * A calendar verdict whose summary or reason names a date the appointment
+ * does not carry keeps its verdict and loses that prose: the decision is what
+ * the page acts on, the sentence only decorates the fold. The topline and the
+ * per-child lines are checked against every source at once (they are about
+ * the week, not one card), plus the dates of the cards that just validated,
+ * and dropped on failure; the page has a plain fallback for each. All three
+ * are warnings, not problems.
  */
 export function validateExtraction(input: BriefInput, parsed: unknown): ExtractResult {
   const { repairCandidates: _repairCandidates, ...result } = validateExtractionDetailed(
@@ -152,7 +179,9 @@ function validateExtractionDetailed(input: BriefInput, parsed: unknown): Validat
     return { ...EMPTY, problems: ['svaret var ikke et objekt'], repairCandidates: [] };
   }
   const problems: string[] = [];
+  const warnings: string[] = [];
   const repairCandidates: CardRepairCandidate[] = [];
+  const rejectedSourceKeys = new Set<string>();
   const items = new Map(input.items.map((item) => [item.key, item]));
   const firstNames = new Set(input.family.children.map((c) => c.firstName));
   // Anthropic's structured-output contract explicitly permits string enum and
@@ -193,6 +222,10 @@ function validateExtractionDetailed(input: BriefInput, parsed: unknown): Validat
     reason: raw.reason,
     sourceKeys,
   });
+  /** A refused card's known sources, so the rules can fill in for it. */
+  const reject = (sourceKeys: string[]) => {
+    for (const key of sourceKeys) if (items.has(key)) rejectedSourceKeys.add(key);
+  };
   const rejectedDateCard = (
     cardIndex: number,
     raw: Record<string, unknown>,
@@ -200,6 +233,7 @@ function validateExtractionDetailed(input: BriefInput, parsed: unknown): Validat
     problem: string,
   ) => {
     problems.push(problem);
+    reject(sourceKeys);
     repairCandidates.push({
       cardIndex,
       problem,
@@ -229,10 +263,12 @@ function validateExtractionDetailed(input: BriefInput, parsed: unknown): Validat
       problems.push(
         `${label}: sourceKeys ${sourceKeys.length === 0 ? 'mangler' : `ukendt: ${unknown.join(', ')}`}`,
       );
+      reject(sourceKeys);
       continue;
     }
     if (sourceKeys.some((key) => items.get(key)?.kind === 'personal')) {
       problems.push(`${label}: en kalenderaftale bliver ikke til et kort`);
+      reject(sourceKeys);
       continue;
     }
     let date: string | null = null;
@@ -240,6 +276,7 @@ function validateExtractionDetailed(input: BriefInput, parsed: unknown): Validat
       const iso = parseIsoDateParts(raw.date.trim().slice(0, 10));
       if (!iso) {
         problems.push(`${label}: date "${raw.date}" er ikke en dato`);
+        reject(sourceKeys);
         continue;
       }
       if (!sourceKeys.some((key) => dueAtSupported(iso.iso, key, support))) {
@@ -270,6 +307,7 @@ function validateExtractionDetailed(input: BriefInput, parsed: unknown): Validat
       recurrenceWeekdayOf({ title, summary, date, recurring }, sourceKeys, support) === null
     ) {
       problems.push(`${label}: recurring har ikke én fast ugedag i kortets kilder`);
+      reject(sourceKeys);
       continue;
     }
     const children = Array.isArray(raw.children)
@@ -282,6 +320,7 @@ function validateExtractionDetailed(input: BriefInput, parsed: unknown): Validat
     const actionableNow = raw.actionableNow === true;
     if (actionableNow && !needsAction) {
       problems.push(`${label}: actionableNow=true kræver needsAction=true`);
+      reject(sourceKeys);
       continue;
     }
     cards.push({
@@ -335,14 +374,22 @@ function validateExtractionDetailed(input: BriefInput, parsed: unknown): Validat
       problems.push(`${label}: relevant, summary eller reason mangler`);
       continue;
     }
-    const invented = unsupportedDateClaims(`${summary} ${reason}`, support, { sourceKey });
-    if (invented.length > 0) {
-      problems.push(
-        `${label}: dato uden belæg i kalenderaftalen: ${invented.map((d) => `"${d}"`).join(', ')}`,
+    // The verdict is the decision; the two sentences only decorate the fold.
+    // A date the appointment does not carry costs the sentence, not the verdict.
+    const prose = (field: 'summary' | 'reason', text: string) => {
+      const invented = unsupportedDateClaims(text, support, { sourceKey });
+      if (invented.length === 0) return text;
+      warnings.push(
+        `${label}: ${field} udeladt, dato uden belæg i kalenderaftalen: ${invented.map((d) => `"${d}"`).join(', ')}`,
       );
-      continue;
-    }
-    personalEvents.push({ sourceKey, relevant: raw.relevant, summary, reason });
+      return '';
+    };
+    personalEvents.push({
+      sourceKey,
+      relevant: raw.relevant,
+      summary: prose('summary', summary),
+      reason: prose('reason', reason),
+    });
   }
   const missingPersonal = personalKeys.filter((key) => !seenPersonal.has(key));
   if (missingPersonal.length > 0) {
@@ -351,16 +398,30 @@ function validateExtractionDetailed(input: BriefInput, parsed: unknown): Validat
     );
   }
 
+  // The overview lines may name any day a validated card is dated on — the
+  // next Thursday of a weekly routine is a projection the page already makes
+  // on the card, badge and all, and the child's line has to be able to say it.
+  const overviewSupport = {
+    ...support,
+    dates: new Set(support.dates),
+    weekdays: new Set(support.weekdays),
+  };
+  for (const card of cards) {
+    const day = card.date ? parseIsoDateParts(card.date) : null;
+    if (!day) continue;
+    overviewSupport.dates.add(day.iso);
+    overviewSupport.weekdays.add(day.weekday);
+  }
   const grounded = (value: unknown, where: string): string | null => {
     if (typeof value !== 'string' || !value.trim()) return null;
     // The prompt supplies this boundary and asks the overview prose to respect
     // it. It is system-grounded context for topline/child summaries, but not a
     // source-grounded date that a card may borrow.
-    const bad = unsupportedDateClaims(value, support, {
+    const bad = unsupportedDateClaims(value, overviewSupport, {
       dueAt: overviewWindow(input.today).through,
     });
     if (bad.length === 0) return value.trim();
-    problems.push(`${where}: dato uden belæg: ${bad.map((d) => `"${d}"`).join(', ')}`);
+    warnings.push(`${where}: udeladt, dato uden belæg: ${bad.map((d) => `"${d}"`).join(', ')}`);
     return null;
   };
   const topline = grounded(parsed.topline, 'topline');
@@ -389,7 +450,17 @@ function validateExtractionDetailed(input: BriefInput, parsed: unknown): Validat
     }
   }
 
-  return { topline, cards, personalEvents, childSummaries, hidden, problems, repairCandidates };
+  return {
+    topline,
+    cards,
+    personalEvents,
+    childSummaries,
+    hidden,
+    problems,
+    warnings,
+    rejectedSourceKeys: Array.isArray(parsed.cards) ? [...rejectedSourceKeys] : null,
+    repairCandidates,
+  };
 }
 
 function cacheKey(payload: unknown): string {
@@ -496,6 +567,7 @@ export async function extractCards(
             primaryAttempts: [],
             initialProblemCount: 0,
             finalProblemCount: 0,
+            finalWarningCount: validated.warnings.length,
           },
         };
       }
@@ -528,13 +600,14 @@ export async function extractCards(
   const initialProblemCount = validated.problems.length;
   let repairTelemetry: ExtractionTelemetry['repair'];
 
-  // A date-only rejection retains all the ranking work that did validate. Its
+  // A date rejection retains all the ranking work that did validate. Its
   // repair sees only that card and its current citations, runs once at the
   // low-cost repair setting, and still faces the full production validator.
-  if (
-    validated.repairCandidates.length > 0 &&
-    validated.repairCandidates.length === validated.problems.length
-  ) {
+  // It runs whenever there is a card to repair, whatever else went wrong: it
+  // used to wait for the card dates to be the *only* problems, so a missing
+  // calendar verdict elsewhere left every rejected card unrepaired and sent
+  // the whole five-minute extraction round again.
+  if (validated.repairCandidates.length > 0) {
     const repairInput = { input, candidates: validated.repairCandidates };
     const repairPayload = briefCardRepairRequest.payload(repairInput);
     const repairInstructions = briefCardRepairRequest.instructions(repairInput);
@@ -557,8 +630,10 @@ export async function extractCards(
       repairTelemetry.attempts = repair.attempts;
       const merged = mergeCardRepairs(parsed, validated.repairCandidates, repair.structured);
       if (merged !== null) {
+        // Kept when it leaves fewer problems than it found: a repair that
+        // rescued one card of two is still a better answer than the first.
         const repaired = validateExtractionDetailed(input, merged);
-        if (repaired.problems.length === 0) {
+        if (repaired.problems.length < validated.problems.length) {
           parsed = merged;
           validated = repaired;
         }
@@ -601,6 +676,7 @@ export async function extractCards(
       ...(repairTelemetry ? { repair: repairTelemetry } : {}),
       initialProblemCount,
       finalProblemCount: result.problems.length,
+      finalWarningCount: result.warnings.length,
     },
   };
 }

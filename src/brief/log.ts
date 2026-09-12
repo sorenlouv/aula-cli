@@ -32,7 +32,8 @@ export type BriefLogEvent = {
     | 'brief.phase.finished'
     | 'brief.run.finished'
     | 'brief.model.failed'
-    | 'brief.model.incomplete';
+    | 'brief.model.incomplete'
+    | 'brief.model.adjusted';
   day: string;
   isoWeek: string;
   model: string | null;

@@ -466,9 +466,35 @@ describe('validateExtraction', () => {
     );
     expect(result.topline).toBeNull();
     expect(result.childSummaries).toEqual({});
-    expect(result.problems.filter((p) => p.includes('dato uden belæg'))).toHaveLength(2);
+    // Dropped and named, but a warning: the page has a fallback for both, and
+    // another five-minute model call is not the price of a missing sentence.
+    expect(result.warnings.filter((w) => w.includes('dato uden belæg'))).toHaveLength(2);
+    expect(result.problems).toEqual([]);
     // The cards were fine; only the two lines were dropped.
     expect(result.cards).toHaveLength(1);
+  });
+
+  test('the child line may name the day a validated card is dated on', () => {
+    // The card's date is a routine's next occurrence, which no source spells
+    // out as a date; once the card stands, the child's line may echo it.
+    const result = validateExtraction(
+      input,
+      answer({ childSummaries: { Viggo: 'Løbetøj med 17/8, og igen mandagen efter.' } }),
+    );
+    expect(result.childSummaries.Viggo).toBe('Løbetøj med 17/8, og igen mandagen efter.');
+    expect(result.warnings).toEqual([]);
+  });
+
+  test('a refused card names its sources, so the rules can fill in for exactly those', () => {
+    const refused = validateExtraction(
+      input,
+      answer({ cards: [good, { ...good, date: '2026-09-24', sourceKeys: ['post:2'] }] }),
+    );
+    expect(refused.cards).toHaveLength(1);
+    expect(refused.rejectedSourceKeys).toEqual(['post:2']);
+
+    const unreadable = validateExtraction(input, answer({ cards: 'nej' }));
+    expect(unreadable.rejectedSourceKeys).toBeNull();
   });
 
   test('overview prose may name the system-provided final Sunday', () => {
@@ -501,14 +527,17 @@ describe('validateExtraction', () => {
     );
     expect(duplicate.problems.some((problem) => problem.includes('mere end én'))).toBe(true);
 
+    // A date the appointment does not carry costs the sentence, not the
+    // verdict: the decision is what the page acts on.
     const invented = validateExtraction(
       input,
       answer({
         personalEvents: [{ ...personalVerdict, summary: 'Tandlægetid 24/9.' }],
       }),
     );
-    expect(invented.personalEvents).toEqual([]);
-    expect(invented.problems.some((problem) => problem.includes('24/9'))).toBe(true);
+    expect(invented.personalEvents).toEqual([{ ...personalVerdict, summary: '' }]);
+    expect(invented.problems).toEqual([]);
+    expect(invented.warnings.some((warning) => warning.includes('24/9'))).toBe(true);
   });
 
   test('hidden keeps Aula keys; personal appointments use their verdict', () => {
@@ -844,6 +873,58 @@ describe('the claude subprocess', () => {
 
       expect(result.cards.map((card) => card.title)).toEqual(['Kort 0']);
       expect(result.problems).toHaveLength(1);
+    });
+
+    test('the repair runs even when something else in the answer was also wrong', async () => {
+      // A missing calendar verdict used to veto the repair of an unrelated
+      // card, and the whole extraction was rerun a quarter of an hour later
+      // to the same end.
+      const dentist = sourceItem({
+        key: 'cal:far@eksempel.dk:dentist:2026-08-14T13:30:00+02:00',
+        kind: 'personal',
+        title: 'Tandlæge',
+        text: 'Tandlæge · kl. 13:30–14:15 · Fra kalenderen «Familien»',
+        at: '2026-08-14T13:30:00',
+        audience: 'family',
+      });
+      const withDentist = briefInput({ items: [...sources, dentist] });
+      const f = fakeSequence([
+        JSON.stringify(answer([modelCard(0), { ...modelCard(9), date: '2026-09-24' }])),
+        JSON.stringify(repair([{ cardIndex: 1, card: modelCard(9) }])),
+      ]);
+
+      const result = await extractCards(withDentist, { useCache: false, timeoutMs: 5_000 });
+
+      expect(f.calls()).toHaveLength(2);
+      expect(result.cards.map((card) => card.title)).toEqual(['Kort 0', 'Kort 9']);
+      // The verdict is still missing, and still the reason the run is incomplete.
+      expect(result.problems).toEqual([
+        expect.stringContaining('mangler relevansvurdering for 1 kalenderaftale'),
+      ]);
+    });
+
+    test('a repair that rescues one card of two is kept', async () => {
+      fakeSequence([
+        JSON.stringify(
+          answer([
+            modelCard(0),
+            { ...modelCard(8), date: '2026-09-24' },
+            { ...modelCard(9), date: '2026-09-24' },
+          ]),
+        ),
+        JSON.stringify(
+          repair([
+            { cardIndex: 1, card: modelCard(8) },
+            { cardIndex: 2, card: { ...modelCard(9), date: '2026-09-25' } },
+          ]),
+        ),
+      ]);
+
+      const result = await extractCards(input, { useCache: false, timeoutMs: 5_000 });
+
+      expect(result.cards.map((card) => card.title)).toEqual(['Kort 0', 'Kort 8']);
+      expect(result.problems).toHaveLength(1);
+      expect(result.rejectedSourceKeys).toEqual(['post:9']);
     });
 
     test('rejects a date repair that changes action semantics', async () => {

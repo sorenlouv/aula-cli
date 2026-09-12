@@ -41,24 +41,42 @@ see at a glance: whether the dates are real.
 **Grounding is the guard.** Every date in a card — its `date`, and any day named
 in its title, summary or reason — must be supported by at least one of the
 card's own sources (`dates.ts`); the topline and per-child lines are checked
-against every source. A card that fails is dropped and reported, never kept
-with the date removed, because the date is usually the point. An unsupported
-card date is the one narrow exception: one small repair request sees only that
-card and the sources it already cites. It may correct or remove the date, but
-cannot change its citations, children or action semantics; the merged answer
-must still pass ordinary validation. Everything else stays degraded and visible.
-Dates in a personal appointment's summary and reason are checked against that
-appointment alone.
+against every source, plus the dates of the cards that just validated, so a
+child's line may name the next Thursday a routine card already projects. A
+card that fails is dropped and reported, never kept with the date removed,
+because the date is usually the point. An unsupported card date is the one
+narrow exception: one small repair request sees only that card and the sources
+it already cites. It may correct or remove the date, but cannot change its
+citations, children or action semantics; the merged answer must still pass
+ordinary validation, and is kept when it leaves fewer problems than it found.
+The repair runs whenever a card was refused, whatever else in the answer went
+wrong — it used to wait for card dates to be the only failures, and one missing
+calendar verdict then cost the whole day its most important card.
+
+Two kinds of failure are told apart. A *problem* — a card refused, a verdict
+missing or duplicated — keeps the run incomplete, so the scheduler tries again,
+and keeps the answer out of the cache. A *warning* is prose that was dropped
+while the decision it decorated survived: an ungrounded topline or child line,
+or a calendar verdict's summary or reason naming a day the appointment does
+not carry. The verdict stands, the sentence goes, *Datastatus* says so, and no
+further model call is spent on it. Both were problems once, and an invented
+"8/9-11" in one verdict's summary kept a whole day of scheduled runs retrying
+a five-minute extraction to no end.
 
 Date support keeps full calendar days, including the year. Relative phrases
 such as *i morgen* resolve from the source's written date — from the individual
 message timestamp inside a thread — not the day the brief runs. A weekly
 recurrence is different: its next display occurrence is computed on or after
 the brief's day from a recurring weekday in one of its sources; the model marks
-the card as recurring, and validation checks that source support. The card
-carries a *Gentages hver …* badge, so the occurrence date is visibly a
-projection, not a claim that Aula named that exact day. A card date must land
-between the beginning of the fetched history and one year after the brief.
+the card as recurring, and validation checks that source support. Evidence is
+prose — *om torsdagen*, *hver mandag* — or the timetable itself: a weekly-plan
+entry's own weekday counts when the same subject occupies that weekday in
+another week's plan, and one week alone is a one-off. `recurrenceWeekdayOf`
+is the single reader of that evidence, for the validator and the ranker
+alike. The card carries a *Gentages hver …* badge, so the occurrence date is
+visibly a projection, not a claim that Aula named that exact day. A card date
+must land between the beginning of the fetched history and one year after the
+brief.
 Every date-shaped claim is checked against at least one of that card's own cited
 sources; an unrelated source elsewhere in the brief cannot license it.
 
@@ -280,6 +298,12 @@ reports when it truncates. Every selected thread is paged to completion. A
 failed later page preserves the messages already read, marks the source
 incomplete, and keeps scheduled retries eligible.
 
+The weekly plan is read for this week *and* next (`planWeeksFor`), matching
+the timeline's horizon. It was this week alone, which on a Friday evening is
+five days already behind the reader and none of the week about to start: the
+teacher's *husk idrætstøj* for next Thursday was invisible until Monday, and
+the model's card for it had nothing in the input to ground its date on.
+
 ### Extraction: the model writes and prioritises the cards; rules are the fallback
 
 The deterministic pass is the fallback *and* the test oracle. It handles the
@@ -289,7 +313,12 @@ forms Danish school communication uses — `d. 18/9`, `tirsdag den 1. september
 hit: the source's title, the matched sentence verbatim as the summary. Without a
 model, those are the page. A complete model answer owns the cards. If the model
 answer is partial, its validated survivors remain and exact-deduplicated rule
-cards fill obligations the invalid portion might otherwise have lost.
+cards fill in for the sources the refused cards cited — and only those
+(`rejectedSourceKeys`): the model read every other source, and its choice not
+to make a card of one is a decision, not a gap. It used to add every rule hit
+in the input, which on a degraded morning put five copies of a thread's title
+under *Uden fast dato* beside the cards the model had written well. Only an
+answer whose card list could not be read at all is filled from every source.
 
 If the model cannot run, the rules-only overview is still published but carries
 a visible warning that its prioritisation may be incomplete. The terminal keeps
@@ -327,16 +356,18 @@ five minutes and gets one fresh-process retry.
 | field semantics | `description`s on the field they govern, written once each |
 
 What a schema cannot know — whether a date stands in the text — is
-`validateExtraction`'s, as described under *The seam*. When the only failures
-are card dates, one small repair request sees each rejected card and precisely
-its existing sources; it cannot re-rank the brief or change a valid card. The
-full validator still decides whether the repaired answer is complete. Any other
-failure, or a failed repair, keeps the first answer's survivors and marks the
-problem in *Datastatus*. Extraction is cached against a hash of the payload,
-instructions **and schema**,
-so a prompt or field-description edit takes effect on the next run rather than
-being masked by an entry the old wording produced. Only complete validated
-answers are cached, and the cache retains the newest 32 entries. There is no
+`validateExtraction`'s, as described under *The seam*. Whenever a card was
+refused over a date, one small repair request sees each rejected card and
+precisely its existing sources; it cannot re-rank the brief or change a valid
+card. The full validator still decides what the repaired answer is worth, and
+it replaces the first answer when it leaves fewer problems. A failed repair
+keeps the first answer's survivors and marks the problem in *Datastatus*.
+Extraction is cached against a hash of the payload, instructions **and
+schema**, so a prompt or field-description edit takes effect on the next run
+rather than being masked by an entry the old wording produced. Only answers
+without problems are cached — warnings do not disqualify one, since validation
+would drop the same sentence again on reading it back — and the cache retains
+the newest 32 entries. There is no
 TTL: an unchanged morning keeps answering from the same entry, which is the
 point, but it means `layout: "model"` alone cannot tell a fresh four-minute call
 from a seven-millisecond reuse. `layoutCached` in the `new` output says which
@@ -421,9 +452,11 @@ audience `family`. The model must return exactly one
 `personalEvents` verdict for each occurrence: relevance, a short factual
 summary, and a reason. An irrelevant appointment lands in the muted hidden
 count; a relevant one becomes the compact card described under *The page*.
-Missing, duplicate or invalid verdicts are never repaired locally or cached,
-and keep the run incomplete. A still-missing verdict fails open to a
-source-only compact card, so model degradation cannot look like a free day.
+Missing or duplicate verdicts are never repaired locally or cached, and keep
+the run incomplete. A still-missing verdict fails open to a source-only compact
+card, so model degradation cannot look like a free day. A verdict whose
+summary or reason names a day the appointment does not carry keeps the verdict
+and loses that sentence: the decision is what the page acts on.
 
 The Aula and personal-calendar collection phases remain sequential. The private
 brief log records both elapsed times separately, so a concurrency change is made

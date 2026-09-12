@@ -193,8 +193,13 @@ export function rank(
     personalEvents?: PersonalEventVerdict[] | null;
     rules: Card[];
     hidden: string[];
-    /** Add deterministic obligations that survived when a model answer was partial. */
-    supplementRules?: boolean;
+    /**
+     * Where a partial model answer lost cards, the sources they cited — so the
+     * deterministic obligations from exactly those sources fill the gap. `'all'`
+     * when the card list itself was unreadable and nothing is known about
+     * which omissions were decisions.
+     */
+    supplementSources?: ReadonlySet<string> | 'all';
   },
 ): RankedBrief {
   const itemByKey = new Map(input.items.map((item) => [item.key, item]));
@@ -222,15 +227,26 @@ export function rank(
 
   const modelCards = cards.model?.filter(real) ?? null;
   const ruleCards = dedupeCards(cards.rules.filter(real));
-  // A complete model answer remains authoritative. A partial answer is not a
-  // trustworthy omission decision, so deterministic obligations supplement
-  // its validated survivors. Exact duplicates collapse; ambiguous duplicates
+  // A complete model answer remains authoritative. Where it lost a card, the
+  // deterministic obligations from that card's own sources supplement the
+  // validated survivors — and only those: the model read every other source
+  // and its choice not to make a card of one is a decision, not a gap. It used
+  // to add every rule hit in the input, which on a degraded morning put five
+  // copies of a thread's title under *Uden fast dato* beside the cards the
+  // model had written well. Exact duplicates collapse; ambiguous duplicates
   // are preferable to silently losing a deadline on a degraded run.
+  const supplement = cards.supplementSources;
+  const filling =
+    supplement === undefined
+      ? []
+      : supplement === 'all'
+        ? ruleCards
+        : ruleCards.filter((card) => card.sourceKeys.every((key) => supplement.has(key)));
   const chosen =
     modelCards === null
       ? ruleCards
-      : cards.supplementRules
-        ? dedupeCards([...modelCards, ...ruleCards])
+      : filling.length > 0
+        ? dedupeCards([...modelCards, ...filling])
         : modelCards;
 
   const { through: overviewThrough } = overviewWindow(input.today);
