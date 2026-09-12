@@ -81,7 +81,10 @@ to a crash. `parseCommandLine` wraps it.
   real people in the class. Fixtures and docs use the fictional Eksempelsen
   family with `eksempel.dk` values; anything real goes in the gitignored
   `data/`. Add to the list the moment a new real name appears, and never move a
-  term out of it into a tracked file.
+  term out of it into a tracked file. `bun run scan:private` checks every
+  tracked file against the list (from a worktree too) and prints file and line
+  only; run it before committing anything that touched a fixture, a test, a doc
+  or an example.
 - **Preferences are the model's to read.** The model interprets the prose in
   `preferences.md` and returns a typed relevance verdict; ranking code acts on
   that verdict. Do not parse preference wording in code.
@@ -239,6 +242,23 @@ fallback sources.
   unchanged": no amount of waiting connects a connector. A wrong calendar name
   is exit 2. Both used to be 1, which the fleet reads as "a source is down,
   retry later".
+- **A model answer has problems and warnings, and only problems retry.** A
+  refused card or a missing calendar verdict is a problem: the run stays
+  incomplete, the scheduler tries again, the answer is not cached. Dropped
+  prose whose decision survived — an ungrounded topline or child line, a
+  verdict's summary — is a warning: named in *Datastatus*, logged as
+  `brief.model.adjusted`, and never worth another five-minute model call.
+  They were all problems once, and one invented "8/9-11" in a verdict summary
+  kept 2026-09-11's scheduled runs retrying the same extraction twelve times.
+  The card repair runs whenever a card was refused, not only when card dates
+  were the *only* failures, and the rules fallback fills in solely for the
+  sources the refused cards cited (`rejectedSourceKeys`).
+- **The weekly plan is read for this week and next, and the timetable is
+  recurrence evidence.** PE on Thursday in two consecutive plans grounds *husk
+  idrætstøj om torsdagen* and its next-Thursday date without any sentence
+  saying "hver torsdag"; one week alone is a one-off. `recurrenceWeekdayOf` in
+  `dates.ts` is the one reader of that evidence, shared by the validator and
+  the ranker — it was two slightly different copies.
 - **Two caches, and `cache status` reports both.** Remote *responses* — Aula,
   the vendor weekly plans and the Google Calendar reads — share one TTL'd
   `ResponseCache` in `~/.aula/cache/responses`; the model's *layout* is cached

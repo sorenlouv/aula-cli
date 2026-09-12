@@ -132,6 +132,47 @@ const runningRoutine = aulaSource({
   audience: 'class',
 });
 
+/**
+ * The timetable as recurrence evidence: PE on the Thursday of this week's plan
+ * and next week's, and two threads that name the day without ever saying
+ * "hver torsdag". The model should read that as a weekly routine and date it
+ * on the next Thursday; the validator grounds that date on the timetable.
+ */
+const peThisWeek = aulaSource({
+  key: 'plan:eksempel:weekly-plan:2026-W34:date:2026-08-20T08%3A00%3A00:0',
+  kind: 'plan',
+  title: 'Idræt / 2.E',
+  text: 'Fag/hold: Idræt / 2.E\nVi er i hallen. Husk, at alle skal have idrætstøj, indesko og håndklæde med.',
+  at: '2026-08-20T08:00:00',
+  author: 'eksempel',
+  groups: [],
+  audience: 'child',
+});
+const peNextWeek = aulaSource({
+  ...peThisWeek,
+  key: 'plan:eksempel:weekly-plan:2026-W35:date:2026-08-27T08%3A00%3A00:0',
+  text: 'Fag/hold: Idræt / 2.E\nI dag skal vi være i hallen. Husk jeres idrætstøj samt badeting.',
+  at: '2026-08-27T08:00:00',
+});
+const peCancelledOnce = aulaSource({
+  key: 'thread:pe-cancelled',
+  kind: 'thread',
+  title: 'Idræt torsdag',
+  text: 'Idræt torsdag\n\nEksempel Lærer (employee): Grundet vejret skal eleverne ikke have idrætstøj med i morgen.',
+  at: '2026-08-19T14:00:00+02:00',
+  conversation: {
+    messages: [
+      {
+        from: 'Eksempel Lærer',
+        at: '2026-08-19T14:00:00+02:00',
+        text: 'Grundet vejret skal eleverne ikke have idrætstøj med i morgen.',
+      },
+    ],
+    total: 1,
+    truncated: false,
+  },
+});
+
 const weekReply = aulaSource({
   key: 'post:week-reply',
   title: 'Svar om efterårsaktiviteter',
@@ -709,6 +750,31 @@ export const briefExtractionCases: BriefExtractionEvalCase[] = [
       relevantPersonalEvents: [almaDentist.key],
       toplineNotContains: ['konflikt', 'kolliderer', 'sammenfald'],
       childSummariesNotContain: ['konflikt', 'kolliderer', 'sammenfald'],
+    },
+  },
+  {
+    id: 'timetable-routine',
+    description:
+      'PE on the same weekday in two weekly plans is a routine dated on its next occurrence, with the gear reminder kept.',
+    provenance: 'user-labelled',
+    // Friday 21 August: this week's Thursday has passed, next Thursday is the 27th.
+    input: input([peThisWeek, peNextWeek, peCancelledOnce], {
+      today: '2026-08-21',
+      isoWeek: '2026-W34',
+    }),
+    expected: {
+      requiredCards: [
+        {
+          sourceKeys: [peNextWeek.key],
+          needsAction: true,
+          actionableNow: false,
+          placement: 'upcoming',
+          date: '2026-08-27',
+          children: ['Alma'],
+          textContains: 'idrætstøj',
+        },
+      ],
+      hiddenExcludes: [peNextWeek.key],
     },
   },
   {

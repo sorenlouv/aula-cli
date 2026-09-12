@@ -307,6 +307,33 @@ describe('rank: personal appointments in the shared timeline', () => {
     });
   });
 
+  test('an appointment that began yesterday and has not ended is today, not history', () => {
+    const sleepover = item({
+      key: 'cal:far@eksempel.dk:sleepover:2026-08-12T14:00:00+02:00',
+      kind: 'personal',
+      title: 'Overnatning i børnehaven',
+      at: '2026-08-12T14:00:00',
+      endsAt: '2026-08-13T15:00:00',
+      audience: 'family',
+    });
+    const finished = item({
+      ...sleepover,
+      key: 'cal:far@eksempel.dk:sleepover:2026-08-10T14:00:00+02:00',
+      at: '2026-08-10T14:00:00',
+      endsAt: '2026-08-11T15:00:00',
+    });
+    const brief = rank(input([sleepover, finished]), { model: [], rules: [], hidden: [] });
+
+    const [ongoing, past] = brief.personalEvents;
+    expect(ongoing).toMatchObject({
+      sourceKey: sleepover.key,
+      date: '2026-08-13',
+      placement: 'upcoming',
+    });
+    expect(ongoing?.reasons).toContain('ongoing since 2026-08-12 → today');
+    expect(past).toMatchObject({ sourceKey: finished.key, date: '2026-08-10', placement: 'past' });
+  });
+
   test('irrelevant appointments are hidden; missing verdicts fail open', () => {
     const hidden = rank(input([DENTIST]), {
       model: [],
@@ -442,16 +469,40 @@ describe('rank: without a model', () => {
     expect(brief.rest.map((s) => s.key)).toEqual(['post:1']);
   });
 
-  test('a partial model answer is supplemented by deterministic obligations', () => {
+  test('an unreadable model answer is supplemented by every deterministic obligation', () => {
     const rules = cardsFromRules(input([POST]), TODAY);
     const brief = rank(input([POST, THREAD]), {
       model: [card({ id: 'a', sourceKeys: ['thread:2'] })],
       rules,
       hidden: [],
-      supplementRules: true,
+      supplementSources: 'all',
     });
     expect(rules[0]).toBeDefined();
     expect(brief.cards.map((entry) => entry.id)).toContain(rules[0]!.id);
+  });
+
+  test('a lost card is filled in from its own sources only', () => {
+    // The model refused a card citing the thread and kept one citing the post.
+    // The rules fill in for the thread; the post's other sentences are the
+    // model's decision to leave folded, not a gap.
+    const lost = item({ key: 'thread:9', kind: 'thread', title: 'Tur', text: 'Husk madpakke.' });
+    const rules = cardsFromRules(input([POST, lost]), TODAY);
+    const fromThread = rules.filter((rule) => rule.sourceKeys[0] === lost.key);
+    const fromPost = rules.filter((rule) => rule.sourceKeys[0] === POST.key);
+    expect(fromThread.length).toBeGreaterThan(0);
+    expect(fromPost.length).toBeGreaterThan(0);
+
+    const brief = rank(input([POST, lost]), {
+      model: [card({ id: 'a', sourceKeys: [POST.key] })],
+      rules,
+      hidden: [],
+      supplementSources: new Set([lost.key]),
+    });
+
+    const ids = brief.cards.map((entry) => entry.id);
+    expect(ids).toContain('a');
+    for (const rule of fromThread) expect(ids).toContain(rule.id);
+    for (const rule of fromPost) expect(ids).not.toContain(rule.id);
   });
 
   test('an actionableNow disagreement does not duplicate the same supplemented card', () => {
@@ -468,7 +519,7 @@ describe('rank: without a model', () => {
       model: [model],
       rules: [rule],
       hidden: [],
-      supplementRules: true,
+      supplementSources: 'all',
     });
 
     expect(brief.cards.map((entry) => entry.id)).toEqual(['model']);

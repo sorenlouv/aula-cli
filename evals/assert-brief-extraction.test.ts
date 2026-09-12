@@ -10,6 +10,8 @@ const EMPTY_RESULT: ExtractResult = {
   childSummaries: {},
   hidden: [],
   problems: [],
+  warnings: [],
+  rejectedSourceKeys: null,
 };
 
 describe('brief extraction eval assertions', () => {

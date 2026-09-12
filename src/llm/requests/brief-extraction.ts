@@ -129,7 +129,7 @@ export function extractionSchema(input: BriefInput) {
               type: ['string', 'null'],
               format: 'date',
               description:
-                'Dagen kortet sorteres efter: fristen, hvis der er én, ellers dagen det sker. For en fast ugentlig aftale uden en enkelt dato: næste forekomst på eller efter today, regnet fra kildens ugedag. Null kun når hverken dato eller fast ugedag findes. Skal have belæg i en af kortets kilder.',
+                'Dagen kortet sorteres efter: fristen, hvis der er én, ellers dagen det sker. Dagen, noget blev meddelt eller udleveret, er ikke kortets dato: en opgave uden frist har date null, så den står under "Uden fast dato" i stedet for under "Tidligere". For en fast ugentlig aftale uden en enkelt dato: næste forekomst på eller efter today, regnet fra kildens ugedag. Null kun når hverken frist, dag eller fast ugedag findes. Skal have belæg i en af kortets kilder.',
             },
             recurring: {
               type: 'boolean',

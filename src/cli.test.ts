@@ -883,6 +883,20 @@ test('every completed brief records revision and phase timings privately', () =>
   assert.equal(typeof finished.revision.dirty, 'boolean');
 });
 
+test('a brief reads the weekly plan for this week and the next', () => {
+  // `digest` reads one week; the brief's timeline runs to the end of next
+  // week, so it asks the vendor twice. The fake records one line per request.
+  const box = sandbox();
+  const digest = box.run('digest');
+  assert.equal(digest.code, 0, digest.stderr);
+  assert.equal(digest.requests.filter((line) => line.startsWith('meebook ')).length, 1);
+
+  box.reset();
+  const brief = box.run('new', '--no-llm', '--no-deploy', '--no-open', '--no-cache');
+  assert.equal(brief.code, 0, brief.stderr);
+  assert.equal(brief.requests.filter((line) => line.startsWith('meebook ')).length, 2);
+});
+
 test('a brief with no hosted copy configured says so and still counts as complete', () => {
   // The deploy is deliberately left on: every other `new` test passes
   // `--no-deploy`, which is how a lost `artifactUrl` stayed invisible. Both

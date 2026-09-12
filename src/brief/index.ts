@@ -168,10 +168,12 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   let personalEvents: PersonalEventVerdict[] | null = null;
   let hidden: string[] = [];
   let extractionRan = opts.useModel === false;
-  let supplementRules = false;
+  /** Sources whose cards the validator refused; the rules fill in for these. */
+  let supplementSources: ReadonlySet<string> | 'all' | undefined;
   let extractionStatus: string | null = null;
   let overviewWarning: string | null = null;
   let extractionTelemetry: unknown = null;
+  let extractionWarnings: string[] = [];
   let layoutCached = false;
   /** Set when the run failed on something a later attempt cannot fix. */
   let dependencyMissing = false;
@@ -189,8 +191,10 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
       personalEvents = extracted.personalEvents;
       hidden = extracted.hidden;
       extractionRan = extracted.problems.length === 0;
-      supplementRules = extracted.problems.length > 0;
       if (extracted.problems.length > 0) {
+        supplementSources = extracted.rejectedSourceKeys
+          ? new Set(extracted.rejectedSourceKeys)
+          : 'all';
         extractionStatus =
           `Modellens svar var ufuldstændigt (${extracted.problems.length} fejl), ` +
           'så siden bruger de validerede kort og reglerne som reserve for resten.';
@@ -209,6 +213,18 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
       for (const problem of extracted.problems) {
         notes.push(`Udtræk afvist: ${problem}`);
       }
+      // Dropped prose whose decision survived: on the page as a note, in the
+      // log for the record, and never a reason to run the model again.
+      for (const warning of extracted.warnings) {
+        notes.push(`Udtræk justeret: ${warning}`);
+      }
+      if (extracted.warnings.length > 0) {
+        log('brief.model.adjusted', {
+          warningCount: extracted.warnings.length,
+          warnings: extracted.warnings,
+        });
+      }
+      extractionWarnings = extracted.warnings;
     } catch (err) {
       phase('extract', extractStartedAt, { error: errorForBriefLog(err) });
       // A missing `claude` is not a transient model failure: it will still be
@@ -242,9 +258,12 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
     personalEvents,
     rules: cardsFromRules(input, now),
     hidden,
-    supplementRules,
+    ...(supplementSources ? { supplementSources } : {}),
   });
   if (extractionStatus) brief.degraded.push(extractionStatus);
+  for (const warning of extractionWarnings) {
+    brief.degraded.push(`Modellen skrev en dato uden belæg — ${warning}`);
+  }
 
   // ----------------------------------------------------------------- render
   const renderStartedAt = performance.now();

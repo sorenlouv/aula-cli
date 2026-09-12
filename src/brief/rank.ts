@@ -16,7 +16,13 @@
  */
 
 import { localIsoDate } from '../integrations/types.ts';
-import { findRecurringWeekdays, nextRecurringDate, overviewWindow } from './dates.ts';
+import {
+  buildDateSupport,
+  findRecurringWeekdays,
+  nextRecurringDate,
+  overviewWindow,
+  recurrenceWeekdayOf,
+} from './dates.ts';
 import { extractHits } from './rules.ts';
 import type {
   BriefInput,
@@ -121,24 +127,6 @@ function placementOf(
   return date > overviewThrough ? 'future' : 'upcoming';
 }
 
-/**
- * A recurrence is presentation metadata only when the card and one of its own
- * sources agree on the weekday. That keeps a source's unrelated weekly routine
- * from turning another card into a recurring one.
- */
-function recurrenceWeekdayOf(card: Card, sources: SourceItem[]): number | null {
-  const cardDays = new Set(findRecurringWeekdays(`${card.title}\n${card.summary}`));
-  const sourceDays = new Set(
-    sources.flatMap((source) => findRecurringWeekdays(`${source.title}\n${source.text}`)),
-  );
-  const shared = [...cardDays].filter((day) => sourceDays.has(day));
-  if (shared.length === 1) return shared[0] ?? null;
-  if (!card.recurring) return null;
-  const datedWeekday = card.date ? new Date(`${card.date}T00:00:00`).getDay() : null;
-  const candidates = [...sourceDays].filter((day) => datedWeekday === null || day === datedWeekday);
-  return candidates.length === 1 ? (candidates[0] ?? null) : null;
-}
-
 function displayedCardDate(card: Card, recurrenceWeekday: number | null, today: string) {
   if (recurrenceWeekday === null || (card.date !== null && card.date >= today)) return card.date;
   return nextRecurringDate(recurrenceWeekday, today);
@@ -205,8 +193,13 @@ export function rank(
     personalEvents?: PersonalEventVerdict[] | null;
     rules: Card[];
     hidden: string[];
-    /** Add deterministic obligations that survived when a model answer was partial. */
-    supplementRules?: boolean;
+    /**
+     * Where a partial model answer lost cards, the sources they cited — so the
+     * deterministic obligations from exactly those sources fill the gap. `'all'`
+     * when the card list itself was unreadable and nothing is known about
+     * which omissions were decisions.
+     */
+    supplementSources?: ReadonlySet<string> | 'all';
   },
 ): RankedBrief {
   const itemByKey = new Map(input.items.map((item) => [item.key, item]));
@@ -234,21 +227,35 @@ export function rank(
 
   const modelCards = cards.model?.filter(real) ?? null;
   const ruleCards = dedupeCards(cards.rules.filter(real));
-  // A complete model answer remains authoritative. A partial answer is not a
-  // trustworthy omission decision, so deterministic obligations supplement
-  // its validated survivors. Exact duplicates collapse; ambiguous duplicates
+  // A complete model answer remains authoritative. Where it lost a card, the
+  // deterministic obligations from that card's own sources supplement the
+  // validated survivors — and only those: the model read every other source
+  // and its choice not to make a card of one is a decision, not a gap. It used
+  // to add every rule hit in the input, which on a degraded morning put five
+  // copies of a thread's title under *Uden fast dato* beside the cards the
+  // model had written well. Exact duplicates collapse; ambiguous duplicates
   // are preferable to silently losing a deadline on a degraded run.
+  const supplement = cards.supplementSources;
+  const filling =
+    supplement === undefined
+      ? []
+      : supplement === 'all'
+        ? ruleCards
+        : ruleCards.filter((card) => card.sourceKeys.every((key) => supplement.has(key)));
   const chosen =
     modelCards === null
       ? ruleCards
-      : cards.supplementRules
-        ? dedupeCards([...modelCards, ...ruleCards])
+      : filling.length > 0
+        ? dedupeCards([...modelCards, ...filling])
         : modelCards;
 
   const { through: overviewThrough } = overviewWindow(input.today);
+  // The same evidence the validator read; a recurrence badge is presentation
+  // metadata only when the card and one of its own sources agree on the day.
+  const support = buildDateSupport(input);
   const ranked: RankedCard[] = chosen.map((card) => {
     const sources = card.sourceKeys.map((key) => itemByKey.get(key)!);
-    const recurrenceWeekday = recurrenceWeekdayOf(card, sources);
+    const recurrenceWeekday = recurrenceWeekdayOf(card, card.sourceKeys, support);
     const date = displayedCardDate(card, recurrenceWeekday, input.today);
     return {
       ...card,
@@ -313,7 +320,15 @@ export function rank(
       hiddenKeys.add(source.key);
       continue;
     }
-    const date = source.at?.slice(0, 10) || null;
+    const startDay = source.at?.slice(0, 10) || null;
+    const endDay = source.endsAt?.slice(0, 10) || startDay;
+    // An appointment that began before today and has not ended — a sleepover
+    // from yesterday afternoon to this afternoon — is today's, not history's.
+    // Read off its start alone it landed under *Tidligere* while it was still
+    // going on.
+    const ongoing =
+      startDay !== null && endDay !== null && startDay < input.today && endDay >= input.today;
+    const date = ongoing ? input.today : startDay;
     // Production collection uses this same boundary. Keep the guard here so a
     // stale cache or hand-built input still cannot put a later appointment on
     // the page — and name it explicitly so that defensive path cannot look like
@@ -340,6 +355,7 @@ export function rank(
     };
     if (event.modelRank !== null) event.reasons.push(`calendar model rank:${event.modelRank}`);
     else event.reasons.push('calendar verdict missing → shown');
+    if (ongoing) event.reasons.push(`ongoing since ${startDay} → today`);
     event.reasons.push(`placement:${event.placement}`);
     personalEvents.push(event);
     hiddenKeys.delete(source.key);
