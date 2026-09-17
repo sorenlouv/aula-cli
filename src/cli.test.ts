@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { SESSION_FREE_COMMANDS } from './auth.ts';
 import { cmd } from './runtime.ts';
 import { currentSlotStart } from './slots.ts';
 import { installFakeClaude } from './testing/fake-claude.ts';
@@ -694,6 +695,46 @@ test('every failing exit ends stderr with the error line, and its code names the
     assert.equal(line.code, code, name);
     assert.match(line.message, message, name);
     assert.equal(result.stdout, '', `${name}: an error never puts anything on stdout`);
+  }
+});
+
+// "Run a MitID login: aula login" reads, to an agent, as the next command to
+// run — and a login costs the user an approval on their phone, and an abandoned
+// one trips MitID's parallel-session detector for the attempt after it.
+test('exit 5 says what still works and who decides about a login, never "log in"', () => {
+  const cases: Array<{ name: string; run: () => RunResult }> = [
+    { name: 'no stored login', run: () => runWithoutLogin('digest') },
+    {
+      name: 'a rejected login',
+      run: () => sandbox({ FAKE_AULA_REJECT_TOKEN: '1' }).run('whoami'),
+    },
+    { name: 'refresh-stepup with nothing stored', run: () => runWithoutLogin('refresh-stepup') },
+  ];
+  for (const { name, run } of cases) {
+    const result = run();
+    assert.equal(result.code, 5, `${name}: ${result.stderr}`);
+    const flat = result.stderr.replace(/\s+/g, ' ');
+    assert.match(flat, /still answer without one/, name);
+    assert.match(flat, /ask them before starting it/, name);
+    assert.doesNotMatch(flat, /Log in again|Run a MitID login|Run `[^`]*login`/i, name);
+
+    const { code, hint } = errorLineOf(result.stderr);
+    assert.equal(code, 'SETUP', name);
+    assert.match(hint ?? '', /Ask the user before starting/, name);
+    assert.match(hint ?? '', /MitID approval on their phone/, name);
+  }
+});
+
+// A list of what "still works" is only worth printing while it is true.
+test('every command exit 5 names really does answer without a session', () => {
+  for (const { command } of SESSION_FREE_COMMANDS) {
+    const result = runWithoutLogin(command);
+    assert.doesNotMatch(result.stderr, /Not logged in/, command);
+    // `open` has no overview to show in an empty sandbox, and says so; that is
+    // a different exit 5, about the overview, and the point stands: no session
+    // was asked for.
+    if (command !== 'open') assert.equal(result.code, 0, `${command}: ${result.stderr}`);
+    assert.equal(result.requests.length, 0, `${command} must not touch the network`);
   }
 });
 
@@ -1759,7 +1800,7 @@ test('a login Aula will not accept is reported in plain language, with the fix',
   const box = sandbox({ FAKE_AULA_REJECT_TOKEN: '1' });
   const result = box.run('whoami');
 
-  assert.equal(result.code, 5, 'setup required — `aula login`, never a retry');
+  assert.equal(result.code, 5, 'setup required — never a retry');
 
   const flat = result.stderr.replace(/\s+/g, ' ');
   assert.match(flat, /Aula rejected your login/i);

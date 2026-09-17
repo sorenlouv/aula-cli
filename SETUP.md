@@ -168,6 +168,12 @@ you reach them; they were asked once, here.
 The whole login happens on one page in the user's own browser. This is the
 expected stop, and your only job is to hand over the link and wait.
 
+The user asked for this installation, so this one login is already agreed to —
+but it is the only one that is. It costs them an approval in the MitID app on
+their phone, so say that it is coming before you start it, and from here on ask
+before starting another: an `aula` command that exits 5 later is a reason to
+ask the user, never a reason to run `aula login`.
+
 1. Run in the background, with a 10-minute timeout: `aula login`
 2. It prints a `http://127.0.0.1:…` link and opens it. Give the user the link
    as well, and tell them to leave the page open until it says they are logged
@@ -429,9 +435,12 @@ say to them; the right is what you type:
 - **`Executable not found in $PATH: "claude"`** — the command-line Claude is
   missing (step 0). Install it, then re-run `schedule` so the new path is
   baked in.
-- **Exit code 2 from a read command** — the login expired. Log in again
-  (step 3).
-- **Exit code 2 from `login` itself** — that attempt failed. Read the message
+- **Exit code 5 from a read command** — there is no usable session, and no
+  retry changes that. `aula open`, `aula status`, `aula preferences` and
+  `aula --contract` still answer without one. A new session is `aula login`
+  (step 3): ask the user before starting it, and never start one unprompted —
+  it costs them an approval in the MitID app on their phone.
+- **Exit code 5 from `login` itself** — that attempt failed. Read the message
   and fix its cause; retrying blindly risks CAP008.
 - **`Could not start the local login page`** — `login` has no other surface:
   the username is typed there and the approval is shown there. The user has to

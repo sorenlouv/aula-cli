@@ -334,12 +334,22 @@ Offer both — don't install or publish unasked.
 Auth is a real MitID login; tokens live encrypted in `~/.aula/tokens.json` and
 refresh themselves, so most of the time there is nothing to do.
 
-**Exit code 5 means the credentials died.** The error text says which kind and
-how to fix it — relay that rather than guessing. Do not retry the command, and
-never attempt to log in yourself: MitID needs the user's phone. Tell them to
-run `aula login` and approve in the MitID app.
+**Exit code 5 means there is no usable session**, and no retry changes that.
+Every read of Aula needs one. These still answer without one:
 
-`aula status` reports whether they are logged in and for how long.
+| Command | What it gives you |
+| --- | --- |
+| `aula open` | the newest overview, already on disk |
+| `aula status` | what is stored, and whether it is still usable |
+| `aula preferences` | what the overview is written to (`remember` / `forget` work too) |
+| `aula --contract` | what this tool emits |
+
+A new session is `aula login`. **Ask the user before starting it, and never
+start one unprompted:** it opens a page on their machine and costs them an
+approval in the MitID app on their phone, and an abandoned attempt leaves a
+pending approval behind that makes the next one fail. Tell them what you could
+not read and why, offer the login, and wait for a yes. The error line's `hint`
+says the same thing.
 
 Exit codes are the fleet's shared table — `aula` used to have its own, colliding
 scheme, which meant an agent driving several of these tools could not branch on
@@ -351,7 +361,7 @@ a code without knowing which tool it came from:
 | 1 | Aula is down or blocking, or a bug in this client | retry later; a stack trace means a bug |
 | 2 | usage error | fix the command line |
 | 4 | resolved, but nothing to report | a real answer — the JSON is still on stdout; record it and move on |
-| 5 | credentials or setup | run `aula login`; never retry unchanged |
+| 5 | no usable session, or setup | never retry unchanged; ask the user before any `aula login` |
 
 **On exits 1, 2 and 5 the last line of stderr is JSON** — read it instead of the
 prose above it:

@@ -1,5 +1,11 @@
 import { createHash } from 'node:crypto';
-import { type Auth, loginInstructions, refreshSupersededToken, resolveAuth } from './auth.ts';
+import {
+  type Auth,
+  refreshSupersededToken,
+  resolveAuth,
+  sessionGuidance,
+  sessionHint,
+} from './auth.ts';
 import { type CacheSettings, ResponseCache, openCache } from './cache.ts';
 import { CliError, type ErrorCode, type Remedy, formatRemedy, remedyHint } from './errors.ts';
 import type {
@@ -210,32 +216,16 @@ export class AulaMethodError extends AulaApiError {
 }
 
 export class AulaAuthError extends CliError {
-  /** Always ends with the fix, because MitID is the only credential there is. */
-  constructor(problem: string | Remedy, guidance: string = loginInstructions()) {
-    super(
-      'SETUP',
-      typeof problem === 'string' ? `${problem}\n\n${guidance}` : formatRemedy(withLogin(problem)),
-      typeof problem === 'string'
-        ? guidance.replaceAll(/\s*\n\s*/g, ' ')
-        : remedyHint(withLogin(problem)),
-    );
+  /**
+   * Every credential failure ends the same way, so it is filled in here rather
+   * than repeated at each throw site: what still works, and that a new login is
+   * the user's to agree to. It used to end "Log in again with MitID: aula
+   * login", which an agent reads as the next command to run.
+   */
+  constructor(problem: Pick<Remedy, 'headline' | 'detail'>) {
+    super('SETUP', `${formatRemedy(problem)}\n\n${sessionGuidance()}`, sessionHint());
     this.name = 'AulaAuthError';
   }
-}
-
-/**
- * Every credential failure has the same fix, so it is filled in rather than
- * repeated at each throw site — but only when the caller has not named a more
- * specific one, since a Remedy that already carries commands has thought about
- * it harder than this default can.
- */
-function withLogin(problem: Remedy): Remedy {
-  if (problem.commands?.length) return problem;
-  return {
-    ...problem,
-    action: problem.action ?? 'Log in again with MitID:',
-    commands: [cmd('login')],
-  };
 }
 
 export type QueryValue = string | number | boolean | Array<string | number>;
@@ -637,7 +627,9 @@ export class AulaClient {
           `aula command running at the same time — which retires the token in hand ` +
           `immediately, whatever its expiry says.`,
         action: 'Run the command again; the next run picks up the current token.',
-        fallback: `If it keeps happening on every run, the stored login is genuinely stale: \`${cmd('login')}\`.`,
+        fallback:
+          `If it keeps happening on every run, the stored login is genuinely stale and only ` +
+          `\`${cmd('login')}\` replaces it — which costs the user a MitID approval, so ask them first.`,
       });
     }
 
@@ -765,8 +757,11 @@ export class AulaClient {
             'Aula could not be reached a second time to tell whether the service is ' +
             'down or your login has been rejected, so this may be either — or simply ' +
             'no network. Aula reports both as a server error.',
-          action: 'Try, in order:',
-          commands: [cmd('doctor --text'), cmd('login')],
+          action: 'See which it is:',
+          commands: [cmd('doctor --text')],
+          fallback:
+            `If it is the login, only \`${cmd('login')}\` replaces it — and that costs the user ` +
+            `a MitID approval on their phone, so ask them before starting one.`,
         });
     }
   }

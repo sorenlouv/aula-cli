@@ -80,10 +80,49 @@ export function tokenStore(): EncryptedFileTokenStore {
   });
 }
 
-export function loginInstructions(): string {
-  // Built per call, not hoisted to a constant: the spelling depends on how this
-  // installation is invoked, and a module-level constant would freeze it.
-  return `Run a MitID login:\n  ${cmd('login')}`;
+/**
+ * What still answers with no session at all, and what each is for. Named in
+ * every exit 5, so `cli.test.ts` runs each one without a login: a list of
+ * things that "still work" is only worth printing while it is true.
+ */
+export const SESSION_FREE_COMMANDS: ReadonlyArray<{ command: string; what: string }> = [
+  { command: 'open', what: 'the newest overview, already on disk' },
+  { command: 'status', what: 'what is stored, and whether it is still usable' },
+  { command: 'preferences', what: 'what the overview is written to' },
+  { command: '--contract', what: 'what this tool emits' },
+];
+
+/**
+ * What every exit 5 says about getting a session back, as prose.
+ *
+ * It used to say "Run a MitID login: aula login", and the reader is usually an
+ * agent — which took it as an instruction and started one. A login here is not
+ * a retry: it opens a page on the user's machine and costs them an approval in
+ * the MitID app on their phone, and an abandoned one is what trips MitID's
+ * parallel-session detector for the next attempt. So the message says what
+ * still works, and that the login is the user's to agree to.
+ *
+ * Built per call, not hoisted to a constant: the spelling of `aula` depends on
+ * how this installation is invoked.
+ */
+export function sessionGuidance(): string {
+  const width = Math.max(...SESSION_FREE_COMMANDS.map((c) => cmd(c.command).length));
+  return [
+    'Every read of Aula needs a session. These still answer without one:',
+    ...SESSION_FREE_COMMANDS.map((c) => `  ${cmd(c.command).padEnd(width)}   ${c.what}`),
+    '',
+    `A new session is \`${cmd('login')}\`. It costs the user a MitID approval on their phone,`,
+    'so ask them before starting it — an agent never starts one unprompted.',
+  ].join('\n');
+}
+
+/** The same thing in the one line an error line's `hint` holds. */
+export function sessionHint(): string {
+  const names = SESSION_FREE_COMMANDS.map((c) => `\`${cmd(c.command)}\``).join(', ');
+  return (
+    `Every read of Aula needs a session; ${names} still answer without one. ` +
+    `Ask the user before starting \`${cmd('login')}\`: it costs them a MitID approval on their phone.`
+  );
 }
 
 /** The stored MitID login, refreshed if need be — or a clear "not logged in". */
@@ -91,7 +130,8 @@ export async function resolveAuth(): Promise<Auth> {
   const record = await loadFreshTokens();
   if (!record) {
     throw new AulaSessionError(
-      `Not logged in — no MitID tokens in ${TOKEN_PATH}.\n\n${loginInstructions()}`,
+      `Not logged in — no MitID tokens in ${TOKEN_PATH}.\n\n${sessionGuidance()}`,
+      sessionHint(),
     );
   }
   const cookie = await loadCookieHeader();
@@ -123,7 +163,9 @@ export async function loadFreshTokens(): Promise<StoredTokenRecord | undefined> 
       throw new AulaSessionError(
         `${TOKEN_PATH} exists but could not be read: ${err.message}\n\n` +
           `If $${KEY_ENV} is set it must be the same value the tokens were written with. ` +
-          `Otherwise delete the file and run \`${cmd('login')}\` again.`,
+          `Otherwise the stored login cannot be recovered: delete the file.\n\n${sessionGuidance()}`,
+        `If $${KEY_ENV} is set it must be the value the tokens were written with; otherwise ` +
+          `the stored login is lost. ${sessionHint()}`,
       );
     }
     throw err;

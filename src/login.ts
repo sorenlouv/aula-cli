@@ -16,10 +16,12 @@ import {
   clearCookieJar,
   loadFreshTokens,
   saveCookieJar,
+  sessionGuidance,
+  sessionHint,
   tokenStore,
 } from './auth.ts';
 import { clearCache } from './cache.ts';
-import { failWith, firstLineOf, UsageError } from './errors.ts';
+import { AulaSessionError, failWith, firstLineOf, UsageError } from './errors.ts';
 import { fail, fmt, info, ok, openInBrowser, toJson, warn } from './io.ts';
 import type { LoginPage } from './login-page.ts';
 import { errorMessage } from './validation.ts';
@@ -408,7 +410,7 @@ export async function runStatus(asText: boolean): Promise<number> {
     info(`  Access token valid for ${mins} min, then refreshed automatically.`);
   } else {
     warn('Not logged in with MitID.');
-    info(`  Run ${fmt.dim(cmd('login'))}.`);
+    info(`  ${fmt.dim(cmd('login'))} starts a session; it needs an approval in the MitID app.`);
   }
   info(
     `  Token store:     ${status.tokenStore}${status.tokenKeyFromEnv ? ` (key from $${KEY_ENV})` : ''}`,
@@ -427,7 +429,11 @@ export async function runStatus(asText: boolean): Promise<number> {
 export async function runRefreshStepUp(): Promise<number> {
   const store = tokenStore();
   const existing = await store.load();
-  if (!existing) throw new UsageError(`Not logged in. Run \`${cmd('login')}\` first.`);
+  if (!existing) {
+    // A missing session, not a mistyped command: 5 with the same guidance every
+    // other read gives. It was a usage error telling the reader to run `login`.
+    throw new AulaSessionError(`Not logged in.\n\n${sessionGuidance()}`, sessionHint());
+  }
 
   const http = new AulaHttpClient({ logger: silentLogger });
   const client = new AulaLoginClient({ http, logger: silentLogger });
@@ -445,7 +451,10 @@ export async function runRefreshStepUp(): Promise<number> {
   } catch (err) {
     if (err instanceof AulaSilentSsoFailedError) {
       warn('The broker session has expired, so a silent refresh is not possible.');
-      info(`  Run ${fmt.dim(cmd('login'))} to step up again.`);
+      info(
+        `  Only ${fmt.dim(cmd('login'))} steps up again, and it costs the user a MitID approval` +
+          ' on their phone — ask them before starting it.',
+      );
       // 5, not the literal 2 the old scheme left here: nothing about the command
       // line is wrong, and no retry brings a dead broker session back.
       return failWith({

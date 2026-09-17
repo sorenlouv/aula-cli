@@ -46,7 +46,7 @@ lines saying so.
 | 1 | Aula is down or blocking, or a bug in this client |
 | 2 | usage error |
 | 4 | resolved, but nothing to report |
-| 5 | credentials or setup — run `aula login` |
+| 5 | no usable session, or setup — never fixed by retrying |
 
 They are the public contract, shared with `cvr`, `bolig`, `tinglysning` and
 `dgs` and recorded in `../contract.json`; change them only in lockstep with
@@ -65,6 +65,16 @@ because Aula has no bot wall this client has met. A site that prints its own
 prose and returns a code calls `failWith`; `ensureErrorLine` is the net under a
 forgotten one. `doctor` is the one exit 1 that also has a body. On stdout, JSON
 is one line unless a terminal is reading it (`toJson`).
+
+**Exit 5 never tells the reader to log in.** It said "Run a MitID login: `aula
+login`", and the reader is usually an agent, which took that as the next command
+— a login costs the user an approval on their phone, and an abandoned one trips
+MitID's parallel-session detector for the attempt after it. `sessionGuidance`
+and `sessionHint` in `auth.ts` are the one wording: what still answers without
+a session (`SESSION_FREE_COMMANDS`, each run without a login by `cli.test.ts`),
+and that the user is asked before `aula login`. `AulaAuthError` appends it to
+every credential failure, so a throw site cannot forget it. The skill and
+`SETUP.md` say the same thing in the same words.
 
 **`aula --contract` prints this tool's slice of that file**, as every sibling
 does — it was `Unknown command "--contract"`, exit 2, while the fleet's own

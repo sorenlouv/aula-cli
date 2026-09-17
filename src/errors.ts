@@ -28,7 +28,10 @@ export const EXIT = {
    * a read that failed, was cut, or came back partial is not "nothing".
    */
   NOTHING: 4,
-  /** Credentials or setup — run `aula login`. Never fixed by retrying. */
+  /**
+   * Credentials or setup. Never fixed by retrying — and a login is the user's
+   * to start, never something an error message tells an agent to run.
+   */
   SETUP: 5,
 } as const;
 
