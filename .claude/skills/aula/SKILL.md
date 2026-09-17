@@ -80,8 +80,20 @@ ranking what actually matters to this family is your job.
 
 `commonfiles` is where the **class timetable (skema)** often lives — it is not
 in the calendar and not in the weekly plan. If the user asks what a child has
-on a given day and `weekly-plan` is thin, look here for a "skema" PDF. Downloading
-it gives a local path you can then read.
+on a given day and `weekly-plan` is thin, look here for a "skema" PDF.
+Downloading it gives a local path — read that with `pdftotext -layout`, not
+with your file-reading tool:
+
+```bash
+pdftotext -layout skema.pdf -
+```
+
+A skema is a grid: days across, periods down. `-layout` is what keeps the grid,
+and plain extraction returns the lessons as a flat list in which a Monday
+lesson is indistinguishable from a Thursday one. The same holds for any
+`attachment` or `commonfile` worth downloading, since a ugeplan is a table too,
+and it is far cheaper either way: a page of PDF costs about 2,300 image tokens
+against a few hundred as text.
 
 **`galleries` is not in `digest`** — run it separately. It reads album metadata
 only, never the photos, and that metadata is often the best evidence of what a
