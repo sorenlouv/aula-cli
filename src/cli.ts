@@ -45,7 +45,13 @@ import {
   resolveCalendarSelection,
   resolveConfiguredSelection,
 } from './calendar/selection.ts';
-import { AulaApiError, AulaAuthError, AulaClient, CALENDAR_MAX_SPAN_DAYS } from './client.ts';
+import {
+  AulaApiError,
+  AulaAuthError,
+  AulaClient,
+  AulaMethodError,
+  CALENDAR_MAX_SPAN_DAYS,
+} from './client.ts';
 import { briefSlots, readConfig, updateConfig } from './config.ts';
 import {
   buildDigest,
@@ -96,7 +102,7 @@ import { buildVersion } from './runtime.ts';
 import { runSchedule } from './schedule.ts';
 import { coordinateScheduledBrief } from './scheduled-brief.ts';
 import { currentSlotStart } from './slots.ts';
-import { SUPPORTED_WIDGET_IDS, type WeekPlan } from './integrations/index.ts';
+import { NoProviderError, SUPPORTED_WIDGET_IDS, type WeekPlan } from './integrations/index.ts';
 import { addLocalDays, isoDate, localIsoDate } from './integrations/types.ts';
 import type { CommonFile, Contact, ThreadDetail } from './types.ts';
 import { errorMessage, parseInteger, parseIsoDateParts } from './validation.ts';
@@ -430,14 +436,14 @@ async function main(): Promise<number> {
         days,
         ...(values.child ? { child: values.child } : {}),
       });
-      return emit(events, asText, renderCalendar);
+      return emitRows(events, asText, renderCalendar);
     }
 
     case 'presence': {
       const family = await resolveFamily(client);
       const children = selectChildren(family, values.child);
       const entries = await client.getDailyPresence(children.map((c) => c.id));
-      return emit(entries.map(normalisePresence), asText, renderPresence);
+      return emitRows(entries.map(normalisePresence), asText, renderPresence);
     }
 
     case 'notifications': {
@@ -451,7 +457,7 @@ async function main(): Promise<number> {
         postId: n.postId ?? null,
         triggered: n.triggered ?? null,
       }));
-      return emit(grouped, asText, (rows) =>
+      return emitRows(grouped, asText, (rows) =>
         rows.map((r) => `${r.area}/${r.type}${r.child ? ` — ${r.child}` : ''}`).join('\n'),
       );
     }
@@ -467,21 +473,26 @@ async function main(): Promise<number> {
         toDate: to,
       });
       const result = normaliseSchedule(templates, { from, to });
-      return emit(result, asText, renderSchedule);
+      return emit(result, asText, renderSchedule, result.days.length === 0);
     }
 
     case 'groups': {
       const family = await resolveFamily(client);
       const children = selectChildren(family, values.child);
       const result = await loadGroups(client, children);
-      return emit(result, asText, (rows) =>
-        rows
-          .map(
-            (r) =>
-              `${r.child}${r.className ? ` — class ${r.className} (group ${r.classGroupId})` : ''}\n` +
-              indent(r.groups.map((g) => `${g.name} (${g.id})`).join('\n') || '(no groups)', 4),
-          )
-          .join('\n\n'),
+      return emit(
+        result,
+        asText,
+        (rows) =>
+          rows
+            .map(
+              (r) =>
+                `${r.child}${r.className ? ` — class ${r.className} (group ${r.classGroupId})` : ''}\n` +
+                indent(r.groups.map((g) => `${g.name} (${g.id})`).join('\n') || '(no groups)', 4),
+            )
+            .join('\n\n'),
+        // A row per child is always there; what can be absent is the groups.
+        result.every((row) => row.groups.length === 0),
       );
     }
 
@@ -492,7 +503,7 @@ async function main(): Promise<number> {
         ...(values.child ? { child: values.child } : {}),
         ...(groupId !== undefined ? { groupId } : {}),
       });
-      return emit(contacts, asText, renderContacts);
+      return emitRows(contacts, asText, renderContacts);
     }
 
     case 'birthdays': {
@@ -533,18 +544,26 @@ async function main(): Promise<number> {
             ? detail.warning
             : null,
       };
-      return emit(result, asText, (value) => {
-        const rows = value.attachments;
-        const body =
-          rows.length === 0
-            ? '(no attachments in this thread)'
-            : rows
-                .map((a) => `[${a.index}] ${a.name} (${a.kind}) — from ${a.from ?? 'unknown'}`)
-                .join('\n');
-        return value.messagesIncomplete
-          ? `WARNING: not every message page was available (${value.messageReadWarning ?? 'unknown reason'}).\n${body}`
-          : body;
-      });
+      return emit(
+        result,
+        asText,
+        (value) => {
+          const rows = value.attachments;
+          const body =
+            rows.length === 0
+              ? '(no attachments in this thread)'
+              : rows
+                  .map((a) => `[${a.index}] ${a.name} (${a.kind}) — from ${a.from ?? 'unknown'}`)
+                  .join('\n');
+          return value.messagesIncomplete
+            ? `WARNING: not every message page was available (${value.messageReadWarning ?? 'unknown reason'}).\n${body}`
+            : body;
+        },
+        // "No attachments" is only a fact about the thread once every message
+        // has been read. One page of it, or a read that lost pages, proves
+        // nothing about the rest.
+        found.length === 0 && result.messagesIncomplete === false,
+      );
     }
 
     case 'attachment': {
@@ -621,7 +640,7 @@ async function main(): Promise<number> {
         capability: w.capability ?? null,
         supported: SUPPORTED_WIDGET_IDS.includes(w.widgetId),
       }));
-      return emit(result, asText, (rows) =>
+      return emitRows(result, asText, (rows) =>
         rows.length === 0
           ? '(no widgets exposed by these institutions)'
           : rows
@@ -649,8 +668,17 @@ async function main(): Promise<number> {
         ...(values.widget ? { widget: values.widget } : {}),
         ...(fromDate ? { fromDate } : {}),
         ...(toDate ? { toDate } : {}),
+      }).catch((err: unknown) => {
+        // A school with no widget for this capability is an answer about the
+        // school, read off the widget list Aula itself returned — most families
+        // have one vendor out of five. It used to fall through to the "bug in
+        // this client" branch: a stack trace at exit 1 for `weekly-letter` on
+        // a school that simply does not use MinUddannelse.
+        if (!(err instanceof NoProviderError)) throw err;
+        console.error(err.message);
+        return [];
       });
-      return emit(plans, asText, renderPlans);
+      return emit(plans, asText, renderPlans, nothingPlanned(plans));
     }
 
     case 'homework': {
@@ -661,13 +689,25 @@ async function main(): Promise<number> {
         ...(fromDate ? { fromDate } : {}),
         ...(toDate ? { toDate } : {}),
       });
-      return emit(plans, asText, renderPlans);
+      return emit(plans, asText, renderPlans, nothingPlanned(plans));
     }
 
     case 'raw': {
       const method = positionals[0];
       if (method === undefined) throw new Error('raw method was not validated');
-      const result = await client.getRaw(method, parseKeyValues(positionals.slice(1)));
+      const result = await client
+        .getRaw(method, parseKeyValues(positionals.slice(1)))
+        .catch((err: unknown) => {
+          // Here the caller typed the method name, so a name the read-only guard
+          // refuses, or one Aula has never heard of, is a command line to fix.
+          // Both used to leave as exit 1 — "a source is down, retry later" —
+          // which is how an agent that had just asked this tool to send a
+          // message was told to try again in a minute.
+          if (err instanceof AulaMethodError) throw new UsageError(err.message);
+          throw err;
+        });
+      // Never 4: what an unwrapped method returns has no shape this command
+      // knows, so it cannot tell an empty answer from a small one.
       return emit(result, asText, (r) => JSON.stringify(r, null, 2));
     }
 
@@ -783,8 +823,9 @@ function runCache(positionals: string[], asText: boolean, ttlMs: number): number
       renderCacheStats,
     );
   }
-  console.error(`Unknown cache subcommand "${sub}". Use "status" or "clear".`);
-  return 1;
+  // A usage error like any other mistyped argument. It printed its own line and
+  // returned 1, which the fleet reads as "a source is down, retry later".
+  throw new UsageError(`Unknown cache subcommand "${sub}". Usage: ${cmd(usageFor('cache'))}`);
 }
 
 /**
@@ -1672,9 +1713,36 @@ function renderBrief(result: {
   return lines.join('\n');
 }
 
-function emit<T>(value: T, asText: boolean, render: (value: T) => string): number {
+/**
+ * Prints the answer and picks the exit code for it.
+ *
+ * `nothing` is the caller saying the read worked and came back empty — exit 4,
+ * "resolved, but nothing to report", with the body still on stdout because the
+ * contract's `body_on` is `[0, 4]`. The table has declared that code for as long
+ * as this repo has used it and nothing ever returned it: `[]` left at exit 0,
+ * so an agent branching on the code alone read an empty inbox as a result to
+ * summarise. It is only ever passed on positive evidence — a complete read —
+ * and never by `digest`, whose payload is a dozen reads at once.
+ */
+function emit<T>(value: T, asText: boolean, render: (value: T) => string, nothing = false): number {
   console.log(asText ? render(value) : JSON.stringify(value, null, 2));
-  return 0;
+  return nothing ? EXIT.NOTHING : EXIT.OK;
+}
+
+/** {@link emit} for a command whose whole answer is one array. */
+function emitRows<T>(rows: T[], asText: boolean, render: (rows: T[]) => string): number {
+  return emit(rows, asText, render, rows.length === 0);
+}
+
+/**
+ * Whether a set of vendor plans amounts to "nothing planned".
+ *
+ * A failed vendor read has the same `items: []` as a quiet week and says so
+ * only in `warnings`, so a warning anywhere means this is not known to be
+ * empty — and an unknown must never leave as exit 4's "a real, final answer".
+ */
+function nothingPlanned(plans: WeekPlan[]): boolean {
+  return plans.every((plan) => plan.items.length === 0 && (plan.warnings ?? []).length === 0);
 }
 
 /**
@@ -1697,18 +1765,21 @@ function emitList<T>(
   asText: boolean,
   render: (rows: T[]) => string,
 ): number {
+  // `--limit` is at least 1, so an empty list is never a cut one: no rows means
+  // no rows matched, which is exit 4's "resolved, but nothing to report".
+  const code = rows.length === 0 ? EXIT.NOTHING : EXIT.OK;
   if (!asText) {
     console.log(
       JSON.stringify({ [key]: rows, truncated: cut.truncated, limit: cut.limit ?? null }, null, 2),
     );
-    return 0;
+    return code;
   }
   const note = cut.truncated
     ? `\n\nWARNING: more than ${cut.limit} matched — these are the first ${cut.limit}. ` +
       'Raise --limit to see the rest.'
     : '';
   console.log(`${render(rows)}${note}`);
-  return 0;
+  return code;
 }
 
 /**

@@ -13,6 +13,7 @@ import {
   AulaApiError,
   AulaAuthError,
   AulaClient,
+  AulaMethodError,
   CALENDAR_MAX_SPAN_DAYS,
   READ_METHOD_PATTERN,
   READ_ONLY_METHODS,
@@ -510,6 +511,55 @@ test('status 10 is split by HTTP status rather than collapsed', async () => {
       },
     );
   }
+});
+
+// The same 404 is two different mistakes. A typed wrapper naming a method Aula
+// lacks is a bug here; through `raw` the caller typed it, and it used to be told
+// "this is a bug in aula-cli, not something you did" about its own typo.
+test('an unknown method blames whoever chose the name', async () => {
+  /** Answers the version probe, then 404 + code 10 for everything after it. */
+  const unknownMethod = (): FetchStub => {
+    let call = 0;
+    return async () => {
+      call++;
+      return call === 1
+        ? jsonResponse(OK_PROFILES)
+        : jsonResponse({ status: { code: 10 }, data: null }, 404);
+    };
+  };
+
+  await withFetch(unknownMethod(), async () => {
+    const client = new AulaClient({ cookie: COOKIE });
+    await assert.rejects(
+      () => client.getThreads(),
+      (err: unknown) => {
+        assert.ok(err instanceof AulaMethodError);
+        assert.match(err.message, /bug in aula-cli/);
+        return true;
+      },
+    );
+  });
+
+  await withFetch(unknownMethod(), async () => {
+    const client = new AulaClient({ cookie: COOKIE });
+    await assert.rejects(
+      () => client.getRaw('posts.getNothingAtAll'),
+      (err: unknown) => {
+        assert.ok(err instanceof AulaMethodError, 'so the CLI can call it a usage error');
+        assert.match(err.message, /Check the spelling/);
+        assert.doesNotMatch(err.message, /bug in aula-cli/);
+        return true;
+      },
+    );
+  });
+});
+
+test('the read-only guard refuses with the error the CLI maps to a usage error', () => {
+  assert.throws(
+    () => assertReadOnly('messaging.sendMessage', 'GET', { allowAnyGetter: true }),
+    AulaMethodError,
+  );
+  assert.throws(() => assertReadOnly('messaging.getThreads', 'POST'), AulaMethodError);
 });
 
 test('status 20 says the token was superseded, not that the login died', async () => {

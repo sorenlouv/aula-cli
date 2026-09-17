@@ -329,8 +329,18 @@ a code without knowing which tool it came from:
 | 0 | success | use the JSON on stdout |
 | 1 | Aula is down or blocking, or a bug in this client | retry later; a stack trace means a bug |
 | 2 | usage error | fix the command line |
-| 4 | resolved, but nothing to report | a real answer — record it and move on |
+| 4 | resolved, but nothing to report | a real answer — the JSON is still on stdout; record it and move on |
 | 5 | credentials or setup | run `aula login`; never retry unchanged |
+
+**Exit 4 is not a failure.** A read that worked and came back empty — no unread
+threads, no albums in the window, a school with no weekly-letter widget — exits
+4 with its usual JSON on stdout (`[]`, or `{ "threads": [], … }`). Say that there
+was nothing; do not retry, and do not treat the non-zero code as an error.
+`digest` never exits 4. A weekly plan whose `warnings` are non-empty is never 4
+either: that is a fetch that failed, not an empty week.
+
+`raw` with a method name the read-only guard refuses, or one Aula does not have,
+is exit 2 — fix the name rather than retrying.
 
 `--json` is accepted and ignored: JSON is already the default, and the flag
 exists so you do not have to remember which tool in the fleet wants it.

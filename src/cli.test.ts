@@ -584,6 +584,107 @@ test('every command that takes --limit reports the cut it made', () => {
   assert.equal(posts.truncated, true);
 });
 
+// ------------------------------------------------------------- the exit table
+
+// Exit 4 was in the contract, the skill and `EXIT` for as long as this repo has
+// used the shared table, and nothing ever returned it: an empty inbox left at
+// exit 0, so an agent branching on the code read "nothing" as a result.
+test('an empty answer is exit 4 with its body still on stdout', () => {
+  const box = sandbox();
+  const cases: Array<{ args: string[]; body: unknown }> = [
+    { args: ['notifications'], body: [] },
+    // The Viggo thread is already read, so nothing unread concerns him.
+    {
+      args: ['messages', '--unread', '--child', 'Viggo'],
+      body: { threads: [], truncated: false, limit: 20 },
+    },
+    // The newest album is two days old.
+    { args: ['galleries', '--since', '1d'], body: { albums: [], truncated: false, limit: null } },
+    { args: ['commonfiles'], body: { files: [], truncated: false, limit: null } },
+  ];
+  for (const { args, body } of cases) {
+    const result = box.run(...args, '--no-cache');
+    assert.equal(result.code, 4, `${args.join(' ')}: ${result.stderr}`);
+    assert.deepEqual(JSON.parse(result.stdout), body, args.join(' '));
+  }
+
+  const pickups = box.run('pickup-times', '--no-cache');
+  assert.equal(pickups.code, 4);
+  assert.deepEqual(JSON.parse(pickups.stdout).days, []);
+
+  const attachments = box.run('attachments', '5002', '--no-cache');
+  assert.equal(attachments.code, 4);
+  assert.deepEqual(JSON.parse(attachments.stdout).attachments, []);
+});
+
+test('an answer with anything in it is still exit 0', () => {
+  const box = sandbox();
+  for (const args of [['messages'], ['posts'], ['calendar'], ['presence'], ['groups']]) {
+    assert.equal(box.run(...args, '--no-cache').code, 0, args.join(' '));
+  }
+});
+
+// `digest` is a dozen reads in one payload, and one of them coming back empty
+// says nothing about the rest.
+test('digest never exits 4, however little one of its reads returned', () => {
+  const result = sandbox({ FAKE_AULA_EMPTY_POSTS: '1' }).run('digest', '--no-cache');
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout).posts, []);
+});
+
+// Only positive evidence of emptiness is "nothing". One page of a thread proves
+// nothing about the other pages.
+test('an empty page of a thread is not an empty thread', () => {
+  const box = sandbox({ FAKE_AULA_THREAD_PAGE_SIZE: '2' });
+  const result = box.run('attachments', '5001', '--page', '0', '--no-cache');
+  assert.equal(result.code, 0, result.stderr);
+});
+
+// The fixture school has Meebook and nothing else. That is an answer about the
+// school, and it used to be a stack trace at exit 1.
+test('a capability no school offers is exit 4, not a crash', () => {
+  const result = sandbox().run('weekly-letter', '--no-cache');
+  assert.equal(result.code, 4, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), []);
+  assert.match(result.stderr, /No weekly-letter widget is enabled/);
+  assert.doesNotMatch(result.stderr, /\n\s+at /, 'a normal answer must not print a stack');
+});
+
+test('an unknown cache subcommand is a usage error', () => {
+  const result = sandbox().run('cache', 'purge');
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /Unknown cache subcommand "purge"/);
+  assert.equal(result.stdout, '');
+});
+
+// Through `raw` the caller typed the method name. Both of these left at exit 1,
+// the fleet's "a source is down, retry later" — so an agent that had just asked
+// a read-only tool to send a message was told to try again in a minute.
+test('raw refuses a write as a usage error, before a request is sent', () => {
+  const box = sandbox();
+  const result = box.run('raw', 'messaging.sendMessage', 'text=hej');
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /read-only/);
+  assert.equal(result.stdout, '');
+  assert.equal(result.requests.length, 0, 'the guard runs before any socket opens');
+});
+
+test('raw with a method Aula does not have blames the spelling, not the client', () => {
+  const result = sandbox().run('raw', 'posts.getNothingAtAll', '--no-cache');
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /Aula has no method called "posts\.getNothingAtAll"/);
+  assert.match(result.stderr, /Check the spelling/);
+  assert.doesNotMatch(result.stderr, /bug in aula-cli/);
+});
+
+// 5, not the literal 2 the old scheme left behind: no retry brings a dead
+// broker session back, and nothing about the command line is wrong.
+test('refresh-stepup with a lapsed broker session is exit 5', () => {
+  const result = sandbox({ FAKE_AULA_BROKER_EXPIRED: '1' }).run('refresh-stepup');
+  assert.equal(result.code, 5, result.stderr);
+  assert.match(result.stderr, /broker session has expired/);
+});
+
 // -------------------------------------------------------------------- doctor
 
 test('doctor walks every endpoint and reports timing', () => {
@@ -1440,6 +1541,42 @@ test('login serves the username page without contacting MitID', async () => {
       [],
       'MitID must not be contacted before the username arrives',
     );
+  } finally {
+    proc.kill();
+  }
+});
+
+// The fake has no MitID in it, so a login that gets as far as its first request
+// fails there — which is all this needs. A failed login left at a literal 2,
+// from the scheme in which 2 meant credentials; on the shared table that says
+// "fix the command line" about a command that takes no arguments.
+test('a login that fails is exit 5, not a usage error', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'aula-cli-login-test-'));
+  sandboxes.push(dir);
+  const log = join(dir, 'requests.log');
+  writeFileSync(log, '');
+
+  const proc = Bun.spawn({
+    cmd: ['bun', '--preload', PRELOAD, ENTRY, 'login', '--no-open'],
+    env: { ...process.env, AULA_DIR: dir, FAKE_AULA_LOG: log, NO_COLOR: '1' },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  try {
+    const stderr = await readUntilUrl(proc.stderr);
+    const url = stderr.match(/http:\/\/127\.0\.0\.1:\d+\/[0-9a-f-]{36}/)?.[0];
+    assert.ok(url, `login printed no page URL:\n${stderr}`);
+
+    const answered = await fetch(`${url}/input`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ value: 'eksempelforaelder' }),
+    });
+    assert.equal(answered.status, 200);
+
+    const code = await Promise.race([proc.exited, Bun.sleep(20_000).then(() => 'timed out')]);
+    assert.equal(code, 5);
   } finally {
     proc.kill();
   }

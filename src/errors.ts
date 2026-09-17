@@ -17,7 +17,16 @@ export const EXIT = {
   ERROR: 1,
   /** Usage error: fix the command line. */
   USAGE: 2,
-  /** Resolved, but nothing to report. */
+  /**
+   * Resolved, but nothing to report: the read worked and came back empty. The
+   * JSON body is still on stdout (`body_on: [0, 4]`), so a caller that only
+   * parses it loses nothing.
+   *
+   * Declared here, in the skill and in the contract for as long as this table
+   * has existed, and returned by nothing — `Object.values(EXIT)` was all that
+   * kept the contract test green. Only ever on positive evidence of emptiness:
+   * a read that failed, was cut, or came back partial is not "nothing".
+   */
   NOTHING: 4,
   /** Credentials or setup — run `aula login`. Never fixed by retrying. */
   SETUP: 5,
@@ -38,7 +47,7 @@ export class UsageError extends Error {
 /**
  * Raised when there are no usable credentials — no stored MitID login, or one
  * that cannot be decrypted. Prints as a plain message with the fix (run
- * `login`); exit code 2, so the skill can tell "log in again" from a bug.
+ * `login`); exit code 5, so the skill can tell "log in again" from a bug.
  */
 export class AulaSessionError extends Error {
   constructor(message: string) {

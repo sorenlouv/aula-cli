@@ -19,7 +19,7 @@ import {
   tokenStore,
 } from './auth.ts';
 import { clearCache } from './cache.ts';
-import { UsageError } from './errors.ts';
+import { EXIT, UsageError } from './errors.ts';
 import { fail, fmt, info, ok, openInBrowser, warn } from './io.ts';
 import type { LoginPage } from './login-page.ts';
 import { errorMessage } from './validation.ts';
@@ -297,7 +297,12 @@ export async function runLogin(args: LoginArgs): Promise<number> {
     } else if (!args.debug) {
       info(`Re-run with ${fmt.dim('--debug')} to capture a sanitised wire transcript.`);
     }
-    return 2;
+    // 5, the fleet's "credentials or setup — do not retry unchanged", which is
+    // exactly what an abandoned approval or a parallel session is. This was a
+    // literal 2, left over from the scheme in which 2 meant credentials; on the
+    // shared table 2 is "fix the command line", and `login` takes no arguments
+    // to fix.
+    return EXIT.SETUP;
   }
 }
 
@@ -435,7 +440,9 @@ export async function runRefreshStepUp(): Promise<number> {
     if (err instanceof AulaSilentSsoFailedError) {
       warn('The broker session has expired, so a silent refresh is not possible.');
       info(`  Run ${fmt.dim(cmd('login'))} to step up again.`);
-      return 2;
+      // 5, not the literal 2 the old scheme left here: nothing about the command
+      // line is wrong, and no retry brings a dead broker session back.
+      return EXIT.SETUP;
     }
     throw err;
   }

@@ -71,6 +71,8 @@ const PROFILES = {
  *   FAKE_AULA_THREAD_PAGE_SIZE=<n>  paginate thread bodies for integration tests
  *   FAKE_AULA_CONTACT_PAGES=<n>  serve one distinct contact on each page
  *   FAKE_AULA_COMMON_FILES=<n>  serve this many paged shared files
+ *   FAKE_AULA_EXTRA_THREADS=<n>  this many more threads, twenty to a page
+ *   FAKE_AULA_BROKER_EXPIRED=1  the silent re-authorise lands on the broker's login page
  *   FAKE_AULA_STALE_TOKEN=1  every widget token is rejected once as expired
  *   FAKE_AULA_REJECT_TOKEN=1 Aula will not accept the access token
  *   FAKE_AULA_DOWN=1         Aula is broken for everyone, credentials or not
@@ -255,6 +257,22 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
   // not contacted before the username arrives, and that assertion is only worth
   // anything if a call to nemlog-in.mitid.dk actually leaves a mark.
   if (!KNOWN_HOSTS.has(url.host)) record(`unexpected ${url.host}`);
+
+  // The silent re-authorise chain as it ends once the broker session has
+  // lapsed: Aula's authorize endpoint redirects to the broker, and the broker
+  // answers with its IdP-selection page instead of redirecting on. That 200 is
+  // the whole signal — there is no error status to read.
+  if (process.env.FAKE_AULA_BROKER_EXPIRED === '1') {
+    if (url.host === 'login.aula.dk') {
+      return new Response(null, {
+        status: 302,
+        headers: { location: 'https://broker.unilogin.dk/auth/realms/broker/login' },
+      });
+    }
+    if (url.host === 'broker.unilogin.dk') {
+      return new Response('<html><body>Vælg login</body></html>', { status: 200 });
+    }
+  }
 
   if (url.host === 'app.meebook.com') {
     record(`meebook ${url.searchParams.getAll('childFilter[]').join(',')}`);
@@ -496,7 +514,13 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
       // Serialised so a caller can tell a re-issued token from the one it had.
       return envelope(`fake-widget-jwt-${++issuedTokens}`);
     default:
-      return envelope(null);
+      // What Aula says to a method name it does not have: HTTP 404 carrying
+      // status code 10. This answered `envelope(null)`, a success, so a typo
+      // through `raw` could only be tested as a shape error it never is.
+      return new Response(JSON.stringify({ status: { code: 10 }, data: null }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
   }
 }
 

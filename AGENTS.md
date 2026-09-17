@@ -52,6 +52,23 @@ They are the public contract, shared with `cvr`, `bolig`, `tinglysning` and
 `dgs` and recorded in `../contract.json`; change them only in lockstep with
 that file and `../AGENTS.md`.
 
+**Exit 4 is returned, not just declared.** It sat in `EXIT`, the skill and the
+contract while nothing emitted it — `Object.values(EXIT)` was all that kept the
+contract test green — so an empty inbox left at exit 0. `emit` takes a
+`nothing` flag and `emitList` derives it; the body is still printed, because
+`body_on` is `[0, 4]`. Pass it only on positive evidence of emptiness: not for
+one page of a thread, not for a vendor plan carrying `warnings` (a failed fetch
+has the same `items: []` as a quiet week), and never for `digest`. A capability
+no school offers (`NoProviderError`) is 4 with `[]`; it used to be a stack trace
+at exit 1.
+
+**Who typed the method name decides the code.** `AulaMethodError` — the
+read-only guard refusing a name, or Aula answering 404 for one — is exit 1 from
+a typed wrapper, where it is a bug in this client, and exit 2 from `raw`, where
+the caller chose it. Both were 1, so an agent that asked `raw` to send a message
+was told a source was down and to retry. A failed `login` and a lapsed
+`refresh-stepup` are 5; they were a literal 2 left over from the old scheme.
+
 **`--json` is accepted everywhere and ignored.** JSON is already the default
 here; the flag exists so an agent driving the whole fleet does not have to
 remember which tool wants it and which rejects it. It used to be a hard error
