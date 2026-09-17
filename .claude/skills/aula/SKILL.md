@@ -63,8 +63,9 @@ ranking what actually matters to this family is your job.
 | `contacts [--group id]` | Class contact list ("kontaktliste") |
 | `birthdays` | Classmates' birthdays, soonest first |
 | `notifications` | Unread badges Aula is currently showing |
-| `attachments <threadId>` | List a thread's attachments |
-| `attachment <threadId> <n>` | Download one to disk |
+| `attachments <threadId>` | List a thread's attachments, each with its `index` |
+| `attachment <threadId> [index]` | Download one of a thread's attachments to disk |
+| `post-attachment <postId> [index]` | Download one of a post's attachments to disk |
 | `commonfiles` | "Fælles Filer": class timetables, holiday plans, policies |
 | `commonfile <id\|title>` | Download one shared file |
 | `new` | Generate the daily "Aula AI oversigt" and open it |
@@ -94,6 +95,26 @@ lesson is indistinguishable from a Thursday one. The same holds for any
 `attachment` or `commonfile` worth downloading, since a ugeplan is a table too,
 and it is far cheaper either way: a page of PDF costs about 2,300 image tokens
 against a few hundred as text.
+
+**An attachment is a position, never a URL.** Wherever a message or a post
+appears — `digest`, `thread`, `messages --full`, `posts` — its attachments look
+like this:
+
+```json
+{ "index": 1, "id": 402, "name": "Pakkeliste.pdf", "kind": "file", "link": null }
+```
+
+Hand `index` to `attachment <threadId> <index>` (a thread's attachments are
+numbered across all of its messages) or `post-attachment <postId> <index>`
+(numbered within the post). Both save the file and print its `path`; then read
+it, with `pdftotext -layout` if it is a PDF. Aula's download URLs are presigned
+and deliberately absent from every payload: one mangled character in a
+signature is a 403 that looks like an expired login, so they never pass through
+you. `kind` is `file`, `media` or `link`; a `link` has no bytes — its address is
+in `link`, and it is the only kind with one. `index` is `null` when you read one
+`--page` of a thread, or when `messagesIncomplete` is true: the position cannot
+be known until the whole thread is read, so re-read it before downloading.
+`commonfiles` rows carry no URL either — `commonfile <id>` fetches one.
 
 **`galleries` is not in `digest`** — run it separately. It reads album metadata
 only, never the photos, and that metadata is often the best evidence of what a
@@ -159,6 +180,26 @@ Options: `--text`, `--limit <n>`, `--since <7d|3w|2026-08-01>`,
 `--child <name|shortName|id>`, `--days <n>`, `--week`, `--next`, `--full`,
 `--unread`, `--important`, `--group <id>`, `--out <path>`, `--no-cache`,
 `--cache-ttl <seconds>`.
+
+**A list says when it was cut, and you must read that.** Every command that
+takes `--limit` — `messages`, `posts`, `galleries`, `commonfiles`, `birthdays` —
+answers with its rows under their own name plus two fields:
+
+```json
+{ "threads": [ … ], "truncated": true, "limit": 20 }
+```
+
+The row keys are `threads`, `posts`, `albums`, `files` and `birthdays`.
+`truncated: true` means more rows matched than you are holding: raise `--limit`
+before you summarise, or say plainly that you are looking at the newest `limit`
+only. Never report a truncated list as everything there is.
+
+`messages`, `posts` and `galleries` return the newest 20 when you give neither
+`--limit` nor `--since`. A `--since` window lifts that cap — `--since 30d`
+returns every row in the month and `limit` comes back `null` — so prefer a
+window to a guess at a big enough number. `digest` carries the same fact as
+`collectionLimits.threads` / `.posts`, non-null only when its `--limit` cut
+something.
 
 Responses are cached for 10 minutes. Add `--no-cache` when the user asks
 whether something *just* arrived, or when an earlier answer in this
@@ -309,8 +350,21 @@ a code without knowing which tool it came from:
 | 0 | success | use the JSON on stdout |
 | 1 | Aula is down or blocking, or a bug in this client | retry later; a stack trace means a bug |
 | 2 | usage error | fix the command line |
-| 4 | resolved, but nothing to report | a real answer — record it and move on |
+| 4 | resolved, but nothing to report | a real answer — the JSON is still on stdout; record it and move on |
 | 5 | credentials or setup | run `aula login`; never retry unchanged |
+
+`aula --contract` prints the same table as JSON — the codes this tool can
+return and which of them carry a body on stdout — with no login and no request.
+
+**Exit 4 is not a failure.** A read that worked and came back empty — no unread
+threads, no albums in the window, a school with no weekly-letter widget — exits
+4 with its usual JSON on stdout (`[]`, or `{ "threads": [], … }`). Say that there
+was nothing; do not retry, and do not treat the non-zero code as an error.
+`digest` never exits 4. A weekly plan whose `warnings` are non-empty is never 4
+either: that is a fetch that failed, not an empty week.
+
+`raw` with a method name the read-only guard refuses, or one Aula does not have,
+is exit 2 — fix the name rather than retrying.
 
 `--json` is accepted and ignored: JSON is already the default, and the flag
 exists so you do not have to remember which tool in the fleet wants it.

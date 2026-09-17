@@ -71,6 +71,8 @@ const PROFILES = {
  *   FAKE_AULA_THREAD_PAGE_SIZE=<n>  paginate thread bodies for integration tests
  *   FAKE_AULA_CONTACT_PAGES=<n>  serve one distinct contact on each page
  *   FAKE_AULA_COMMON_FILES=<n>  serve this many paged shared files
+ *   FAKE_AULA_EXTRA_THREADS=<n>  this many more threads, twenty to a page
+ *   FAKE_AULA_BROKER_EXPIRED=1  the silent re-authorise lands on the broker's login page
  *   FAKE_AULA_STALE_TOKEN=1  every widget token is rejected once as expired
  *   FAKE_AULA_REJECT_TOKEN=1 Aula will not accept the access token
  *   FAKE_AULA_DOWN=1         Aula is broken for everyone, credentials or not
@@ -142,6 +144,23 @@ const THREADS = [
 ];
 
 /**
+ * Where the fixture's files live. Shaped like the real thing — a presigned URL
+ * whose query string *is* the authorisation — so a test can assert that no
+ * payload ever carries one: `Signature=` appearing on stdout is the failure.
+ */
+const FILE_HOST = 'files.eksempel.dk';
+const signed = (name: string) =>
+  `https://${FILE_HOST}/${encodeURIComponent(name)}?Expires=1&Signature=FAKE-SIGNATURE`;
+
+type FixtureAttachment = {
+  id: number;
+  name: string;
+  file?: { name: string; url: string };
+  media?: { name: string; url: string };
+  link?: { name: string; url: string };
+};
+
+/**
  * Thread bodies, oldest first.
  *
  * 5001 is deliberately a back-and-forth rather than a single message: an active
@@ -149,7 +168,10 @@ const THREADS = [
  * exchange behind the more-block — and a fixture where every thread is one
  * message would never exercise it.
  */
-const MESSAGES: Record<number, { from: string; role: string; ago: number; html: string }[]> = {
+const MESSAGES: Record<
+  number,
+  { from: string; role: string; ago: number; html: string; attachments?: FixtureAttachment[] }[]
+> = {
   5001: [
     {
       from: 'Yrsa Storm',
@@ -168,8 +190,36 @@ const MESSAGES: Record<number, { from: string; role: string; ago: number; html: 
       role: 'employee',
       ago: -2,
       html: 'Kun mandag. Tirsdag sørger vi for maden.',
+      // On the third and fourth messages on purpose. Attachments are numbered
+      // across the whole thread, which only shows when two messages carry them;
+      // and with a page size of two they all sit on the second page, so a read
+      // of the first page alone sees a thread with none.
+      attachments: [
+        {
+          id: 401,
+          name: 'Tilmelding',
+          link: { name: 'Tilmelding', url: 'https://tilmelding.eksempel.dk/lejrskole' },
+        },
+        {
+          id: 402,
+          name: 'Pakkeliste.pdf',
+          file: { name: 'Pakkeliste.pdf', url: signed('Pakkeliste.pdf') },
+        },
+      ],
     },
-    { from: 'Far Eksempelsen', role: 'guardian', ago: -1, html: 'Perfekt, tak.' },
+    {
+      from: 'Far Eksempelsen',
+      role: 'guardian',
+      ago: -1,
+      html: 'Perfekt, tak.',
+      attachments: [
+        {
+          id: 403,
+          name: 'Sovepose.jpg',
+          media: { name: 'Sovepose.jpg', url: signed('Sovepose.jpg') },
+        },
+      ],
+    },
   ],
   5002: [
     { from: 'Pædagog Palle', role: 'employee', ago: -2, html: 'Vi holder lukket fredag den 29.' },
@@ -242,7 +292,7 @@ function record(what: string): void {
 }
 
 /** The hosts this stub knows how to answer. Anything else is worth recording. */
-const KNOWN_HOSTS = new Set(['www.aula.dk', 'app.meebook.com', 'api.minuddannelse.net']);
+const KNOWN_HOSTS = new Set(['www.aula.dk', 'app.meebook.com', 'api.minuddannelse.net', FILE_HOST]);
 
 async function handle(input: string | Request | URL, init?: RequestInit): Promise<Response> {
   const url = new URL(
@@ -255,6 +305,39 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
   // not contacted before the username arrives, and that assertion is only worth
   // anything if a call to nemlog-in.mitid.dk actually leaves a mark.
   if (!KNOWN_HOSTS.has(url.host)) record(`unexpected ${url.host}`);
+
+  // The silent re-authorise chain as it ends once the broker session has
+  // lapsed: Aula's authorize endpoint redirects to the broker, and the broker
+  // answers with its IdP-selection page instead of redirecting on. That 200 is
+  // the whole signal — there is no error status to read.
+  if (process.env.FAKE_AULA_BROKER_EXPIRED === '1') {
+    if (url.host === 'login.aula.dk') {
+      return new Response(null, {
+        status: 302,
+        headers: { location: 'https://broker.unilogin.dk/auth/realms/broker/login' },
+      });
+    }
+    if (url.host === 'broker.unilogin.dk') {
+      return new Response('<html><body>Vælg login</body></html>', { status: 200 });
+    }
+  }
+
+  if (url.host === FILE_HOST) {
+    record(`download ${decodeURIComponent(url.pathname.slice(1))}`);
+    // A presigned URL is fetched clean: S3 rejects one that arrives with the
+    // Aula cookie or an Authorization header beside its signature.
+    const headers = new Headers(init?.headers);
+    if (headers.has('cookie') || headers.has('authorization')) {
+      return new Response('SignatureDoesNotMatch', { status: 403 });
+    }
+    if (url.searchParams.get('Signature') !== 'FAKE-SIGNATURE') {
+      return new Response('MalformedSignature', { status: 403 });
+    }
+    return new Response(`bytes of ${decodeURIComponent(url.pathname.slice(1))}`, {
+      status: 200,
+      headers: { 'content-type': 'application/octet-stream' },
+    });
+  }
 
   if (url.host === 'app.meebook.com') {
     record(`meebook ${url.searchParams.getAll('childFilter[]').join(',')}`);
@@ -322,11 +405,31 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
       return envelope(PROFILES);
     case 'profiles.getProfileContext':
       return envelope(PROFILE_CONTEXT);
-    case 'messaging.getThreads':
+    case 'messaging.getThreads': {
+      // Twenty to a page, as Aula serves them. The three fixture threads fit on
+      // one, so a cut list could never be exercised end to end until
+      // `FAKE_AULA_EXTRA_THREADS` could push the inbox past a page.
+      const extra = Number(process.env.FAKE_AULA_EXTRA_THREADS ?? 0);
+      const all = [
+        ...THREADS,
+        ...Array.from({ length: Math.max(0, extra) }, (_, index) => ({
+          id: 6001 + index,
+          subject: `Besked ${index + 1}`,
+          read: true,
+          sensitive: false,
+          startedTime: iso(-4),
+          institutionCode: '100001',
+          regardingChildren: [],
+          creator: { fullName: 'Skoleleder' },
+          latestMessage: { sendDateTime: iso(-4), text: { html: 'Til orientering.' } },
+        })),
+      ];
+      const page = Number(url.searchParams.get('page') ?? 0);
       return envelope({
-        threads: Number(url.searchParams.get('page') ?? 0) === 0 ? THREADS : [],
-        moreMessagesExist: false,
+        threads: all.slice(page * 20, (page + 1) * 20),
+        moreMessagesExist: (page + 1) * 20 < all.length,
       });
+    }
     case 'messaging.getMessagesForThread': {
       const threadId = Number(url.searchParams.get('threadId'));
       const page = Number(url.searchParams.get('page') ?? 0);
@@ -364,6 +467,7 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
           sendDateTime: iso(m.ago),
           sender: { fullName: m.from, mailBoxOwner: { portalRole: m.role } },
           text: { html: m.html },
+          attachments: m.attachments ?? [],
         })),
       });
     }
@@ -464,11 +568,17 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
       const limit = Number(url.searchParams.get('limit') ?? 50);
       const commonFiles = Array.from(
         { length: Math.max(0, Math.min(limit, total - index)) },
-        (_, offset) => ({
-          id: index + offset + 1,
-          title: `Fælles fil ${index + offset + 1}`,
-          created: iso(-1),
-        }),
+        (_, offset) => {
+          const id = index + offset + 1;
+          const name = `Faelles fil ${id}.pdf`;
+          return {
+            id,
+            title: `Fælles fil ${id}`,
+            created: iso(-1),
+            // Aula's own double nesting: the attachment record, then the blob.
+            file: { name, status: 'available', file: { url: signed(name) } },
+          };
+        },
       );
       return envelope({ commonFiles, totalAmount: total });
     }
@@ -476,7 +586,13 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
       // Serialised so a caller can tell a re-issued token from the one it had.
       return envelope(`fake-widget-jwt-${++issuedTokens}`);
     default:
-      return envelope(null);
+      // What Aula says to a method name it does not have: HTTP 404 carrying
+      // status code 10. This answered `envelope(null)`, a success, so a typo
+      // through `raw` could only be tested as a shape error it never is.
+      return new Response(JSON.stringify({ status: { code: 10 }, data: null }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
   }
 }
 
@@ -488,6 +604,17 @@ function toPost(p: (typeof POSTS)[number]) {
     content: { html: `Indhold for ${p.title}` },
     ownerProfile: { fullName: 'Afsender', institutionCode: p.institutionCode },
     sharedWithGroups: [],
+    // One post with something to download, one without.
+    attachments:
+      p.id === 7001
+        ? [
+            {
+              id: 501,
+              name: 'Ugeplan uge 33.pdf',
+              file: { name: 'Ugeplan uge 33.pdf', url: signed('Ugeplan uge 33.pdf') },
+            },
+          ]
+        : [],
   };
 }
 

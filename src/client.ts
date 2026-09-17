@@ -101,7 +101,7 @@ export function assertReadOnly(
 ): void {
   const known = READ_ONLY_METHODS.has(method);
   if (!known && !(opts.allowAnyGetter && READ_METHOD_PATTERN.test(method))) {
-    throw new AulaApiError(
+    throw new AulaMethodError(
       method,
       -1,
       opts.allowAnyGetter
@@ -113,7 +113,7 @@ export function assertReadOnly(
     );
   }
   if (httpMethod === 'POST' && !POST_ALLOWED.has(method)) {
-    throw new AulaApiError(method, -1, `Refusing to POST to "${method}" — read-only client.`);
+    throw new AulaMethodError(method, -1, `Refusing to POST to "${method}" — read-only client.`);
   }
 }
 
@@ -172,6 +172,23 @@ export class AulaApiError extends Error {
     this.name = 'AulaApiError';
     this.code = code;
     this.method = method;
+  }
+}
+
+/**
+ * The method *name* is what is wrong: the read-only guard refused it, or Aula
+ * has no method called that.
+ *
+ * Its own class because whose mistake that is depends on who chose the name.
+ * From a typed wrapper it is a bug in this client and stays exit 1. From `raw`
+ * the caller typed it, so `cli.ts` turns it into a usage error — it used to
+ * exit 1 there too, which told an agent that had just asked a read-only tool
+ * to send a message that Aula was down and worth retrying.
+ */
+export class AulaMethodError extends AulaApiError {
+  constructor(method: string, code: number, problem: string | Remedy) {
+    super(method, code, problem);
+    this.name = 'AulaMethodError';
   }
 }
 
@@ -455,7 +472,12 @@ export class AulaClient {
   async #send(
     method: string,
     httpMethod: 'GET' | 'POST',
-    opts: { query?: Record<string, QueryValue | undefined>; body?: unknown },
+    opts: {
+      query?: Record<string, QueryValue | undefined>;
+      body?: unknown;
+      /** Set by `raw`: the caller chose the method name, not a typed wrapper. */
+      allowAnyGetter?: boolean;
+    },
     version: number,
     mayRecover = true,
   ): Promise<unknown> {
@@ -587,16 +609,21 @@ export class AulaClient {
     // method name ends up looking like an outage.
     if (code === STATUS_VERSION_OR_ACCESS) {
       if (res.status === 404) {
-        throw new AulaApiError(method, code, {
+        throw new AulaMethodError(method, code, {
           headline: `Aula has no method called "${method}".`,
           detail:
             `The name is wrong, not the parameters — Aula answers an unknown method ` +
             `with HTTP 404 and status code ${code}.`,
-          // The remedy here is maintainer work — reading the real method names
-          // out of Aula's own frontend bundle (AGENTS.md, "Finding an unwrapped
-          // endpoint"). That is a note for whoever is extending this client, not
-          // something to hand a parent mid-error, so it stays a comment.
-          fallback: 'This is a bug in aula-cli, not something you did.',
+          // Whose mistake this is depends on who chose the name. A typed wrapper
+          // naming a method Aula lacks is ours, and finding the real one is
+          // maintainer work (AGENTS.md, "Finding an unwrapped endpoint") — not
+          // something to hand a parent mid-error. Through `raw` the caller typed
+          // it, and this used to tell them "this is a bug in aula-cli, not
+          // something you did" about a typo sitting in their own command line.
+          fallback: opts.allowAnyGetter
+            ? 'Method names are case-sensitive and spelled module.verbNoun, as in ' +
+              'messaging.getThreads. Check the spelling and run it again.'
+            : 'This is a bug in aula-cli, not something you did.',
         });
       }
       if (res.status === 403) {

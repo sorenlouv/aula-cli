@@ -11,6 +11,7 @@ import {
 } from './cli-options.ts';
 import {
   type BirthdayContact,
+  commonFileUrl,
   formatDate,
   formatWhen,
   indent,
@@ -45,19 +46,29 @@ import {
   resolveCalendarSelection,
   resolveConfiguredSelection,
 } from './calendar/selection.ts';
-import { AulaApiError, AulaAuthError, AulaClient, CALENDAR_MAX_SPAN_DAYS } from './client.ts';
+import {
+  AulaApiError,
+  AulaAuthError,
+  AulaClient,
+  AulaMethodError,
+  CALENDAR_MAX_SPAN_DAYS,
+} from './client.ts';
 import { briefSlots, readConfig, updateConfig } from './config.ts';
+import { contractSlice } from './contract.ts';
 import {
   buildDigest,
   collectAlbums,
   collectPosts,
   collectThreads,
   type ChildGroups,
+  findPost,
+  type FullThreadDetail,
   loadCalendar,
   loadGroups,
   normaliseAlbum,
   normaliseEvent,
-  normaliseMessage,
+  normaliseMessages,
+  type NormalMessage,
   normalisePost,
   normalisePresence,
   normaliseThread,
@@ -96,7 +107,7 @@ import { buildVersion } from './runtime.ts';
 import { runSchedule } from './schedule.ts';
 import { coordinateScheduledBrief } from './scheduled-brief.ts';
 import { currentSlotStart } from './slots.ts';
-import { SUPPORTED_WIDGET_IDS, type WeekPlan } from './integrations/index.ts';
+import { NoProviderError, SUPPORTED_WIDGET_IDS, type WeekPlan } from './integrations/index.ts';
 import { addLocalDays, isoDate, localIsoDate } from './integrations/types.ts';
 import type { CommonFile, Contact, ThreadDetail } from './types.ts';
 import { errorMessage, parseInteger, parseIsoDateParts } from './validation.ts';
@@ -104,6 +115,12 @@ import { type Capability, WidgetError } from './widgets.ts';
 
 /** Upper bound on `--days` where no endpoint imposes its own — a year of history. */
 const MAX_HISTORY_DAYS = 365;
+
+/**
+ * How many rows `messages`, `posts` and `galleries` return when the caller
+ * bounded the read with neither `--limit` nor `--since`.
+ */
+const DEFAULT_LIST_LIMIT = 20;
 
 const USAGE = `
 aula — your kids' school and daycare, read from Aula (aula.dk)
@@ -139,6 +156,8 @@ Everyday:
   install-skill [claude|codex] Teach your agent to use this tool, then open a
                                new session (--out <dir> to write elsewhere)
   version                      Which build this is, and for which platform
+  --contract                   This tool's slice of the fleet's shared contract:
+                               its exit codes and which of them carry a body
 
 Options for new:
   --days <n>                   How much history to read (default 60)
@@ -163,8 +182,9 @@ type them:
   groups / contacts            Group membership / class contact list
   birthdays                    Classmates' birthdays, soonest first
   notifications                Unread badges Aula is currently showing
-  attachments <threadId>       List a thread's attachments
+  attachments <threadId>       List a thread's attachments, each with its index
   attachment <threadId> [n]    Download attachment n of a thread (default 0)
+  post-attachment <postId> [n] Download attachment n of a post (default 0)
   commonfiles / commonfile <x> "Fælles Filer" — the shared shelf / download one
   widgets                      Which vendor widgets these schools expose
   weekly-plan / weekly-letter  Weekly plan / weekly letter, whichever vendor
@@ -215,6 +235,14 @@ async function main(): Promise<number> {
   // which build they have, and that has to answer even when nothing else does.
   if (command === '--version' || command === '-v') {
     console.log(versionLine());
+    return 0;
+  }
+
+  // Beside `--version` for the same reason: it is a question about the tool,
+  // so it has to answer with no login, no network and no command. Every
+  // sibling answers it; here it was `Unknown command "--contract"`, exit 2.
+  if (command === '--contract') {
+    console.log(JSON.stringify(contractSlice(), null, 2));
     return 0;
   }
 
@@ -269,6 +297,11 @@ async function main(): Promise<number> {
     throw new UsageError(`--from (${fromDate}) must not be after --to (${toDate}).`);
   }
   const since = values.since ? parseSince(values.since) : undefined;
+  // A `--since` window is a bound of its own. The default cap used to apply on
+  // top of it, so the skill's own `messages --full --since 30d` answered with
+  // the newest 20 threads of a month and no sign that the rest existed — a
+  // busy class loses the very message being asked about.
+  const listLimit = limit ?? (since ? undefined : DEFAULT_LIST_LIMIT);
   const week = resolveWeek(values.week, values.next === true);
   const ttlMs = parseCacheTtl(values['cache-ttl']);
 
@@ -337,17 +370,23 @@ async function main(): Promise<number> {
 
     case 'messages': {
       const family = await resolveFamily(client);
-      const threads = await collectThreads(client, {
-        limit: limit ?? 20,
+      const read = await collectThreads(client, {
         unreadOnly: values.unread === true,
         family,
+        ...(listLimit !== undefined ? { limit: listLimit } : {}),
         ...(since ? { since } : {}),
         ...(values.child ? { child: values.child } : {}),
       });
-      const result = values.full
-        ? await withFullMessages(client, threads)
-        : threads.map(normaliseThread);
-      return emit(result, asText, renderThreads);
+      const threads: NormalThread[] = values.full
+        ? await withFullMessages(client, read.rows)
+        : read.rows.map(normaliseThread);
+      return emitList(
+        'threads',
+        threads,
+        { truncated: read.truncated, limit: listLimit },
+        asText,
+        renderThreads,
+      );
     }
 
     case 'thread': {
@@ -369,30 +408,47 @@ async function main(): Promise<number> {
             ? detail.warning
             : null,
         participants: (detail.recipients ?? []).map((r) => r.fullName).filter(Boolean),
-        messages: (detail.messages ?? []).map(normaliseMessage),
+        // Attachment positions count from the thread's first message, so they
+        // are only known when every message is here: not for one `--page`, and
+        // not for a read that lost a page.
+        messages: normaliseMessages(detail.messages, {
+          wholeThread: page === undefined && !detail.moreMessagesExist,
+        }),
       };
       return emit(result, asText, (r) => renderThreadDetail(r));
     }
 
     case 'posts': {
       const family = await resolveFamily(client);
-      const posts = await collectPosts(client, family, {
-        limit: limit ?? 20,
+      const read = await collectPosts(client, family, {
         important: values.important === true,
+        ...(listLimit !== undefined ? { limit: listLimit } : {}),
         ...(since ? { since } : {}),
         ...(values.child ? { child: values.child } : {}),
       });
-      return emit(posts, asText, renderPosts);
+      return emitList(
+        'posts',
+        read.rows,
+        { truncated: read.truncated, limit: listLimit },
+        asText,
+        renderPosts,
+      );
     }
 
     case 'galleries': {
       const family = await resolveFamily(client);
-      const albums = await collectAlbums(client, family, {
-        limit: limit ?? 20,
+      const read = await collectAlbums(client, family, {
+        ...(listLimit !== undefined ? { limit: listLimit } : {}),
         ...(since ? { since } : {}),
         ...(values.child ? { child: values.child } : {}),
       });
-      return emit(albums, asText, renderAlbums);
+      return emitList(
+        'albums',
+        read.rows,
+        { truncated: read.truncated, limit: listLimit },
+        asText,
+        renderAlbums,
+      );
     }
 
     case 'calendar': {
@@ -401,14 +457,14 @@ async function main(): Promise<number> {
         days,
         ...(values.child ? { child: values.child } : {}),
       });
-      return emit(events, asText, renderCalendar);
+      return emitRows(events, asText, renderCalendar);
     }
 
     case 'presence': {
       const family = await resolveFamily(client);
       const children = selectChildren(family, values.child);
       const entries = await client.getDailyPresence(children.map((c) => c.id));
-      return emit(entries.map(normalisePresence), asText, renderPresence);
+      return emitRows(entries.map(normalisePresence), asText, renderPresence);
     }
 
     case 'notifications': {
@@ -422,7 +478,7 @@ async function main(): Promise<number> {
         postId: n.postId ?? null,
         triggered: n.triggered ?? null,
       }));
-      return emit(grouped, asText, (rows) =>
+      return emitRows(grouped, asText, (rows) =>
         rows.map((r) => `${r.area}/${r.type}${r.child ? ` — ${r.child}` : ''}`).join('\n'),
       );
     }
@@ -438,21 +494,26 @@ async function main(): Promise<number> {
         toDate: to,
       });
       const result = normaliseSchedule(templates, { from, to });
-      return emit(result, asText, renderSchedule);
+      return emit(result, asText, renderSchedule, result.days.length === 0);
     }
 
     case 'groups': {
       const family = await resolveFamily(client);
       const children = selectChildren(family, values.child);
       const result = await loadGroups(client, children);
-      return emit(result, asText, (rows) =>
-        rows
-          .map(
-            (r) =>
-              `${r.child}${r.className ? ` — class ${r.className} (group ${r.classGroupId})` : ''}\n` +
-              indent(r.groups.map((g) => `${g.name} (${g.id})`).join('\n') || '(no groups)', 4),
-          )
-          .join('\n\n'),
+      return emit(
+        result,
+        asText,
+        (rows) =>
+          rows
+            .map(
+              (r) =>
+                `${r.child}${r.className ? ` — class ${r.className} (group ${r.classGroupId})` : ''}\n` +
+                indent(r.groups.map((g) => `${g.name} (${g.id})`).join('\n') || '(no groups)', 4),
+            )
+            .join('\n\n'),
+        // A row per child is always there; what can be absent is the groups.
+        result.every((row) => row.groups.length === 0),
       );
     }
 
@@ -463,7 +524,7 @@ async function main(): Promise<number> {
         ...(values.child ? { child: values.child } : {}),
         ...(groupId !== undefined ? { groupId } : {}),
       });
-      return emit(contacts, asText, renderContacts);
+      return emitRows(contacts, asText, renderContacts);
     }
 
     case 'birthdays': {
@@ -473,8 +534,10 @@ async function main(): Promise<number> {
         ...(values.child ? { child: values.child } : {}),
         ...(groupId !== undefined ? { groupId } : {}),
       });
-      const result = upcomingBirthdays(contacts, limit);
-      return emit(result, asText, (rows) =>
+      const all = upcomingBirthdays(contacts);
+      const shown = limit === undefined ? all : all.slice(0, limit);
+      const cut = { truncated: shown.length < all.length, limit };
+      return emitList('birthdays', shown, cut, asText, (rows) =>
         rows.length === 0
           ? '(no birthdays shared in these classes)'
           : rows
@@ -489,31 +552,38 @@ async function main(): Promise<number> {
 
     case 'attachments': {
       if (threadId === undefined) throw new Error('thread id was not validated');
-      const detail =
-        page === undefined
-          ? await readFullThread(client, threadId)
-          : await client.getThread(threadId, page);
-      const found = threadAttachments(detail);
+      // Always the whole thread. This took `--page`, and numbered what it found
+      // on that page from zero — positions `attachment` would then resolve
+      // against the full thread, downloading a different file without a word.
+      const detail = await readFullThread(client, threadId);
+      const found = describeThreadAttachments(detail);
       const result = {
         attachments: found,
-        messagesIncomplete: page === undefined ? Boolean(detail.moreMessagesExist) : null,
-        messageReadWarning:
-          page === undefined && 'warning' in detail && typeof detail.warning === 'string'
-            ? detail.warning
-            : null,
+        messagesIncomplete: detail.incomplete,
+        messageReadWarning: detail.warning,
       };
-      return emit(result, asText, (value) => {
-        const rows = value.attachments;
-        const body =
-          rows.length === 0
-            ? '(no attachments in this thread)'
-            : rows
-                .map((a) => `[${a.index}] ${a.name} (${a.kind}) — from ${a.from ?? 'unknown'}`)
-                .join('\n');
-        return value.messagesIncomplete
-          ? `WARNING: not every message page was available (${value.messageReadWarning ?? 'unknown reason'}).\n${body}`
-          : body;
-      });
+      return emit(
+        result,
+        asText,
+        (value) => {
+          const rows = value.attachments;
+          const body =
+            rows.length === 0
+              ? '(no attachments in this thread)'
+              : rows
+                  .map(
+                    (a) =>
+                      `[${a.index ?? '?'}] ${a.name} (${a.kind}) — from ${a.from ?? 'unknown'}`,
+                  )
+                  .join('\n');
+          return value.messagesIncomplete
+            ? `WARNING: not every message page was available (${value.messageReadWarning ?? 'unknown reason'}).\n${body}`
+            : body;
+        },
+        // "No attachments" is only a fact about the thread once every message
+        // has been read. A read that lost pages proves nothing about the rest.
+        found.length === 0 && !detail.incomplete,
+      );
     }
 
     case 'attachment': {
@@ -527,7 +597,7 @@ async function main(): Promise<number> {
             'Re-read the thread before choosing an attachment index.',
         );
       }
-      const found = threadAttachments(detail);
+      const found = resolveThreadAttachments(detail);
       const wanted = found[attachmentIndex];
       if (!wanted) {
         throw new UsageError(
@@ -546,19 +616,53 @@ async function main(): Promise<number> {
       return emit(saved, asText, (r) => `Saved ${r.filename} (${r.bytes} bytes) to ${r.path}`);
     }
 
+    case 'post-attachment': {
+      const postId = requireId(positionals[0], 'post-attachment <postId> [index]');
+      const index = requireInteger(positionals[1] ?? '0', 'attachment index', { min: 0 });
+      const family = await resolveFamily(client);
+      const post = await findPost(client, family, postId);
+      if (!post) {
+        throw new UsageError(
+          `No post ${postId} is visible to this login. \`${cmd('posts')}\` lists the ids.`,
+        );
+      }
+      const found = listAttachments(post.attachments);
+      const wanted = found[index];
+      if (!wanted) {
+        throw new UsageError(
+          `Post ${postId} has ${found.length} attachment(s); there is no index ${index}.` +
+            (found.length ? `\n${found.map((a) => `  [${a.index}] ${a.name}`).join('\n')}` : ''),
+        );
+      }
+      if (wanted.kind === 'link') {
+        throw new UsageError(`Attachment ${index} is a link, not a file: ${wanted.url}`);
+      }
+      const saved = await downloadAttachment({
+        attachment: wanted,
+        prefix: `post-${postId}-${index}`,
+        ...(values.out ? { out: values.out } : {}),
+      });
+      return emit(saved, asText, (r) => `Saved ${r.filename} (${r.bytes} bytes) to ${r.path}`);
+    }
+
     case 'commonfiles': {
       const family = await resolveFamily(client);
-      const files = await collectCommonFiles(client, family, limit);
-      return emit(files, asText, renderCommonFiles);
+      const all = (await collectCommonFiles(client, family)).map(normaliseCommonFile);
+      const files = limit === undefined ? all : all.slice(0, limit);
+      const cut = { truncated: files.length < all.length, limit };
+      return emitList('files', files, cut, asText, renderCommonFiles);
     }
 
     case 'commonfile': {
       const family = await resolveFamily(client);
       const ref = positionals[0];
       if (!ref) throw new UsageError('Usage: commonfile <id|text from the title>');
-      const files = await collectCommonFiles(client, family);
-      const wanted = selectCommonFile(files, ref);
-      if (!wanted.url) {
+      const shelf = await collectCommonFiles(client, family);
+      const wanted = selectCommonFile(shelf.map(normaliseCommonFile), ref);
+      // The printed shape carries no URL, so it is read off the row Aula sent.
+      const source = shelf.find((file) => file.id === wanted.id);
+      const url = source ? commonFileUrl(source) : null;
+      if (!url) {
         throw new UsageError(
           `"${wanted.title}" has no downloadable file` +
             (wanted.status && wanted.status !== 'available'
@@ -569,8 +673,9 @@ async function main(): Promise<number> {
       const saved = await downloadAttachment({
         attachment: {
           index: 0,
+          id: null,
           name: wanted.filename ?? wanted.title,
-          url: wanted.url,
+          url,
           kind: 'file',
         },
         prefix: `commonfile-${wanted.id}`,
@@ -588,7 +693,7 @@ async function main(): Promise<number> {
         capability: w.capability ?? null,
         supported: SUPPORTED_WIDGET_IDS.includes(w.widgetId),
       }));
-      return emit(result, asText, (rows) =>
+      return emitRows(result, asText, (rows) =>
         rows.length === 0
           ? '(no widgets exposed by these institutions)'
           : rows
@@ -616,8 +721,17 @@ async function main(): Promise<number> {
         ...(values.widget ? { widget: values.widget } : {}),
         ...(fromDate ? { fromDate } : {}),
         ...(toDate ? { toDate } : {}),
+      }).catch((err: unknown) => {
+        // A school with no widget for this capability is an answer about the
+        // school, read off the widget list Aula itself returned — most families
+        // have one vendor out of five. It used to fall through to the "bug in
+        // this client" branch: a stack trace at exit 1 for `weekly-letter` on
+        // a school that simply does not use MinUddannelse.
+        if (!(err instanceof NoProviderError)) throw err;
+        console.error(err.message);
+        return [];
       });
-      return emit(plans, asText, renderPlans);
+      return emit(plans, asText, renderPlans, nothingPlanned(plans));
     }
 
     case 'homework': {
@@ -628,13 +742,25 @@ async function main(): Promise<number> {
         ...(fromDate ? { fromDate } : {}),
         ...(toDate ? { toDate } : {}),
       });
-      return emit(plans, asText, renderPlans);
+      return emit(plans, asText, renderPlans, nothingPlanned(plans));
     }
 
     case 'raw': {
       const method = positionals[0];
       if (method === undefined) throw new Error('raw method was not validated');
-      const result = await client.getRaw(method, parseKeyValues(positionals.slice(1)));
+      const result = await client
+        .getRaw(method, parseKeyValues(positionals.slice(1)))
+        .catch((err: unknown) => {
+          // Here the caller typed the method name, so a name the read-only guard
+          // refuses, or one Aula has never heard of, is a command line to fix.
+          // Both used to leave as exit 1 — "a source is down, retry later" —
+          // which is how an agent that had just asked this tool to send a
+          // message was told to try again in a minute.
+          if (err instanceof AulaMethodError) throw new UsageError(err.message);
+          throw err;
+        });
+      // Never 4: what an unwrapped method returns has no shape this command
+      // knows, so it cannot tell an empty answer from a small one.
       return emit(result, asText, (r) => JSON.stringify(r, null, 2));
     }
 
@@ -750,8 +876,9 @@ function runCache(positionals: string[], asText: boolean, ttlMs: number): number
       renderCacheStats,
     );
   }
-  console.error(`Unknown cache subcommand "${sub}". Use "status" or "clear".`);
-  return 1;
+  // A usage error like any other mistyped argument. It printed its own line and
+  // returned 1, which the fleet reads as "a source is down, retry later".
+  throw new UsageError(`Unknown cache subcommand "${sub}". Usage: ${cmd(usageFor('cache'))}`);
 }
 
 /**
@@ -1281,22 +1408,34 @@ async function loadContacts(
 
 // --------------------------------------------------------------- attachments
 
-type ThreadAttachment = ResolvedAttachment & { from: string | null; at: string | null };
-
-/** Every attachment in a thread, flattened in message order. */
-function threadAttachments(detail: ThreadDetail): ThreadAttachment[] {
-  const out: ThreadAttachment[] = [];
+/**
+ * Every attachment in a thread, flattened in message order, URLs included —
+ * for `attachment`, which downloads from it and prints none of it.
+ */
+function resolveThreadAttachments(detail: ThreadDetail): ResolvedAttachment[] {
+  const out: ResolvedAttachment[] = [];
   for (const message of detail.messages ?? []) {
     for (const attachment of listAttachments(message.attachments)) {
-      out.push({
-        ...attachment,
-        index: out.length,
-        from: message.sender?.fullName ?? null,
-        at: message.sendDateTime ?? null,
-      });
+      out.push({ ...attachment, index: out.length });
     }
   }
   return out;
+}
+
+/**
+ * The same list as `attachments` prints it: who sent each one and when, and no
+ * URL. Built on `normaliseMessages` so a position here is the position `thread`
+ * and `digest` show for the same attachment — and the one `attachment` takes.
+ */
+function describeThreadAttachments(detail: FullThreadDetail) {
+  return normaliseMessages(detail.messages, { wholeThread: !detail.incomplete }).flatMap(
+    (message) =>
+      message.attachments.map((attachment) => ({
+        ...attachment,
+        from: message.from,
+        at: message.at ?? null,
+      })),
+  );
 }
 
 // ------------------------------------------------------------------- parsing
@@ -1377,7 +1516,7 @@ function renderWhoami(family: Family): string {
 }
 
 type NormalThread = ReturnType<typeof normaliseThread> & {
-  messages?: ReturnType<typeof normaliseMessage>[];
+  messages?: NormalMessage[];
   messagesUnavailable?: boolean;
   messagesIncomplete?: boolean;
   messageReadWarning?: string | null;
@@ -1411,7 +1550,7 @@ function renderThreadDetail(thread: {
   id: number;
   subject: string;
   sensitive: boolean;
-  messages: ReturnType<typeof normaliseMessage>[];
+  messages: NormalMessage[];
   messagesIncomplete?: boolean | null;
   messageReadWarning?: string | null;
 }): string {
@@ -1422,7 +1561,7 @@ function renderThreadDetail(thread: {
   const body = thread.messages
     .map((m) => {
       const attachments = m.attachments.length
-        ? `\n${indent(m.attachments.map((a) => `attachment: ${a.name}`).join('\n'), 4)}`
+        ? `\n${indent(m.attachments.map((a) => `attachment [${a.index ?? '?'}]: ${a.name}`).join('\n'), 4)}`
         : '';
       return `  ${formatWhen(m.at)} ${m.from ?? 'unknown'}:\n${indent(m.text, 4)}${attachments}`;
     })
@@ -1434,7 +1573,7 @@ function renderPosts(posts: ReturnType<typeof normalisePost>[]): string {
   return posts
     .map((p) => {
       const attachments = p.attachments.length
-        ? `\n    attachments: ${p.attachments.map((a) => a.name).join(', ')}`
+        ? `\n    attachments: ${p.attachments.map((a) => `[${a.index}] ${a.name}`).join(', ')}`
         : '';
       return (
         `[${p.id}] ${formatWhen(p.publishedAt)} — ${p.title}${p.important ? '  <IMPORTANT>' : ''}\n` +
@@ -1639,20 +1778,80 @@ function renderBrief(result: {
   return lines.join('\n');
 }
 
-function emit<T>(value: T, asText: boolean, render: (value: T) => string): number {
+/**
+ * Prints the answer and picks the exit code for it.
+ *
+ * `nothing` is the caller saying the read worked and came back empty — exit 4,
+ * "resolved, but nothing to report", with the body still on stdout because the
+ * contract's `body_on` is `[0, 4]`. The table has declared that code for as long
+ * as this repo has used it and nothing ever returned it: `[]` left at exit 0,
+ * so an agent branching on the code alone read an empty inbox as a result to
+ * summarise. It is only ever passed on positive evidence — a complete read —
+ * and never by `digest`, whose payload is a dozen reads at once.
+ */
+function emit<T>(value: T, asText: boolean, render: (value: T) => string, nothing = false): number {
   console.log(asText ? render(value) : JSON.stringify(value, null, 2));
-  return 0;
+  return nothing ? EXIT.NOTHING : EXIT.OK;
+}
+
+/** {@link emit} for a command whose whole answer is one array. */
+function emitRows<T>(rows: T[], asText: boolean, render: (rows: T[]) => string): number {
+  return emit(rows, asText, render, rows.length === 0);
+}
+
+/**
+ * Whether a set of vendor plans amounts to "nothing planned".
+ *
+ * A failed vendor read has the same `items: []` as a quiet week and says so
+ * only in `warnings`, so a warning anywhere means this is not known to be
+ * empty — and an unknown must never leave as exit 4's "a real, final answer".
+ */
+function nothingPlanned(plans: WeekPlan[]): boolean {
+  return plans.every((plan) => plan.items.length === 0 && (plan.warnings ?? []).length === 0);
+}
+
+/**
+ * What every command that takes `--limit` prints: the rows under their own
+ * name, whether the limit cut them, and the limit that was in force.
+ *
+ * These were bare arrays. Twenty rows then read the same whether twenty or two
+ * hundred qualified, and an agent summarising "the last month of messages" had
+ * no way to know it was holding a fraction of them — a failure that looks
+ * exactly like an answer. The rows keep the key the digest already uses for
+ * them, so `.threads[]` and `.posts[]` mean the same thing in both payloads.
+ *
+ * `limit` is null when nothing capped the read — `--since` on its own, or a
+ * command with no default cap — and `truncated` is then false by construction.
+ */
+function emitList<T>(
+  key: string,
+  rows: T[],
+  cut: { truncated: boolean; limit: number | undefined },
+  asText: boolean,
+  render: (rows: T[]) => string,
+): number {
+  // `--limit` is at least 1, so an empty list is never a cut one: no rows means
+  // no rows matched, which is exit 4's "resolved, but nothing to report".
+  const code = rows.length === 0 ? EXIT.NOTHING : EXIT.OK;
+  if (!asText) {
+    console.log(
+      JSON.stringify({ [key]: rows, truncated: cut.truncated, limit: cut.limit ?? null }, null, 2),
+    );
+    return code;
+  }
+  const note = cut.truncated
+    ? `\n\nWARNING: more than ${cut.limit} matched — these are the first ${cut.limit}. ` +
+      'Raise --limit to see the rest.'
+    : '';
+  console.log(`${render(rows)}${note}`);
+  return code;
 }
 
 /**
  * Common files filter on institution *codes*, not on any of the profile ids —
  * a fourth addressing scheme on top of the three in API.md.
  */
-async function collectCommonFiles(
-  client: AulaClient,
-  family: Family,
-  limit?: number,
-): Promise<NormalCommonFile[]> {
+async function collectCommonFiles(client: AulaClient, family: Family): Promise<CommonFile[]> {
   const collected: CommonFile[] = [];
   const seen = new Set<number>();
   const pageSize = 50;
@@ -1684,11 +1883,13 @@ async function collectCommonFiles(
     }
     if (newRows === 0) throw new Error(`Aula repeated shared-file page ${index}.`);
   }
-  const normalised = collected.map(normaliseCommonFile);
   // Newest first: the shelf is dominated by years-old policy documents, and the
   // thing being looked for is almost always what was added most recently.
-  normalised.sort((a, b) => (b.created ?? '').localeCompare(a.created ?? ''));
-  return limit ? normalised.slice(0, limit) : normalised;
+  //
+  // The rows as Aula sent them, not the printed shape: `commonfile` needs the
+  // presigned URL, and that is deliberately absent from what `commonfiles`
+  // prints. Each caller normalises for itself.
+  return collected.sort((a, b) => (b.created ?? '').localeCompare(a.created ?? ''));
 }
 
 function renderCommonFiles(files: NormalCommonFile[]): string {

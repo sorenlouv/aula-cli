@@ -8,6 +8,7 @@
  * live here, and `cli.ts` keeps the argument parsing and the renderers.
  */
 
+import { describeAttachments } from './attachments.ts';
 import { type AulaClient, CALENDAR_MAX_SPAN_DAYS } from './client.ts';
 import { mapLimit, presenceStatus, presenceStatusDanish, startOfDay } from './cli-helpers.ts';
 import {
@@ -27,7 +28,6 @@ import {
 } from './integrations/index.ts';
 import type {
   Album,
-  Attachment,
   CalendarEvent,
   Message,
   Post,
@@ -175,7 +175,16 @@ export type DigestOptions = {
   family?: Family;
 };
 
-type LimitTracker = { hit: boolean };
+/**
+ * A list read, and whether `limit` cut it short of what the window held.
+ *
+ * The collectors used to return bare arrays and report a cut through an
+ * optional out-parameter that only `buildDigest` passed — so `messages`,
+ * `posts` and `galleries` answered with 20 rows whether 20 or 200 qualified,
+ * and nothing in the payload could tell the two apart. Returning the fact with
+ * the rows means a caller has to drop it on purpose rather than by omission.
+ */
+export type Collected<T> = { rows: T[]; truncated: boolean };
 
 type RecoveredRead<T> = { value: T; warning: string | null };
 
@@ -202,12 +211,9 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
   // the caller explicitly asks for one; otherwise a busy 60-day period must
   // not lose sources merely because it crossed an estimated daily average.
   const historyLimit = opts.limit;
-  const threadLimit: LimitTracker = { hit: false };
-  const postLimit: LimitTracker = { hit: false };
 
   const threadSummaries = collectThreads(client, {
     ...(historyLimit !== undefined ? { limit: historyLimit } : {}),
-    limitTracker: threadLimit,
     since,
     unreadOnly: false,
     family,
@@ -216,13 +222,13 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
   // Start the per-thread detail reads as soon as the summaries resolve. They
   // are normally the slowest part of a digest and need not wait for calendar,
   // presence or vendor reads to finish first.
-  const threads = threadSummaries.then((summaries) => withFullMessages(client, summaries));
+  const threads = threadSummaries.then((read) => withFullMessages(client, read.rows));
 
-  const [fullThreads, posts, calendarRead, presenceRead, plans] = await Promise.all([
+  const [threadRead, fullThreads, postRead, calendarRead, presenceRead, plans] = await Promise.all([
+    threadSummaries,
     threads,
     collectPosts(client, family, {
       ...(historyLimit !== undefined ? { limit: historyLimit } : {}),
-      limitTracker: postLimit,
       since,
       ...(opts.child ? { child: opts.child } : {}),
     }),
@@ -251,6 +257,7 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
       ),
     ).then((weeks) => weeks.flat()),
   ]);
+  const posts = postRead.rows;
   const events = calendarRead.value;
   const presence = presenceRead.value;
   const fetchWarnings = [calendarRead.warning, presenceRead.warning].filter(
@@ -313,8 +320,8 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
     fetchWarnings,
     calendarAvailable: calendarRead.warning === null,
     collectionLimits: {
-      posts: postLimit.hit ? (historyLimit ?? null) : null,
-      threads: threadLimit.hit ? (historyLimit ?? null) : null,
+      posts: postRead.truncated ? (historyLimit ?? null) : null,
+      threads: threadRead.truncated ? (historyLimit ?? null) : null,
     },
   };
 }
@@ -323,7 +330,6 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
 
 export type ThreadFilter = {
   limit?: number;
-  limitTracker?: LimitTracker;
   since?: Date;
   unreadOnly: boolean;
   child?: string;
@@ -334,7 +340,7 @@ export type ThreadFilter = {
 export async function collectThreads(
   client: AulaClient,
   filter: ThreadFilter,
-): Promise<ThreadSummary[]> {
+): Promise<Collected<ThreadSummary>> {
   const wanted = selectChildren(filter.family, filter.child);
   const wantedProfileIds = new Set(wanted.map((c) => c.profileId));
   const restrictToChild = filter.child !== undefined;
@@ -371,8 +377,7 @@ export async function collectThreads(
       // Read one qualifying row past the cap so a caller can distinguish a
       // genuinely complete N-row window from a silently truncated one.
       if (filter.limit !== undefined && collected.length > filter.limit) {
-        if (filter.limitTracker) filter.limitTracker.hit = true;
-        return collected.slice(0, filter.limit);
+        return { rows: collected.slice(0, filter.limit), truncated: true };
       }
     }
 
@@ -382,7 +387,7 @@ export async function collectThreads(
     // window there is nothing useful further back.
     if (filter.since && pageWentPastWindow) break;
   }
-  return collected;
+  return { rows: collected, truncated: false };
 }
 
 export async function collectPosts(
@@ -390,12 +395,11 @@ export async function collectPosts(
   family: Family,
   opts: {
     limit?: number;
-    limitTracker?: LimitTracker;
     since?: Date;
     important?: boolean;
     child?: string;
   },
-) {
+): Promise<Collected<ReturnType<typeof normalisePost>>> {
   const pageSize = 10;
   const collected: Post[] = [];
   // Aula filters posts by the id set you ask with, so narrowing to one child is
@@ -429,8 +433,7 @@ export async function collectPosts(
       }
       collected.push(post);
       if (opts.limit !== undefined && collected.length > opts.limit) {
-        if (opts.limitTracker) opts.limitTracker.hit = true;
-        return collected.slice(0, opts.limit).map(normalisePost);
+        return { rows: collected.slice(0, opts.limit).map(normalisePost), truncated: true };
       }
     }
 
@@ -438,7 +441,41 @@ export async function collectPosts(
     if (newRows === 0) throw new Error(`Aula repeated post page ${index} with more=true.`);
     if (opts.since && wentPastWindow) break;
   }
-  return collected.map(normalisePost);
+  return { rows: collected.map(normalisePost), truncated: false };
+}
+
+/**
+ * One post as Aula sent it — attachments with their URLs still on them, which
+ * is the whole reason to want the raw row: `post-attachment` downloads from it.
+ *
+ * Found by paging the feed rather than asked for by id. Aula's frontend may well
+ * have a single-post read, but none has been verified against the live API, and
+ * a guessed method that answered differently would download the wrong file. The
+ * page size and filters match `collectPosts`, so the `posts` run that showed the
+ * caller this id has already put the pages in the response cache.
+ */
+export async function findPost(
+  client: AulaClient,
+  family: Family,
+  postId: number,
+): Promise<Post | undefined> {
+  const pageSize = 10;
+  const seen = new Set<number>();
+  for (let index = 0; ; index += pageSize) {
+    const { posts, hasMorePosts } = await client.getPosts({
+      institutionProfileIds: family.postInstitutionProfileIds,
+      index,
+      limit: pageSize,
+      isImportant: false,
+    });
+    const found = posts.find((post) => post.id === postId);
+    if (found) return found;
+
+    const before = seen.size;
+    for (const post of posts) seen.add(post.id);
+    if (!hasMorePosts) return undefined;
+    if (seen.size === before) throw new Error(`Aula repeated post page ${index} with more=true.`);
+  }
 }
 
 /**
@@ -456,8 +493,8 @@ export async function collectPosts(
 export async function collectAlbums(
   client: AulaClient,
   family: Family,
-  opts: { limit: number; since?: Date; child?: string },
-) {
+  opts: { limit?: number; since?: Date; child?: string },
+): Promise<Collected<ReturnType<typeof normaliseAlbum>>> {
   const pageSize = 100;
   const children = selectChildren(family, opts.child);
   const childInstitutionProfileIds = children.map((c) => c.id);
@@ -479,15 +516,16 @@ export async function collectAlbums(
     if (newRows === 0) throw new Error(`Aula repeated album page ${index}.`);
   }
 
-  return collected
+  const inWindow = collected
     .filter((a) => {
       if (!opts.since) return true;
       const at = Date.parse(a.creationDate ?? '');
       return !Number.isFinite(at) || at >= opts.since.getTime();
     })
     .map(normaliseAlbum)
-    .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
-    .slice(0, opts.limit);
+    .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+  const rows = opts.limit === undefined ? inWindow : inWindow.slice(0, opts.limit);
+  return { rows, truncated: rows.length < inWindow.length };
 }
 
 export async function loadCalendar(
@@ -510,7 +548,7 @@ export async function loadCalendar(
     .sort((a, b) => a.start.localeCompare(b.start));
 }
 
-function emptyMessages(): Array<ReturnType<typeof normaliseMessage>> {
+function emptyMessages(): NormalMessage[] {
   return [];
 }
 
@@ -547,7 +585,7 @@ export async function withFullMessages(client: AulaClient, threads: ThreadSummar
       ...base,
       totalMessageCount: detail.totalMessageCount,
       moreMessagesExist: detail.incomplete,
-      messages: (detail.messages ?? []).map(normaliseMessage),
+      messages: normaliseMessages(detail.messages, { wholeThread: !detail.incomplete }),
       messagesUnavailable: false,
       messagesIncomplete: detail.incomplete,
       messageReadWarning: detail.warning,
@@ -656,17 +694,33 @@ export function normaliseThread(thread: ThreadSummary) {
   };
 }
 
-export function normaliseMessage(message: Message) {
-  return {
-    id: message.id,
-    at: message.sendDateTime,
-    from: message.sender?.fullName ?? null,
-    fromRole: message.sender?.mailBoxOwner?.portalRole ?? null,
-    type: message.messageType ?? 'Message',
-    text: htmlToText(message.text?.html),
-    attachments: normaliseAttachments(message.attachments),
-  };
+/**
+ * A thread's messages, with its attachments numbered across all of them.
+ *
+ * Plural on purpose. `attachment <threadId> <index>` counts from the thread's
+ * first message, so an attachment's index depends on every message before it
+ * and cannot be worked out one message at a time. `wholeThread` says whether
+ * these *are* all of them: for one `--page` of a thread, or a read that lost a
+ * page, the positions are unknown and come back null rather than wrong.
+ */
+export function normaliseMessages(messages: Message[] | undefined, opts: { wholeThread: boolean }) {
+  let next = 0;
+  return (messages ?? []).map((message) => {
+    const attachments = describeAttachments(message.attachments, opts.wholeThread ? next : null);
+    next += attachments.length;
+    return {
+      id: message.id,
+      at: message.sendDateTime,
+      from: message.sender?.fullName ?? null,
+      fromRole: message.sender?.mailBoxOwner?.portalRole ?? null,
+      type: message.messageType ?? 'Message',
+      text: htmlToText(message.text?.html),
+      attachments,
+    };
+  });
 }
+
+export type NormalMessage = ReturnType<typeof normaliseMessages>[number];
 
 export function normalisePost(post: Post) {
   return {
@@ -680,7 +734,8 @@ export function normalisePost(post: Post) {
     groups: (post.sharedWithGroups ?? []).map((g) => g.name).filter((n): n is string => Boolean(n)),
     commentCount: post.commentCount ?? 0,
     text: htmlToText(post.content?.html),
-    attachments: normaliseAttachments(post.attachments),
+    // Numbered within the post: `post-attachment <postId> <index>`.
+    attachments: describeAttachments(post.attachments),
   };
 }
 
@@ -746,15 +801,6 @@ export function normalisePresence(entry: PresenceEntry) {
     comment: entry.comment || null,
     vacationNote: entry.vacationNote || null,
   };
-}
-
-function normaliseAttachments(attachments: Attachment[] | undefined) {
-  return (attachments ?? [])
-    .map((a) => {
-      const target = a.file ?? a.media ?? a.link ?? null;
-      return { name: a.name ?? target?.name ?? 'attachment', url: target?.url ?? null };
-    })
-    .filter((a) => a.name || a.url);
 }
 
 function threadTimestamp(thread: ThreadSummary): Date | undefined {

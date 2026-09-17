@@ -11,6 +11,15 @@
  *    blobs, and a single mangled character produces a `MalformedSignature` 403
  *    that reads like an auth failure. Downloading here and returning a path
  *    keeps them out of that loop entirely.
+ *
+ * The second rule was written here and broken everywhere else: every message
+ * and post in `digest`, `thread`, `messages --full`, `posts` and `attachments`
+ * carried `{ name, url }`, so the model was handed each signature anyway — a
+ * few hundred tokens apiece, for a string it must never retype — and a post's
+ * attachment had no download command at all, which made copying the URL out of
+ * the JSON the only way to fetch it. Payloads now carry an {@link AttachmentRef}
+ * instead: a position to hand to `attachment` or `post-attachment`, never a
+ * signed URL.
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -27,6 +36,8 @@ const MAX_BYTES = 50 * 1024 * 1024;
 export type ResolvedAttachment = {
   /** Position in the flattened, message-order list — what the CLI takes. */
   index: number;
+  /** Aula's own id for the attachment, when the payload carries one. */
+  id: number | null;
   name: string;
   url: string;
   /** A `link` has no bytes behind it: it points somewhere else on the web. */
@@ -50,12 +61,53 @@ export function listAttachments(attachments: Attachment[] | undefined): Resolved
     if (!url) continue;
     out.push({
       index: out.length,
+      id: attachment.id ?? null,
       name: attachment.name ?? target?.name ?? `attachment-${out.length}`,
       url,
       kind,
     });
   }
   return out;
+}
+
+/** What a payload says about an attachment: enough to name and fetch it. */
+export type AttachmentRef = {
+  /**
+   * What `attachment <threadId> <index>` and `post-attachment <postId> <index>`
+   * take. Null when only part of a thread was read: a position counts from the
+   * thread's first message, so it cannot be known from one page of it.
+   */
+  index: number | null;
+  id: number | null;
+  name: string;
+  kind: ResolvedAttachment['kind'];
+  /**
+   * Where a `link` points — an ordinary web address somebody pasted, which is
+   * content. Null for `file` and `media`, whose URLs are presigned and stay in
+   * this process.
+   */
+  link: string | null;
+};
+
+/**
+ * The payload form of {@link listAttachments}, built on it so the two can never
+ * number the same attachments differently.
+ *
+ * `firstIndex` is where this list starts within its thread — a thread's
+ * attachments are numbered across all of its messages — or null when that is
+ * not known.
+ */
+export function describeAttachments(
+  attachments: Attachment[] | undefined,
+  firstIndex: number | null = 0,
+): AttachmentRef[] {
+  return listAttachments(attachments).map((attachment) => ({
+    index: firstIndex === null ? null : firstIndex + attachment.index,
+    id: attachment.id,
+    name: attachment.name,
+    kind: attachment.kind,
+    link: attachment.kind === 'link' ? attachment.url : null,
+  }));
 }
 
 /** Strips anything that could escape the target directory or confuse a shell. */

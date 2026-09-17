@@ -20,6 +20,7 @@ import { expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+import { contractSlice } from './contract.ts';
 import { EXIT } from './errors.ts';
 
 const VENDORED = fileURLToPath(new URL('../contract.json', import.meta.url));
@@ -86,4 +87,13 @@ test('the bridge boundary is recorded, because it is a rule about people', () =>
   const bridge = loadContract().bridge;
   expect(bridge).toBeDefined();
   expect(bridge?.boundary).toContain('never here');
+});
+
+test('--contract prints this slice, and the number a consumer reads to see it moved', () => {
+  // `contractSlice` imports the JSON so the compiled binary carries it; this
+  // reads the same file from disk, so the two routes are held to one answer.
+  expect(contractSlice()).toEqual({ contract: loadAll().contract, ...loadContract() });
+  // Outside the join graph on purpose: no join key leads into this tool, and
+  // printing the table would suggest one does.
+  expect(contractSlice()).not.toHaveProperty('join_keys');
 });

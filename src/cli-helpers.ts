@@ -155,9 +155,20 @@ export function normaliseCommonFile(file: CommonFile) {
     /** Only "available" has cleared the virus scan and can be fetched. */
     status: file.file?.status ?? null,
     groups: (file.groupRestrictions ?? []).map((g) => g.name).filter(Boolean),
-    /** Presigned and short-lived, exactly like a message attachment. */
-    url: file.file?.file?.url ?? null,
   };
+}
+
+/**
+ * Where a shared file's bytes are: presigned and short-lived, exactly like a
+ * message attachment, and absent until the virus scan has passed it.
+ *
+ * Kept off {@link normaliseCommonFile} on purpose. That shape is what
+ * `commonfiles` prints, and it used to carry this URL — a signature the model
+ * must never retype, in every row of a shelf that runs to hundreds of files.
+ * `commonfile <id>` is how a file is fetched; this is for that command alone.
+ */
+export function commonFileUrl(file: CommonFile): string | null {
+  return file.file?.file?.url ?? null;
 }
 
 export type NormalCommonFile = ReturnType<typeof normaliseCommonFile>;
@@ -245,8 +256,11 @@ export type Birthday = {
 /**
  * Birthdays, ordered by how soon they are rather than by calendar date —
  * "who is next" is the only question anybody asks of this list.
+ *
+ * Every row, always: `--limit` is applied by the caller, which is the only
+ * place that can also say the list was cut.
  */
-export function upcomingBirthdays(contacts: BirthdayContact[], limit?: number): Birthday[] {
+export function upcomingBirthdays(contacts: BirthdayContact[]): Birthday[] {
   const today = startOfDay(new Date());
   const rows: Birthday[] = [];
 
@@ -279,7 +293,7 @@ export function upcomingBirthdays(contacts: BirthdayContact[], limit?: number): 
   }
 
   rows.sort((a, b) => a.inDays - b.inDays || a.name.localeCompare(b.name, 'da'));
-  return limit ? rows.slice(0, limit) : rows;
+  return rows;
 }
 
 /**

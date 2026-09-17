@@ -214,7 +214,7 @@ A **parallel session** error (CAP008) means an earlier attempt is still live on
 MitID's side: reject any pending approval in the app, close aula.dk tabs, wait
 a minute, then retry. The CLI explains this when it happens.
 
-A failed login exits 2. Read what it says and fix that — do not simply retry,
+A failed login exits 5. Read what it says and fix that — do not simply retry,
 because each abandoned attempt leaves another pending approval and makes
 CAP008 more likely.
 

@@ -52,6 +52,30 @@ They are the public contract, shared with `cvr`, `bolig`, `tinglysning` and
 `dgs` and recorded in `../contract.json`; change them only in lockstep with
 that file and `../AGENTS.md`.
 
+**`aula --contract` prints this tool's slice of that file**, as every sibling
+does — it was `Unknown command "--contract"`, exit 2, while the fleet's own
+instructions said each tool answers it. `src/contract.ts` *imports* the vendored
+`contract.json` rather than reading it, because the compiled binary has no
+checkout beside it (see Releasing). No `join_keys` in the output: this tool sits
+outside the join graph on purpose.
+
+**Exit 4 is returned, not just declared.** It sat in `EXIT`, the skill and the
+contract while nothing emitted it — `Object.values(EXIT)` was all that kept the
+contract test green — so an empty inbox left at exit 0. `emit` takes a
+`nothing` flag and `emitList` derives it; the body is still printed, because
+`body_on` is `[0, 4]`. Pass it only on positive evidence of emptiness: not for
+one page of a thread, not for a vendor plan carrying `warnings` (a failed fetch
+has the same `items: []` as a quiet week), and never for `digest`. A capability
+no school offers (`NoProviderError`) is 4 with `[]`; it used to be a stack trace
+at exit 1.
+
+**Who typed the method name decides the code.** `AulaMethodError` — the
+read-only guard refusing a name, or Aula answering 404 for one — is exit 1 from
+a typed wrapper, where it is a bug in this client, and exit 2 from `raw`, where
+the caller chose it. Both were 1, so an agent that asked `raw` to send a message
+was told a source was down and to retry. A failed `login` and a lapsed
+`refresh-stepup` are 5; they were a literal 2 left over from the old scheme.
+
 **`--json` is accepted everywhere and ignored.** JSON is already the default
 here; the flag exists so an agent driving the whole fleet does not have to
 remember which tool wants it and which rejects it. It used to be a hard error
@@ -286,6 +310,27 @@ fallback sources.
   client re-reads the token store, adopts a newer token or buys one, and replays
   once. Keep that order — two runs that both refresh rotate each other's tokens
   forever.
+- **A list that was cut says so, in the payload.** Every command that takes
+  `--limit` prints `{ <rows>, truncated, limit }` through `emitList`, and the
+  collectors in `digest.ts` return `Collected<T>` so the fact cannot be dropped
+  by omission. They were bare arrays, the default cap of 20 applied even on top
+  of a `--since` window, and the only collector that reported a cut did it
+  through an out-parameter that `buildDigest` alone passed — so `messages --full
+  --since 30d`, the skill's own example, answered with a fraction of a busy
+  month that read as all of it. A `--since` window now lifts the default cap.
+- **A presigned URL never reaches a payload.** `attachments.ts` has always said
+  they must not round-trip through a model — one mangled character is a
+  `MalformedSignature` 403 that reads like a dead login — while `digest`,
+  `thread`, `messages --full`, `posts`, `attachments` and `commonfiles` each
+  printed them, a few hundred tokens apiece, and a post's attachment had no
+  download command, so copying the URL out of the JSON was the only way to get
+  it. Payloads carry `AttachmentRef` (`describeAttachments`): an `index` for
+  `attachment` or `post-attachment`, and a `link` for the one kind that is a web
+  address rather than a download. A thread's attachments are numbered across
+  all of its messages, which is why `normaliseMessages` is plural and why the
+  index is null for one `--page` or an incomplete read — `attachments` used to
+  take `--page` and number that page from zero, positions `attachment` then
+  resolved against the whole thread.
 - `family.ts` resolves the id sets endpoints want once
   (`postInstitutionProfileIds`, `childInstitutionProfileIds`,
   `institutionCodes`); re-deriving at a call site is how wrong-id failures start.
@@ -383,7 +428,8 @@ compiled branch is testable from a checkout; use that rather than adding a
 mode-specific test path.
 
 New files the binary must carry — templates, fixtures, anything read at
-runtime — have to be imported (`with { type: 'text' }`), not read from disk.
+runtime — have to be imported (`with { type: 'text' }`, or `type: 'json'` as
+`src/contract.ts` does), not read from disk.
 `import.meta.dir` is a virtual path in a compiled binary, so `readFileSync`
 against it compiles happily and fails only for the user.
 

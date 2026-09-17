@@ -8,11 +8,12 @@ import { test } from 'node:test';
  * that drift in the first place.
  */
 const escapeRe = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-import { listAttachments, safeFilename } from './attachments.ts';
+import { describeAttachments, listAttachments, safeFilename } from './attachments.ts';
 import {
   AulaApiError,
   AulaAuthError,
   AulaClient,
+  AulaMethodError,
   CALENDAR_MAX_SPAN_DAYS,
   READ_METHOD_PATTERN,
   READ_ONLY_METHODS,
@@ -23,6 +24,7 @@ import { htmlToText, preview } from './html.ts';
 import { cmd } from './runtime.ts';
 import { addLocalDays, localIsoDate } from './integrations/types.ts';
 import {
+  commonFileUrl,
   normaliseCommonFile,
   normaliseSchedule,
   mapLimit,
@@ -317,19 +319,26 @@ test("a shared file is read off the right level of Aula's double nesting", () =>
   const f = normaliseCommonFile(COMMON_FILE);
   assert.equal(f.title, '2e skema uge 33-43 2026');
   assert.equal(f.filename, '2e Uge 33-43 2026.pdf');
-  assert.equal(f.url, 'https://media-prod.aula.dk/signed', 'url lives on the inner file');
+  assert.equal(
+    commonFileUrl(COMMON_FILE),
+    'https://media-prod.aula.dk/signed',
+    'url lives on the inner file',
+  );
+  // `commonfiles` prints this shape, and a presigned URL is never the model's
+  // to carry: `commonfile <id>` fetches the bytes and returns a path.
+  assert.ok(!('url' in f), 'the printed shape must not carry the signature');
   assert.equal(f.uploadedBy, 'Yrsa Storm Bille');
   assert.equal(f.status, 'available');
   assert.deepEqual(f.groups, ['2E']);
 });
 
-test('a shared file still awaiting its virus scan reports no url', () => {
-  const pending = normaliseCommonFile({
+test('a shared file still awaiting its virus scan has no url to download from', () => {
+  const pending = {
     ...COMMON_FILE,
     file: { ...COMMON_FILE.file, status: 'pending', file: null },
-  });
-  assert.equal(pending.url, null);
-  assert.equal(pending.status, 'pending');
+  };
+  assert.equal(commonFileUrl(pending), null);
+  assert.equal(normaliseCommonFile(pending).status, 'pending');
 });
 
 // The shelf carries near-identical names across years. Quietly downloading last
@@ -510,6 +519,55 @@ test('status 10 is split by HTTP status rather than collapsed', async () => {
       },
     );
   }
+});
+
+// The same 404 is two different mistakes. A typed wrapper naming a method Aula
+// lacks is a bug here; through `raw` the caller typed it, and it used to be told
+// "this is a bug in aula-cli, not something you did" about its own typo.
+test('an unknown method blames whoever chose the name', async () => {
+  /** Answers the version probe, then 404 + code 10 for everything after it. */
+  const unknownMethod = (): FetchStub => {
+    let call = 0;
+    return async () => {
+      call++;
+      return call === 1
+        ? jsonResponse(OK_PROFILES)
+        : jsonResponse({ status: { code: 10 }, data: null }, 404);
+    };
+  };
+
+  await withFetch(unknownMethod(), async () => {
+    const client = new AulaClient({ cookie: COOKIE });
+    await assert.rejects(
+      () => client.getThreads(),
+      (err: unknown) => {
+        assert.ok(err instanceof AulaMethodError);
+        assert.match(err.message, /bug in aula-cli/);
+        return true;
+      },
+    );
+  });
+
+  await withFetch(unknownMethod(), async () => {
+    const client = new AulaClient({ cookie: COOKIE });
+    await assert.rejects(
+      () => client.getRaw('posts.getNothingAtAll'),
+      (err: unknown) => {
+        assert.ok(err instanceof AulaMethodError, 'so the CLI can call it a usage error');
+        assert.match(err.message, /Check the spelling/);
+        assert.doesNotMatch(err.message, /bug in aula-cli/);
+        return true;
+      },
+    );
+  });
+});
+
+test('the read-only guard refuses with the error the CLI maps to a usage error', () => {
+  assert.throws(
+    () => assertReadOnly('messaging.sendMessage', 'GET', { allowAnyGetter: true }),
+    AulaMethodError,
+  );
+  assert.throws(() => assertReadOnly('messaging.getThreads', 'POST'), AulaMethodError);
 });
 
 test('status 20 says the token was superseded, not that the login died', async () => {
@@ -1322,6 +1380,30 @@ test('attachments are indexed across all three kinds Aula models', () => {
       [2, 'link'],
     ],
   );
+});
+
+// The form payloads carry. `attachments.ts` always said a presigned URL must not
+// round-trip through a model, while every message and post handed it one.
+test('the payload form of an attachment has a position and no signed URL', () => {
+  const wire = [
+    { id: 7, name: 'seddel.pdf', file: { name: 'seddel.pdf', url: 'https://cf/1?Signature=x' } },
+    { name: 'foto.jpg', media: { name: 'foto.jpg', url: 'https://cf/2?Signature=y' } },
+    { name: 'Tilmelding', link: { name: 'Tilmelding', url: 'https://x.dk' } },
+    { name: 'broken' },
+  ];
+  // Numbered from where this message starts within its thread.
+  assert.deepEqual(describeAttachments(wire, 5), [
+    { index: 5, id: 7, name: 'seddel.pdf', kind: 'file', link: null },
+    { index: 6, id: null, name: 'foto.jpg', kind: 'media', link: null },
+    // A link is an ordinary address somebody pasted: content, not a download.
+    { index: 7, id: null, name: 'Tilmelding', kind: 'link', link: 'https://x.dk' },
+  ]);
+  // One page of a thread cannot know where it starts.
+  assert.deepEqual(
+    describeAttachments(wire, null).map((a) => a.index),
+    [null, null, null],
+  );
+  assert.doesNotMatch(JSON.stringify(describeAttachments(wire)), /Signature/);
 });
 
 test('attachment filenames cannot escape the download directory', () => {

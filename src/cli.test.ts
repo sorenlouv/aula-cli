@@ -227,7 +227,7 @@ test('digest without --child still covers the whole family', () => {
 
 test('digest --child reaches the standalone commands too', () => {
   const box = sandbox();
-  const posts = json(box.run('posts', '--child', 'Viggo', '--no-cache'));
+  const { posts } = json(box.run('posts', '--child', 'Viggo', '--no-cache'));
   const titles = posts.map((p: any) => p.title);
   assert.ok(titles.includes('Sommerfest i Myretuen'));
   assert.ok(!titles.includes('Ugeplan 2E'));
@@ -443,7 +443,7 @@ test('cached responses belong to one login', () => {
 // so the metadata has to survive the two things Aula does to it: a synthetic
 // first row, and a sort order the payload cannot account for.
 test('galleries drops the synthetic tagged-media row', () => {
-  const albums = json(sandbox().run('galleries', '--no-cache'));
+  const { albums } = json(sandbox().run('galleries', '--no-cache'));
   assert.ok(albums.length > 0, 'sanity: the fake serves albums');
   assert.ok(
     !albums.some((a: any) => a.id === null),
@@ -455,7 +455,7 @@ test('galleries drops the synthetic tagged-media row', () => {
 // Aula orders on mediaCreatedAt and returns creationDate, and the two disagree.
 // Trusting the wire order would put a three-week-old album above yesterday's.
 test('galleries sorts on the date it actually returns, not the wire order', () => {
-  const albums = json(sandbox().run('galleries', '--no-cache'));
+  const { albums } = json(sandbox().run('galleries', '--no-cache'));
   const dates = albums.map((a: any) => a.createdAt);
   assert.deepEqual(
     [...dates].sort((a: string, b: string) => a.localeCompare(b)).reverse(),
@@ -466,7 +466,7 @@ test('galleries sorts on the date it actually returns, not the wire order', () =
 });
 
 test('galleries carries the metadata that makes an album worth reading', () => {
-  const albums = json(sandbox().run('galleries', '--no-cache'));
+  const { albums } = json(sandbox().run('galleries', '--no-cache'));
   const beach = albums.find((a: any) => a.title === 'Tur til stranden');
   assert.equal(beach.id, 9001);
   assert.equal(beach.author, 'Yrsa Storm');
@@ -481,7 +481,7 @@ test('galleries honours --child, --since and --limit', () => {
   const box = sandbox();
   const viggo = json(box.run('galleries', '--child', 'Viggo', '--no-cache'));
   assert.deepEqual(
-    viggo.map((a: any) => a.title),
+    viggo.albums.map((a: any) => a.title),
     ['Sommerfest i Myretuen'],
   );
 
@@ -489,17 +489,19 @@ test('galleries honours --child, --since and --limit', () => {
   // even though it sits above a newer one in the order Aula returns.
   const recent = json(box.run('galleries', '--since', '7d', '--no-cache'));
   assert.deepEqual(
-    recent.map((a: any) => a.title),
+    recent.albums.map((a: any) => a.title),
     ['Tur til stranden', 'Fastelavn i 2E'],
   );
 
   const one = json(box.run('galleries', '--limit', '1', '--no-cache'));
-  assert.equal(one.length, 1);
+  assert.equal(one.albums.length, 1);
   assert.equal(
-    one[0].title,
+    one.albums[0].title,
     'Tur til stranden',
     '--limit keeps the newest, not the first on the wire',
   );
+  assert.equal(one.truncated, true, 'two more albums qualified, and the payload must say so');
+  assert.equal(one.limit, 1);
 });
 
 test('galleries --text renders titles, dates and photographers', () => {
@@ -507,6 +509,332 @@ test('galleries --text renders titles, dates and photographers', () => {
   assert.equal(result.code, 0);
   assert.match(result.stdout, /\[9001\] .* — Tur til stranden/);
   assert.match(result.stdout, /by Yrsa Storm → 2E/);
+});
+
+// ----------------------------------------------------------------- cut lists
+
+// Twenty rows used to read the same whether twenty or two hundred qualified:
+// the list commands printed bare arrays, and the default cap applied even on
+// top of a `--since` window. The skill's own `messages --full --since 30d`
+// therefore answered with a fraction of a busy month and nothing to show for it.
+test('a list cut by the default cap says so, and --since lifts the cap', () => {
+  const box = sandbox({ FAKE_AULA_EXTRA_THREADS: '30' });
+
+  const capped = json(box.run('messages', '--no-cache'));
+  assert.equal(capped.threads.length, 20);
+  assert.equal(capped.truncated, true);
+  assert.equal(capped.limit, 20);
+
+  const windowed = json(box.run('messages', '--since', '30d', '--no-cache'));
+  assert.equal(windowed.threads.length, 33, 'every thread inside the window, not the newest 20');
+  assert.equal(windowed.truncated, false);
+  assert.equal(windowed.limit, null);
+
+  const explicit = json(box.run('messages', '--since', '30d', '--limit', '5', '--no-cache'));
+  assert.equal(explicit.threads.length, 5);
+  assert.equal(explicit.truncated, true, 'a limit the caller chose is still a cut worth stating');
+  assert.equal(explicit.limit, 5);
+});
+
+test('a list that fits is not reported as cut', () => {
+  const box = sandbox();
+  const messages = json(box.run('messages', '--no-cache'));
+  assert.equal(messages.threads.length, 3);
+  assert.equal(messages.truncated, false);
+
+  const posts = json(box.run('posts', '--no-cache'));
+  assert.equal(posts.posts.length, 3);
+  assert.equal(posts.truncated, false);
+  assert.equal(posts.limit, 20);
+});
+
+test('--text says when the list was cut', () => {
+  const result = sandbox({ FAKE_AULA_EXTRA_THREADS: '30' }).run('messages', '--text', '--no-cache');
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /more than 20 matched/);
+  assert.match(result.stdout, /--limit/);
+
+  const whole = sandbox().run('messages', '--text', '--no-cache');
+  assert.doesNotMatch(whole.stdout, /more than/);
+});
+
+test('every command that takes --limit reports the cut it made', () => {
+  const shelf = json(
+    sandbox({ FAKE_AULA_COMMON_FILES: '5' }).run('commonfiles', '--limit', '2', '--no-cache'),
+  );
+  assert.equal(shelf.files.length, 2);
+  assert.equal(shelf.truncated, true);
+  assert.equal(shelf.limit, 2);
+
+  const birthdays = json(
+    sandbox({ FAKE_AULA_CONTACT_PAGES: '3' }).run(
+      'birthdays',
+      '--group',
+      '5001',
+      '--limit',
+      '1',
+      '--no-cache',
+    ),
+  );
+  assert.equal(birthdays.birthdays.length, 1);
+  assert.equal(birthdays.truncated, true);
+
+  const posts = json(sandbox().run('posts', '--limit', '2', '--no-cache'));
+  assert.equal(posts.posts.length, 2);
+  assert.equal(posts.truncated, true);
+});
+
+// Every sibling answers `--contract`, and the fleet's instructions say this one
+// does too. It was `Unknown command "--contract"`, exit 2.
+test('--contract answers with no login and no request', () => {
+  const result = runWithoutLogin('--contract');
+  assert.equal(result.code, 0, result.stderr);
+  const slice = JSON.parse(result.stdout);
+  const vendored = JSON.parse(readFileSync(join(ROOT, 'contract.json'), 'utf8'));
+  assert.equal(slice.contract, vendored.contract);
+  assert.deepEqual(slice.exit_codes, vendored.tools.aula.exit_codes);
+  assert.deepEqual(slice.body_on, vendored.tools.aula.body_on);
+  assert.match(slice.bridge.boundary, /never here/);
+  assert.equal(result.requests.length, 0);
+});
+
+// ---------------------------------------------------------------- attachments
+
+// A presigned URL is the authorisation itself, and one mangled character is a
+// 403 that reads like an auth failure — `attachments.ts` has always said they
+// must not round-trip through a model. Every payload carried them anyway, and a
+// post's attachment had no download command, so copying the URL out of the JSON
+// was the only way to fetch it.
+test('no payload carries a signed URL', () => {
+  const box = sandbox({ FAKE_AULA_COMMON_FILES: '3' });
+  for (const args of [
+    ['digest'],
+    ['thread', '5001'],
+    ['messages', '--full'],
+    ['posts'],
+    ['attachments', '5001'],
+    ['commonfiles'],
+    ['thread', '5001', '--text'],
+    ['posts', '--text'],
+  ]) {
+    const result = box.run(...args, '--no-cache');
+    assert.equal(result.code, 0, `${args.join(' ')}: ${result.stderr}`);
+    assert.doesNotMatch(result.stdout, /Signature=/, `${args.join(' ')} leaked a signed URL`);
+    assert.doesNotMatch(result.stdout, /files\.eksempel\.dk/, args.join(' '));
+  }
+});
+
+test('attachments are numbered across the thread, the same way everywhere', () => {
+  const box = sandbox();
+  const expected = [
+    { index: 0, id: 401, name: 'Tilmelding', kind: 'link' },
+    { index: 1, id: 402, name: 'Pakkeliste.pdf', kind: 'file' },
+    { index: 2, id: 403, name: 'Sovepose.jpg', kind: 'media' },
+  ];
+  const pick = (rows: any[]) =>
+    rows.map((a) => ({ index: a.index, id: a.id, name: a.name, kind: a.kind }));
+
+  const listed = json(box.run('attachments', '5001', '--no-cache'));
+  assert.deepEqual(pick(listed.attachments), expected);
+  assert.equal(listed.attachments[2].from, 'Far Eksempelsen');
+  // A link is content somebody pasted, not a signed download, so it stays.
+  assert.equal(listed.attachments[0].link, 'https://tilmelding.eksempel.dk/lejrskole');
+  assert.equal(listed.attachments[1].link, null);
+
+  const thread = json(box.run('thread', '5001', '--no-cache'));
+  assert.deepEqual(pick(thread.messages.flatMap((m: any) => m.attachments)), expected);
+
+  const digest = json(box.run('digest', '--no-cache'));
+  const inDigest = digest.threads.find((t: any) => t.id === 5001);
+  assert.deepEqual(pick(inDigest.messages.flatMap((m: any) => m.attachments)), expected);
+});
+
+// A position counts from the thread's first message, so one page of a thread
+// cannot know it. Null is honest; a page-local 0 would download another file.
+test('one page of a thread gives its attachments no index', () => {
+  const box = sandbox({ FAKE_AULA_THREAD_PAGE_SIZE: '2' });
+  const page = json(box.run('thread', '5001', '--page', '1', '--no-cache'));
+  const attachments = page.messages.flatMap((m: any) => m.attachments);
+  assert.equal(attachments.length, 3);
+  assert.ok(attachments.every((a: any) => a.index === null));
+
+  // `attachments` took --page too, and numbered that page from zero.
+  const refused = box.run('attachments', '5001', '--page', '1');
+  assert.equal(refused.code, 2);
+  assert.match(refused.stderr, /does not accept --page/);
+});
+
+test('attachment downloads by index, and never prints where it came from', () => {
+  const box = sandbox();
+  const out = join(box.dir, 'pakkeliste.pdf');
+  const result = box.run('attachment', '5001', '1', '--out', out, '--no-cache');
+  assert.equal(result.code, 0, result.stderr);
+  const saved = JSON.parse(result.stdout);
+  assert.equal(saved.path, out);
+  assert.equal(saved.filename, 'Pakkeliste.pdf');
+  assert.equal(readFileSync(out, 'utf8'), 'bytes of Pakkeliste.pdf');
+  assert.doesNotMatch(result.stdout, /Signature=/);
+  assert.ok(box.requests().includes('download Pakkeliste.pdf'));
+
+  const link = box.run('attachment', '5001', '0', '--no-cache');
+  assert.equal(link.code, 2, 'a link has no bytes to download');
+  assert.match(link.stderr, /is a link, not a file/);
+});
+
+test("post-attachment downloads a post's file by the index posts shows", () => {
+  const box = sandbox();
+  const { posts } = json(box.run('posts', '--no-cache'));
+  const plan = posts.find((p: any) => p.id === 7001);
+  assert.deepEqual(plan.attachments, [
+    { index: 0, id: 501, name: 'Ugeplan uge 33.pdf', kind: 'file', link: null },
+  ]);
+
+  const out = join(box.dir, 'ugeplan.pdf');
+  const result = box.run('post-attachment', '7001', '0', '--out', out, '--no-cache');
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).filename, 'Ugeplan uge 33.pdf');
+  assert.equal(readFileSync(out, 'utf8'), 'bytes of Ugeplan uge 33.pdf');
+  assert.doesNotMatch(result.stdout, /Signature=/);
+
+  // The index defaults to the first attachment, as it does for `attachment`.
+  const byDefault = box.run('post-attachment', '7001', '--out', out, '--no-cache');
+  assert.equal(byDefault.code, 0, byDefault.stderr);
+});
+
+test('post-attachment names what is wrong with a bad post id or index', () => {
+  const box = sandbox();
+  const noPost = box.run('post-attachment', '7999', '--no-cache');
+  assert.equal(noPost.code, 2);
+  assert.match(noPost.stderr, /No post 7999 is visible to this login/);
+
+  const noIndex = box.run('post-attachment', '7001', '4', '--no-cache');
+  assert.equal(noIndex.code, 2);
+  assert.match(noIndex.stderr, /has 1 attachment\(s\); there is no index 4/);
+  assert.match(noIndex.stderr, /\[0\] Ugeplan uge 33\.pdf/);
+
+  const none = box.run('post-attachment', '7002', '--no-cache');
+  assert.equal(none.code, 2);
+  assert.match(none.stderr, /has 0 attachment\(s\)/);
+});
+
+test('commonfile still downloads, from a URL commonfiles no longer prints', () => {
+  const box = sandbox({ FAKE_AULA_COMMON_FILES: '3' });
+  const { files } = json(box.run('commonfiles', '--no-cache'));
+  assert.ok(files.every((f: any) => !('url' in f)));
+  assert.equal(files[0].status, 'available');
+
+  const out = join(box.dir, 'faelles.pdf');
+  const result = box.run('commonfile', '2', '--out', out, '--no-cache');
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(readFileSync(out, 'utf8'), 'bytes of Faelles fil 2.pdf');
+});
+
+// ------------------------------------------------------------- the exit table
+
+// Exit 4 was in the contract, the skill and `EXIT` for as long as this repo has
+// used the shared table, and nothing ever returned it: an empty inbox left at
+// exit 0, so an agent branching on the code read "nothing" as a result.
+test('an empty answer is exit 4 with its body still on stdout', () => {
+  const box = sandbox();
+  const cases: Array<{ args: string[]; body: unknown }> = [
+    { args: ['notifications'], body: [] },
+    // The Viggo thread is already read, so nothing unread concerns him.
+    {
+      args: ['messages', '--unread', '--child', 'Viggo'],
+      body: { threads: [], truncated: false, limit: 20 },
+    },
+    // The newest album is two days old.
+    { args: ['galleries', '--since', '1d'], body: { albums: [], truncated: false, limit: null } },
+    { args: ['commonfiles'], body: { files: [], truncated: false, limit: null } },
+  ];
+  for (const { args, body } of cases) {
+    const result = box.run(...args, '--no-cache');
+    assert.equal(result.code, 4, `${args.join(' ')}: ${result.stderr}`);
+    assert.deepEqual(JSON.parse(result.stdout), body, args.join(' '));
+  }
+
+  const pickups = box.run('pickup-times', '--no-cache');
+  assert.equal(pickups.code, 4);
+  assert.deepEqual(JSON.parse(pickups.stdout).days, []);
+
+  const attachments = box.run('attachments', '5002', '--no-cache');
+  assert.equal(attachments.code, 4);
+  assert.deepEqual(JSON.parse(attachments.stdout).attachments, []);
+});
+
+test('an answer with anything in it is still exit 0', () => {
+  const box = sandbox();
+  for (const args of [['messages'], ['posts'], ['calendar'], ['presence'], ['groups']]) {
+    assert.equal(box.run(...args, '--no-cache').code, 0, args.join(' '));
+  }
+});
+
+// `digest` is a dozen reads in one payload, and one of them coming back empty
+// says nothing about the rest.
+test('digest never exits 4, however little one of its reads returned', () => {
+  const result = sandbox({ FAKE_AULA_EMPTY_POSTS: '1' }).run('digest', '--no-cache');
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout).posts, []);
+});
+
+// Only positive evidence of emptiness is "nothing". Every attachment in 5001
+// sits on its second page, so a read that lost that page sees none — and that
+// proves nothing about the thread.
+test('a thread that could not be read to the end is never "no attachments"', () => {
+  const box = sandbox({
+    FAKE_AULA_THREAD_PAGE_SIZE: '2',
+    FAKE_AULA_FAIL_THREAD_PAGE: '5001:1',
+  });
+  const result = box.run('attachments', '5001', '--no-cache');
+  assert.equal(result.code, 0, result.stderr);
+  const listed = JSON.parse(result.stdout);
+  assert.deepEqual(listed.attachments, []);
+  assert.equal(listed.messagesIncomplete, true);
+});
+
+// The fixture school has Meebook and nothing else. That is an answer about the
+// school, and it used to be a stack trace at exit 1.
+test('a capability no school offers is exit 4, not a crash', () => {
+  const result = sandbox().run('weekly-letter', '--no-cache');
+  assert.equal(result.code, 4, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), []);
+  assert.match(result.stderr, /No weekly-letter widget is enabled/);
+  assert.doesNotMatch(result.stderr, /\n\s+at /, 'a normal answer must not print a stack');
+});
+
+test('an unknown cache subcommand is a usage error', () => {
+  const result = sandbox().run('cache', 'purge');
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /Unknown cache subcommand "purge"/);
+  assert.equal(result.stdout, '');
+});
+
+// Through `raw` the caller typed the method name. Both of these left at exit 1,
+// the fleet's "a source is down, retry later" — so an agent that had just asked
+// a read-only tool to send a message was told to try again in a minute.
+test('raw refuses a write as a usage error, before a request is sent', () => {
+  const box = sandbox();
+  const result = box.run('raw', 'messaging.sendMessage', 'text=hej');
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /read-only/);
+  assert.equal(result.stdout, '');
+  assert.equal(result.requests.length, 0, 'the guard runs before any socket opens');
+});
+
+test('raw with a method Aula does not have blames the spelling, not the client', () => {
+  const result = sandbox().run('raw', 'posts.getNothingAtAll', '--no-cache');
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /Aula has no method called "posts\.getNothingAtAll"/);
+  assert.match(result.stderr, /Check the spelling/);
+  assert.doesNotMatch(result.stderr, /bug in aula-cli/);
+});
+
+// 5, not the literal 2 the old scheme left behind: no retry brings a dead
+// broker session back, and nothing about the command line is wrong.
+test('refresh-stepup with a lapsed broker session is exit 5', () => {
+  const result = sandbox({ FAKE_AULA_BROKER_EXPIRED: '1' }).run('refresh-stepup');
+  assert.equal(result.code, 5, result.stderr);
+  assert.match(result.stderr, /broker session has expired/);
 });
 
 // -------------------------------------------------------------------- doctor
@@ -598,8 +926,10 @@ test('contact and shared-file commands have no hidden legacy page ceilings', () 
   );
   assert.equal(contacts.length, 55);
 
-  const files = json(sandbox({ FAKE_AULA_COMMON_FILES: '550' }).run('commonfiles'));
-  assert.equal(files.length, 550);
+  const shelf = json(sandbox({ FAKE_AULA_COMMON_FILES: '550' }).run('commonfiles'));
+  assert.equal(shelf.files.length, 550);
+  assert.equal(shelf.truncated, false);
+  assert.equal(shelf.limit, null, 'nothing capped the read, so no limit is claimed');
 });
 
 // ------------------------------------------------------------- hosted copy
@@ -1363,6 +1693,42 @@ test('login serves the username page without contacting MitID', async () => {
       [],
       'MitID must not be contacted before the username arrives',
     );
+  } finally {
+    proc.kill();
+  }
+});
+
+// The fake has no MitID in it, so a login that gets as far as its first request
+// fails there — which is all this needs. A failed login left at a literal 2,
+// from the scheme in which 2 meant credentials; on the shared table that says
+// "fix the command line" about a command that takes no arguments.
+test('a login that fails is exit 5, not a usage error', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'aula-cli-login-test-'));
+  sandboxes.push(dir);
+  const log = join(dir, 'requests.log');
+  writeFileSync(log, '');
+
+  const proc = Bun.spawn({
+    cmd: ['bun', '--preload', PRELOAD, ENTRY, 'login', '--no-open'],
+    env: { ...process.env, AULA_DIR: dir, FAKE_AULA_LOG: log, NO_COLOR: '1' },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  try {
+    const stderr = await readUntilUrl(proc.stderr);
+    const url = stderr.match(/http:\/\/127\.0\.0\.1:\d+\/[0-9a-f-]{36}/)?.[0];
+    assert.ok(url, `login printed no page URL:\n${stderr}`);
+
+    const answered = await fetch(`${url}/input`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ value: 'eksempelforaelder' }),
+    });
+    assert.equal(answered.status, 200);
+
+    const code = await Promise.race([proc.exited, Bun.sleep(20_000).then(() => 'timed out')]);
+    assert.equal(code, 5);
   } finally {
     proc.kill();
   }

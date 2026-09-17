@@ -16,6 +16,7 @@ import {
   collectAlbums,
   collectPosts,
   collectThreads,
+  findPost,
   normaliseAlbum,
   withFullMessages,
 } from './digest.ts';
@@ -236,7 +237,8 @@ describe('buildDigest', () => {
       unreadOnly: false,
       family: EMPTY_FAMILY,
     });
-    expect(threads).toHaveLength(26);
+    expect(threads.rows).toHaveLength(26);
+    expect(threads.truncated).toBe(false);
     expect(reads).toBe(26);
   });
 
@@ -264,7 +266,8 @@ describe('buildDigest', () => {
       },
     } as unknown as AulaClient;
     const found = await collectAlbums(fake, CHILD_FAMILY, { limit: 1_200 });
-    expect(found).toHaveLength(1_100);
+    expect(found.rows).toHaveLength(1_100);
+    expect(found.truncated).toBe(false);
   });
 
   test('album dates are calendar days, not timestamps that leak into the page', () => {
@@ -275,5 +278,194 @@ describe('buildDigest', () => {
         creationDate: '2026-08-12T23:30:00+02:00',
       }).createdAt,
     ).toBe('2026-08-12');
+  });
+});
+
+/**
+ * The three collectors used to return bare arrays, and the CLI capped each at
+ * twenty rows — so twenty of twenty and twenty of two hundred were the same
+ * answer. The cap is only honest if the cut travels with the rows.
+ */
+describe('a list that was cut says so', () => {
+  const WINDOW_START = new Date('2026-08-01T00:00:00+02:00');
+
+  /**
+   * Plain method bags rather than `AulaClient`s, so the digest test below can
+   * combine two of them: spreading a class instance loses its prototype, and
+   * these never had one.
+   */
+  const asClient = (methods: object) => methods as unknown as AulaClient;
+
+  /** `count` threads inside the window, twenty to a page like Aula's own. */
+  function threadReads(count: number) {
+    const all = Array.from({ length: count }, (_, index) =>
+      summary(index + 1, `Tråd ${index + 1}`),
+    );
+    return {
+      async getThreads(page: number) {
+        return {
+          threads: all.slice(page * 20, (page + 1) * 20),
+          moreMessagesExist: (page + 1) * 20 < all.length,
+        };
+      },
+    };
+  }
+
+  function postReads(count: number) {
+    const all: Post[] = Array.from({ length: count }, (_, index) => ({
+      id: index + 1,
+      title: `Opslag ${index + 1}`,
+      publishAt: '2026-08-12T08:00:00+02:00',
+    }));
+    return {
+      async getPosts(opts: { index: number; limit: number }) {
+        return {
+          posts: all.slice(opts.index, opts.index + opts.limit),
+          hasMorePosts: opts.index + opts.limit < all.length,
+        };
+      },
+    };
+  }
+
+  function albumReads(count: number) {
+    const all = Array.from({ length: count }, (_, index) => ({
+      id: index + 1,
+      title: `Album ${index + 1}`,
+      creationDate: '2026-08-12T08:00:00+02:00',
+    }));
+    return {
+      async getAlbums(opts: { index: number; limit: number }) {
+        return all.slice(opts.index, opts.index + opts.limit);
+      },
+    };
+  }
+
+  test('a window with no limit keeps every row inside it', async () => {
+    const filter = { since: WINDOW_START, unreadOnly: false, family: EMPTY_FAMILY };
+    const threads = await collectThreads(asClient(threadReads(45)), filter);
+    expect(threads.rows).toHaveLength(45);
+    expect(threads.truncated).toBe(false);
+
+    const posts = await collectPosts(asClient(postReads(45)), EMPTY_FAMILY, {
+      since: WINDOW_START,
+    });
+    expect(posts.rows).toHaveLength(45);
+    expect(posts.truncated).toBe(false);
+
+    const albums = await collectAlbums(asClient(albumReads(45)), CHILD_FAMILY, {
+      since: WINDOW_START,
+    });
+    expect(albums.rows).toHaveLength(45);
+    expect(albums.truncated).toBe(false);
+  });
+
+  test('a limit below what qualified is reported as a cut', async () => {
+    const threads = await collectThreads(asClient(threadReads(45)), {
+      limit: 20,
+      unreadOnly: false,
+      family: EMPTY_FAMILY,
+    });
+    expect(threads.rows).toHaveLength(20);
+    expect(threads.truncated).toBe(true);
+
+    const posts = await collectPosts(asClient(postReads(45)), EMPTY_FAMILY, { limit: 20 });
+    expect(posts.rows).toHaveLength(20);
+    expect(posts.truncated).toBe(true);
+
+    const albums = await collectAlbums(asClient(albumReads(45)), CHILD_FAMILY, { limit: 20 });
+    expect(albums.rows).toHaveLength(20);
+    expect(albums.truncated).toBe(true);
+  });
+
+  // The off-by-one that matters: a limit that exactly fits is a complete
+  // answer, and calling it cut would send the caller back for rows that do not
+  // exist.
+  test('a limit that exactly fits is not a cut', async () => {
+    const threads = await collectThreads(asClient(threadReads(20)), {
+      limit: 20,
+      unreadOnly: false,
+      family: EMPTY_FAMILY,
+    });
+    expect(threads.rows).toHaveLength(20);
+    expect(threads.truncated).toBe(false);
+
+    const posts = await collectPosts(asClient(postReads(20)), EMPTY_FAMILY, { limit: 20 });
+    expect(posts.truncated).toBe(false);
+
+    const albums = await collectAlbums(asClient(albumReads(20)), CHILD_FAMILY, { limit: 20 });
+    expect(albums.truncated).toBe(false);
+  });
+
+  test('the digest reports the same cut through collectionLimits', async () => {
+    const fake = {
+      ...threadReads(3),
+      ...postReads(3),
+      async getThread(threadId: number) {
+        return { id: threadId, sensitive: false, totalMessageCount: 1, messages: [MESSAGE] };
+      },
+      async getCalendarEvents() {
+        return [];
+      },
+      async getDailyPresence() {
+        return [];
+      },
+    } as unknown as AulaClient;
+
+    const digest = await buildDigest(fake, {
+      days: 60,
+      limit: 2,
+      isoWeek: '2026-W33',
+      family: EMPTY_FAMILY,
+      now: new Date('2026-08-21T06:30:00+02:00'),
+    });
+    expect(digest.threads).toHaveLength(2);
+    expect(digest.posts).toHaveLength(2);
+    expect(digest.collectionLimits).toEqual({ posts: 2, threads: 2 });
+  });
+});
+
+/**
+ * `post-attachment` needs the post as Aula sent it, URLs and all, and finds it
+ * by paging the feed — there is no verified single-post read to ask instead.
+ */
+describe('findPost', () => {
+  function feed(count: number, pageReads: number[] = []): AulaClient {
+    const all: Post[] = Array.from({ length: count }, (_, index) => ({
+      id: index + 1,
+      title: `Opslag ${index + 1}`,
+      publishAt: '2026-08-12T08:00:00+02:00',
+    }));
+    return {
+      async getPosts(opts: { index: number; limit: number }) {
+        pageReads.push(opts.index);
+        return {
+          posts: all.slice(opts.index, opts.index + opts.limit),
+          hasMorePosts: opts.index + opts.limit < all.length,
+        };
+      },
+    } as unknown as AulaClient;
+  }
+
+  test('pages until the post turns up, and no further', async () => {
+    const reads: number[] = [];
+    const post = await findPost(feed(45, reads), EMPTY_FAMILY, 23);
+    expect(post?.title).toBe('Opslag 23');
+    expect(reads).toEqual([0, 10, 20]);
+  });
+
+  test('a post that is not in the feed is undefined, not an endless read', async () => {
+    const reads: number[] = [];
+    expect(await findPost(feed(25, reads), EMPTY_FAMILY, 99)).toBeUndefined();
+    expect(reads).toEqual([0, 10, 20]);
+  });
+
+  test('a repeated page fails instead of looping', async () => {
+    const post: Post = { id: 1, title: 'Gentaget', publishAt: '2026-08-12T08:00:00+02:00' };
+    const fake = {
+      async getPosts() {
+        return { posts: [post], hasMorePosts: true };
+      },
+    } as unknown as AulaClient;
+    await expect(findPost(fake, EMPTY_FAMILY, 2)).rejects.toThrow('repeated post page');
   });
 });
