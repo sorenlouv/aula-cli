@@ -162,8 +162,11 @@ that only `login` does.
 CloudFront presigned URLs, valid about an hour; the signature is the
 authorisation, so fetch with no cookie and no `Authorization` header. One
 mangled character is a `403 MalformedSignature` that reads like an auth failure
-— do not round-trip them through a model; `attachment` downloads server-side
-and returns a path.
+— do not round-trip them through a model. No payload this CLI prints carries
+one: a message's or post's attachments are `{ index, id, name, kind, link }`,
+and `attachment <threadId> [index]`, `post-attachment <postId> [index]` and
+`commonfile <id>` download in-process and return a path. `link` is set only for
+`kind: "link"`, which is an ordinary web address rather than a signed one.
 
 ## MitID login
 

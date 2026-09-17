@@ -16,6 +16,7 @@ import {
   collectAlbums,
   collectPosts,
   collectThreads,
+  findPost,
   normaliseAlbum,
   withFullMessages,
 } from './digest.ts';
@@ -420,5 +421,51 @@ describe('a list that was cut says so', () => {
     expect(digest.threads).toHaveLength(2);
     expect(digest.posts).toHaveLength(2);
     expect(digest.collectionLimits).toEqual({ posts: 2, threads: 2 });
+  });
+});
+
+/**
+ * `post-attachment` needs the post as Aula sent it, URLs and all, and finds it
+ * by paging the feed — there is no verified single-post read to ask instead.
+ */
+describe('findPost', () => {
+  function feed(count: number, pageReads: number[] = []): AulaClient {
+    const all: Post[] = Array.from({ length: count }, (_, index) => ({
+      id: index + 1,
+      title: `Opslag ${index + 1}`,
+      publishAt: '2026-08-12T08:00:00+02:00',
+    }));
+    return {
+      async getPosts(opts: { index: number; limit: number }) {
+        pageReads.push(opts.index);
+        return {
+          posts: all.slice(opts.index, opts.index + opts.limit),
+          hasMorePosts: opts.index + opts.limit < all.length,
+        };
+      },
+    } as unknown as AulaClient;
+  }
+
+  test('pages until the post turns up, and no further', async () => {
+    const reads: number[] = [];
+    const post = await findPost(feed(45, reads), EMPTY_FAMILY, 23);
+    expect(post?.title).toBe('Opslag 23');
+    expect(reads).toEqual([0, 10, 20]);
+  });
+
+  test('a post that is not in the feed is undefined, not an endless read', async () => {
+    const reads: number[] = [];
+    expect(await findPost(feed(25, reads), EMPTY_FAMILY, 99)).toBeUndefined();
+    expect(reads).toEqual([0, 10, 20]);
+  });
+
+  test('a repeated page fails instead of looping', async () => {
+    const post: Post = { id: 1, title: 'Gentaget', publishAt: '2026-08-12T08:00:00+02:00' };
+    const fake = {
+      async getPosts() {
+        return { posts: [post], hasMorePosts: true };
+      },
+    } as unknown as AulaClient;
+    await expect(findPost(fake, EMPTY_FAMILY, 2)).rejects.toThrow('repeated post page');
   });
 });

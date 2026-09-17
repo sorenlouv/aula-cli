@@ -8,6 +8,7 @@
  * live here, and `cli.ts` keeps the argument parsing and the renderers.
  */
 
+import { describeAttachments } from './attachments.ts';
 import { type AulaClient, CALENDAR_MAX_SPAN_DAYS } from './client.ts';
 import { mapLimit, presenceStatus, presenceStatusDanish, startOfDay } from './cli-helpers.ts';
 import {
@@ -27,7 +28,6 @@ import {
 } from './integrations/index.ts';
 import type {
   Album,
-  Attachment,
   CalendarEvent,
   Message,
   Post,
@@ -445,6 +445,40 @@ export async function collectPosts(
 }
 
 /**
+ * One post as Aula sent it — attachments with their URLs still on them, which
+ * is the whole reason to want the raw row: `post-attachment` downloads from it.
+ *
+ * Found by paging the feed rather than asked for by id. Aula's frontend may well
+ * have a single-post read, but none has been verified against the live API, and
+ * a guessed method that answered differently would download the wrong file. The
+ * page size and filters match `collectPosts`, so the `posts` run that showed the
+ * caller this id has already put the pages in the response cache.
+ */
+export async function findPost(
+  client: AulaClient,
+  family: Family,
+  postId: number,
+): Promise<Post | undefined> {
+  const pageSize = 10;
+  const seen = new Set<number>();
+  for (let index = 0; ; index += pageSize) {
+    const { posts, hasMorePosts } = await client.getPosts({
+      institutionProfileIds: family.postInstitutionProfileIds,
+      index,
+      limit: pageSize,
+      isImportant: false,
+    });
+    const found = posts.find((post) => post.id === postId);
+    if (found) return found;
+
+    const before = seen.size;
+    for (const post of posts) seen.add(post.id);
+    if (!hasMorePosts) return undefined;
+    if (seen.size === before) throw new Error(`Aula repeated post page ${index} with more=true.`);
+  }
+}
+
+/**
  * Photo albums, newest first.
  *
  * Unlike `collectPosts` this pages the whole list before applying `--since` or
@@ -514,7 +548,7 @@ export async function loadCalendar(
     .sort((a, b) => a.start.localeCompare(b.start));
 }
 
-function emptyMessages(): Array<ReturnType<typeof normaliseMessage>> {
+function emptyMessages(): NormalMessage[] {
   return [];
 }
 
@@ -551,7 +585,7 @@ export async function withFullMessages(client: AulaClient, threads: ThreadSummar
       ...base,
       totalMessageCount: detail.totalMessageCount,
       moreMessagesExist: detail.incomplete,
-      messages: (detail.messages ?? []).map(normaliseMessage),
+      messages: normaliseMessages(detail.messages, { wholeThread: !detail.incomplete }),
       messagesUnavailable: false,
       messagesIncomplete: detail.incomplete,
       messageReadWarning: detail.warning,
@@ -660,17 +694,33 @@ export function normaliseThread(thread: ThreadSummary) {
   };
 }
 
-export function normaliseMessage(message: Message) {
-  return {
-    id: message.id,
-    at: message.sendDateTime,
-    from: message.sender?.fullName ?? null,
-    fromRole: message.sender?.mailBoxOwner?.portalRole ?? null,
-    type: message.messageType ?? 'Message',
-    text: htmlToText(message.text?.html),
-    attachments: normaliseAttachments(message.attachments),
-  };
+/**
+ * A thread's messages, with its attachments numbered across all of them.
+ *
+ * Plural on purpose. `attachment <threadId> <index>` counts from the thread's
+ * first message, so an attachment's index depends on every message before it
+ * and cannot be worked out one message at a time. `wholeThread` says whether
+ * these *are* all of them: for one `--page` of a thread, or a read that lost a
+ * page, the positions are unknown and come back null rather than wrong.
+ */
+export function normaliseMessages(messages: Message[] | undefined, opts: { wholeThread: boolean }) {
+  let next = 0;
+  return (messages ?? []).map((message) => {
+    const attachments = describeAttachments(message.attachments, opts.wholeThread ? next : null);
+    next += attachments.length;
+    return {
+      id: message.id,
+      at: message.sendDateTime,
+      from: message.sender?.fullName ?? null,
+      fromRole: message.sender?.mailBoxOwner?.portalRole ?? null,
+      type: message.messageType ?? 'Message',
+      text: htmlToText(message.text?.html),
+      attachments,
+    };
+  });
 }
+
+export type NormalMessage = ReturnType<typeof normaliseMessages>[number];
 
 export function normalisePost(post: Post) {
   return {
@@ -684,7 +734,8 @@ export function normalisePost(post: Post) {
     groups: (post.sharedWithGroups ?? []).map((g) => g.name).filter((n): n is string => Boolean(n)),
     commentCount: post.commentCount ?? 0,
     text: htmlToText(post.content?.html),
-    attachments: normaliseAttachments(post.attachments),
+    // Numbered within the post: `post-attachment <postId> <index>`.
+    attachments: describeAttachments(post.attachments),
   };
 }
 
@@ -750,15 +801,6 @@ export function normalisePresence(entry: PresenceEntry) {
     comment: entry.comment || null,
     vacationNote: entry.vacationNote || null,
   };
-}
-
-function normaliseAttachments(attachments: Attachment[] | undefined) {
-  return (attachments ?? [])
-    .map((a) => {
-      const target = a.file ?? a.media ?? a.link ?? null;
-      return { name: a.name ?? target?.name ?? 'attachment', url: target?.url ?? null };
-    })
-    .filter((a) => a.name || a.url);
 }
 
 function threadTimestamp(thread: ThreadSummary): Date | undefined {

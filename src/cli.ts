@@ -11,6 +11,7 @@ import {
 } from './cli-options.ts';
 import {
   type BirthdayContact,
+  commonFileUrl,
   formatDate,
   formatWhen,
   indent,
@@ -60,11 +61,14 @@ import {
   collectPosts,
   collectThreads,
   type ChildGroups,
+  findPost,
+  type FullThreadDetail,
   loadCalendar,
   loadGroups,
   normaliseAlbum,
   normaliseEvent,
-  normaliseMessage,
+  normaliseMessages,
+  type NormalMessage,
   normalisePost,
   normalisePresence,
   normaliseThread,
@@ -178,8 +182,9 @@ type them:
   groups / contacts            Group membership / class contact list
   birthdays                    Classmates' birthdays, soonest first
   notifications                Unread badges Aula is currently showing
-  attachments <threadId>       List a thread's attachments
+  attachments <threadId>       List a thread's attachments, each with its index
   attachment <threadId> [n]    Download attachment n of a thread (default 0)
+  post-attachment <postId> [n] Download attachment n of a post (default 0)
   commonfiles / commonfile <x> "Fælles Filer" — the shared shelf / download one
   widgets                      Which vendor widgets these schools expose
   weekly-plan / weekly-letter  Weekly plan / weekly letter, whichever vendor
@@ -403,7 +408,12 @@ async function main(): Promise<number> {
             ? detail.warning
             : null,
         participants: (detail.recipients ?? []).map((r) => r.fullName).filter(Boolean),
-        messages: (detail.messages ?? []).map(normaliseMessage),
+        // Attachment positions count from the thread's first message, so they
+        // are only known when every message is here: not for one `--page`, and
+        // not for a read that lost a page.
+        messages: normaliseMessages(detail.messages, {
+          wholeThread: page === undefined && !detail.moreMessagesExist,
+        }),
       };
       return emit(result, asText, (r) => renderThreadDetail(r));
     }
@@ -542,18 +552,15 @@ async function main(): Promise<number> {
 
     case 'attachments': {
       if (threadId === undefined) throw new Error('thread id was not validated');
-      const detail =
-        page === undefined
-          ? await readFullThread(client, threadId)
-          : await client.getThread(threadId, page);
-      const found = threadAttachments(detail);
+      // Always the whole thread. This took `--page`, and numbered what it found
+      // on that page from zero — positions `attachment` would then resolve
+      // against the full thread, downloading a different file without a word.
+      const detail = await readFullThread(client, threadId);
+      const found = describeThreadAttachments(detail);
       const result = {
         attachments: found,
-        messagesIncomplete: page === undefined ? Boolean(detail.moreMessagesExist) : null,
-        messageReadWarning:
-          page === undefined && 'warning' in detail && typeof detail.warning === 'string'
-            ? detail.warning
-            : null,
+        messagesIncomplete: detail.incomplete,
+        messageReadWarning: detail.warning,
       };
       return emit(
         result,
@@ -564,16 +571,18 @@ async function main(): Promise<number> {
             rows.length === 0
               ? '(no attachments in this thread)'
               : rows
-                  .map((a) => `[${a.index}] ${a.name} (${a.kind}) — from ${a.from ?? 'unknown'}`)
+                  .map(
+                    (a) =>
+                      `[${a.index ?? '?'}] ${a.name} (${a.kind}) — from ${a.from ?? 'unknown'}`,
+                  )
                   .join('\n');
           return value.messagesIncomplete
             ? `WARNING: not every message page was available (${value.messageReadWarning ?? 'unknown reason'}).\n${body}`
             : body;
         },
         // "No attachments" is only a fact about the thread once every message
-        // has been read. One page of it, or a read that lost pages, proves
-        // nothing about the rest.
-        found.length === 0 && result.messagesIncomplete === false,
+        // has been read. A read that lost pages proves nothing about the rest.
+        found.length === 0 && !detail.incomplete,
       );
     }
 
@@ -588,7 +597,7 @@ async function main(): Promise<number> {
             'Re-read the thread before choosing an attachment index.',
         );
       }
-      const found = threadAttachments(detail);
+      const found = resolveThreadAttachments(detail);
       const wanted = found[attachmentIndex];
       if (!wanted) {
         throw new UsageError(
@@ -607,9 +616,38 @@ async function main(): Promise<number> {
       return emit(saved, asText, (r) => `Saved ${r.filename} (${r.bytes} bytes) to ${r.path}`);
     }
 
+    case 'post-attachment': {
+      const postId = requireId(positionals[0], 'post-attachment <postId> [index]');
+      const index = requireInteger(positionals[1] ?? '0', 'attachment index', { min: 0 });
+      const family = await resolveFamily(client);
+      const post = await findPost(client, family, postId);
+      if (!post) {
+        throw new UsageError(
+          `No post ${postId} is visible to this login. \`${cmd('posts')}\` lists the ids.`,
+        );
+      }
+      const found = listAttachments(post.attachments);
+      const wanted = found[index];
+      if (!wanted) {
+        throw new UsageError(
+          `Post ${postId} has ${found.length} attachment(s); there is no index ${index}.` +
+            (found.length ? `\n${found.map((a) => `  [${a.index}] ${a.name}`).join('\n')}` : ''),
+        );
+      }
+      if (wanted.kind === 'link') {
+        throw new UsageError(`Attachment ${index} is a link, not a file: ${wanted.url}`);
+      }
+      const saved = await downloadAttachment({
+        attachment: wanted,
+        prefix: `post-${postId}-${index}`,
+        ...(values.out ? { out: values.out } : {}),
+      });
+      return emit(saved, asText, (r) => `Saved ${r.filename} (${r.bytes} bytes) to ${r.path}`);
+    }
+
     case 'commonfiles': {
       const family = await resolveFamily(client);
-      const all = await collectCommonFiles(client, family);
+      const all = (await collectCommonFiles(client, family)).map(normaliseCommonFile);
       const files = limit === undefined ? all : all.slice(0, limit);
       const cut = { truncated: files.length < all.length, limit };
       return emitList('files', files, cut, asText, renderCommonFiles);
@@ -619,9 +657,12 @@ async function main(): Promise<number> {
       const family = await resolveFamily(client);
       const ref = positionals[0];
       if (!ref) throw new UsageError('Usage: commonfile <id|text from the title>');
-      const files = await collectCommonFiles(client, family);
-      const wanted = selectCommonFile(files, ref);
-      if (!wanted.url) {
+      const shelf = await collectCommonFiles(client, family);
+      const wanted = selectCommonFile(shelf.map(normaliseCommonFile), ref);
+      // The printed shape carries no URL, so it is read off the row Aula sent.
+      const source = shelf.find((file) => file.id === wanted.id);
+      const url = source ? commonFileUrl(source) : null;
+      if (!url) {
         throw new UsageError(
           `"${wanted.title}" has no downloadable file` +
             (wanted.status && wanted.status !== 'available'
@@ -632,8 +673,9 @@ async function main(): Promise<number> {
       const saved = await downloadAttachment({
         attachment: {
           index: 0,
+          id: null,
           name: wanted.filename ?? wanted.title,
-          url: wanted.url,
+          url,
           kind: 'file',
         },
         prefix: `commonfile-${wanted.id}`,
@@ -1366,22 +1408,34 @@ async function loadContacts(
 
 // --------------------------------------------------------------- attachments
 
-type ThreadAttachment = ResolvedAttachment & { from: string | null; at: string | null };
-
-/** Every attachment in a thread, flattened in message order. */
-function threadAttachments(detail: ThreadDetail): ThreadAttachment[] {
-  const out: ThreadAttachment[] = [];
+/**
+ * Every attachment in a thread, flattened in message order, URLs included —
+ * for `attachment`, which downloads from it and prints none of it.
+ */
+function resolveThreadAttachments(detail: ThreadDetail): ResolvedAttachment[] {
+  const out: ResolvedAttachment[] = [];
   for (const message of detail.messages ?? []) {
     for (const attachment of listAttachments(message.attachments)) {
-      out.push({
-        ...attachment,
-        index: out.length,
-        from: message.sender?.fullName ?? null,
-        at: message.sendDateTime ?? null,
-      });
+      out.push({ ...attachment, index: out.length });
     }
   }
   return out;
+}
+
+/**
+ * The same list as `attachments` prints it: who sent each one and when, and no
+ * URL. Built on `normaliseMessages` so a position here is the position `thread`
+ * and `digest` show for the same attachment — and the one `attachment` takes.
+ */
+function describeThreadAttachments(detail: FullThreadDetail) {
+  return normaliseMessages(detail.messages, { wholeThread: !detail.incomplete }).flatMap(
+    (message) =>
+      message.attachments.map((attachment) => ({
+        ...attachment,
+        from: message.from,
+        at: message.at ?? null,
+      })),
+  );
 }
 
 // ------------------------------------------------------------------- parsing
@@ -1462,7 +1516,7 @@ function renderWhoami(family: Family): string {
 }
 
 type NormalThread = ReturnType<typeof normaliseThread> & {
-  messages?: ReturnType<typeof normaliseMessage>[];
+  messages?: NormalMessage[];
   messagesUnavailable?: boolean;
   messagesIncomplete?: boolean;
   messageReadWarning?: string | null;
@@ -1496,7 +1550,7 @@ function renderThreadDetail(thread: {
   id: number;
   subject: string;
   sensitive: boolean;
-  messages: ReturnType<typeof normaliseMessage>[];
+  messages: NormalMessage[];
   messagesIncomplete?: boolean | null;
   messageReadWarning?: string | null;
 }): string {
@@ -1507,7 +1561,7 @@ function renderThreadDetail(thread: {
   const body = thread.messages
     .map((m) => {
       const attachments = m.attachments.length
-        ? `\n${indent(m.attachments.map((a) => `attachment: ${a.name}`).join('\n'), 4)}`
+        ? `\n${indent(m.attachments.map((a) => `attachment [${a.index ?? '?'}]: ${a.name}`).join('\n'), 4)}`
         : '';
       return `  ${formatWhen(m.at)} ${m.from ?? 'unknown'}:\n${indent(m.text, 4)}${attachments}`;
     })
@@ -1519,7 +1573,7 @@ function renderPosts(posts: ReturnType<typeof normalisePost>[]): string {
   return posts
     .map((p) => {
       const attachments = p.attachments.length
-        ? `\n    attachments: ${p.attachments.map((a) => a.name).join(', ')}`
+        ? `\n    attachments: ${p.attachments.map((a) => `[${a.index}] ${a.name}`).join(', ')}`
         : '';
       return (
         `[${p.id}] ${formatWhen(p.publishedAt)} — ${p.title}${p.important ? '  <IMPORTANT>' : ''}\n` +
@@ -1797,7 +1851,7 @@ function emitList<T>(
  * Common files filter on institution *codes*, not on any of the profile ids —
  * a fourth addressing scheme on top of the three in API.md.
  */
-async function collectCommonFiles(client: AulaClient, family: Family): Promise<NormalCommonFile[]> {
+async function collectCommonFiles(client: AulaClient, family: Family): Promise<CommonFile[]> {
   const collected: CommonFile[] = [];
   const seen = new Set<number>();
   const pageSize = 50;
@@ -1829,11 +1883,13 @@ async function collectCommonFiles(client: AulaClient, family: Family): Promise<N
     }
     if (newRows === 0) throw new Error(`Aula repeated shared-file page ${index}.`);
   }
-  const normalised = collected.map(normaliseCommonFile);
   // Newest first: the shelf is dominated by years-old policy documents, and the
   // thing being looked for is almost always what was added most recently.
-  normalised.sort((a, b) => (b.created ?? '').localeCompare(a.created ?? ''));
-  return normalised;
+  //
+  // The rows as Aula sent them, not the printed shape: `commonfile` needs the
+  // presigned URL, and that is deliberately absent from what `commonfiles`
+  // prints. Each caller normalises for itself.
+  return collected.sort((a, b) => (b.created ?? '').localeCompare(a.created ?? ''));
 }
 
 function renderCommonFiles(files: NormalCommonFile[]): string {

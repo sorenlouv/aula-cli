@@ -63,8 +63,9 @@ ranking what actually matters to this family is your job.
 | `contacts [--group id]` | Class contact list ("kontaktliste") |
 | `birthdays` | Classmates' birthdays, soonest first |
 | `notifications` | Unread badges Aula is currently showing |
-| `attachments <threadId>` | List a thread's attachments |
-| `attachment <threadId> <n>` | Download one to disk |
+| `attachments <threadId>` | List a thread's attachments, each with its `index` |
+| `attachment <threadId> [index]` | Download one of a thread's attachments to disk |
+| `post-attachment <postId> [index]` | Download one of a post's attachments to disk |
 | `commonfiles` | "Fælles Filer": class timetables, holiday plans, policies |
 | `commonfile <id\|title>` | Download one shared file |
 | `new` | Generate the daily "Aula AI oversigt" and open it |
@@ -94,6 +95,26 @@ lesson is indistinguishable from a Thursday one. The same holds for any
 `attachment` or `commonfile` worth downloading, since a ugeplan is a table too,
 and it is far cheaper either way: a page of PDF costs about 2,300 image tokens
 against a few hundred as text.
+
+**An attachment is a position, never a URL.** Wherever a message or a post
+appears — `digest`, `thread`, `messages --full`, `posts` — its attachments look
+like this:
+
+```json
+{ "index": 1, "id": 402, "name": "Pakkeliste.pdf", "kind": "file", "link": null }
+```
+
+Hand `index` to `attachment <threadId> <index>` (a thread's attachments are
+numbered across all of its messages) or `post-attachment <postId> <index>`
+(numbered within the post). Both save the file and print its `path`; then read
+it, with `pdftotext -layout` if it is a PDF. Aula's download URLs are presigned
+and deliberately absent from every payload: one mangled character in a
+signature is a 403 that looks like an expired login, so they never pass through
+you. `kind` is `file`, `media` or `link`; a `link` has no bytes — its address is
+in `link`, and it is the only kind with one. `index` is `null` when you read one
+`--page` of a thread, or when `messagesIncomplete` is true: the position cannot
+be known until the whole thread is read, so re-read it before downloading.
+`commonfiles` rows carry no URL either — `commonfile <id>` fetches one.
 
 **`galleries` is not in `digest`** — run it separately. It reads album metadata
 only, never the photos, and that metadata is often the best evidence of what a

@@ -318,6 +318,19 @@ fallback sources.
   through an out-parameter that `buildDigest` alone passed — so `messages --full
   --since 30d`, the skill's own example, answered with a fraction of a busy
   month that read as all of it. A `--since` window now lifts the default cap.
+- **A presigned URL never reaches a payload.** `attachments.ts` has always said
+  they must not round-trip through a model — one mangled character is a
+  `MalformedSignature` 403 that reads like a dead login — while `digest`,
+  `thread`, `messages --full`, `posts`, `attachments` and `commonfiles` each
+  printed them, a few hundred tokens apiece, and a post's attachment had no
+  download command, so copying the URL out of the JSON was the only way to get
+  it. Payloads carry `AttachmentRef` (`describeAttachments`): an `index` for
+  `attachment` or `post-attachment`, and a `link` for the one kind that is a web
+  address rather than a download. A thread's attachments are numbered across
+  all of its messages, which is why `normaliseMessages` is plural and why the
+  index is null for one `--page` or an incomplete read — `attachments` used to
+  take `--page` and number that page from zero, positions `attachment` then
+  resolved against the whole thread.
 - `family.ts` resolves the id sets endpoints want once
   (`postInstitutionProfileIds`, `childInstitutionProfileIds`,
   `institutionCodes`); re-deriving at a call site is how wrong-id failures start.

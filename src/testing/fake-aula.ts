@@ -144,6 +144,23 @@ const THREADS = [
 ];
 
 /**
+ * Where the fixture's files live. Shaped like the real thing — a presigned URL
+ * whose query string *is* the authorisation — so a test can assert that no
+ * payload ever carries one: `Signature=` appearing on stdout is the failure.
+ */
+const FILE_HOST = 'files.eksempel.dk';
+const signed = (name: string) =>
+  `https://${FILE_HOST}/${encodeURIComponent(name)}?Expires=1&Signature=FAKE-SIGNATURE`;
+
+type FixtureAttachment = {
+  id: number;
+  name: string;
+  file?: { name: string; url: string };
+  media?: { name: string; url: string };
+  link?: { name: string; url: string };
+};
+
+/**
  * Thread bodies, oldest first.
  *
  * 5001 is deliberately a back-and-forth rather than a single message: an active
@@ -151,7 +168,10 @@ const THREADS = [
  * exchange behind the more-block — and a fixture where every thread is one
  * message would never exercise it.
  */
-const MESSAGES: Record<number, { from: string; role: string; ago: number; html: string }[]> = {
+const MESSAGES: Record<
+  number,
+  { from: string; role: string; ago: number; html: string; attachments?: FixtureAttachment[] }[]
+> = {
   5001: [
     {
       from: 'Yrsa Storm',
@@ -170,8 +190,36 @@ const MESSAGES: Record<number, { from: string; role: string; ago: number; html: 
       role: 'employee',
       ago: -2,
       html: 'Kun mandag. Tirsdag sørger vi for maden.',
+      // On the third and fourth messages on purpose. Attachments are numbered
+      // across the whole thread, which only shows when two messages carry them;
+      // and with a page size of two they all sit on the second page, so a read
+      // of the first page alone sees a thread with none.
+      attachments: [
+        {
+          id: 401,
+          name: 'Tilmelding',
+          link: { name: 'Tilmelding', url: 'https://tilmelding.eksempel.dk/lejrskole' },
+        },
+        {
+          id: 402,
+          name: 'Pakkeliste.pdf',
+          file: { name: 'Pakkeliste.pdf', url: signed('Pakkeliste.pdf') },
+        },
+      ],
     },
-    { from: 'Far Eksempelsen', role: 'guardian', ago: -1, html: 'Perfekt, tak.' },
+    {
+      from: 'Far Eksempelsen',
+      role: 'guardian',
+      ago: -1,
+      html: 'Perfekt, tak.',
+      attachments: [
+        {
+          id: 403,
+          name: 'Sovepose.jpg',
+          media: { name: 'Sovepose.jpg', url: signed('Sovepose.jpg') },
+        },
+      ],
+    },
   ],
   5002: [
     { from: 'Pædagog Palle', role: 'employee', ago: -2, html: 'Vi holder lukket fredag den 29.' },
@@ -244,7 +292,7 @@ function record(what: string): void {
 }
 
 /** The hosts this stub knows how to answer. Anything else is worth recording. */
-const KNOWN_HOSTS = new Set(['www.aula.dk', 'app.meebook.com', 'api.minuddannelse.net']);
+const KNOWN_HOSTS = new Set(['www.aula.dk', 'app.meebook.com', 'api.minuddannelse.net', FILE_HOST]);
 
 async function handle(input: string | Request | URL, init?: RequestInit): Promise<Response> {
   const url = new URL(
@@ -272,6 +320,23 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
     if (url.host === 'broker.unilogin.dk') {
       return new Response('<html><body>Vælg login</body></html>', { status: 200 });
     }
+  }
+
+  if (url.host === FILE_HOST) {
+    record(`download ${decodeURIComponent(url.pathname.slice(1))}`);
+    // A presigned URL is fetched clean: S3 rejects one that arrives with the
+    // Aula cookie or an Authorization header beside its signature.
+    const headers = new Headers(init?.headers);
+    if (headers.has('cookie') || headers.has('authorization')) {
+      return new Response('SignatureDoesNotMatch', { status: 403 });
+    }
+    if (url.searchParams.get('Signature') !== 'FAKE-SIGNATURE') {
+      return new Response('MalformedSignature', { status: 403 });
+    }
+    return new Response(`bytes of ${decodeURIComponent(url.pathname.slice(1))}`, {
+      status: 200,
+      headers: { 'content-type': 'application/octet-stream' },
+    });
   }
 
   if (url.host === 'app.meebook.com') {
@@ -402,6 +467,7 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
           sendDateTime: iso(m.ago),
           sender: { fullName: m.from, mailBoxOwner: { portalRole: m.role } },
           text: { html: m.html },
+          attachments: m.attachments ?? [],
         })),
       });
     }
@@ -502,11 +568,17 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
       const limit = Number(url.searchParams.get('limit') ?? 50);
       const commonFiles = Array.from(
         { length: Math.max(0, Math.min(limit, total - index)) },
-        (_, offset) => ({
-          id: index + offset + 1,
-          title: `Fælles fil ${index + offset + 1}`,
-          created: iso(-1),
-        }),
+        (_, offset) => {
+          const id = index + offset + 1;
+          const name = `Faelles fil ${id}.pdf`;
+          return {
+            id,
+            title: `Fælles fil ${id}`,
+            created: iso(-1),
+            // Aula's own double nesting: the attachment record, then the blob.
+            file: { name, status: 'available', file: { url: signed(name) } },
+          };
+        },
       );
       return envelope({ commonFiles, totalAmount: total });
     }
@@ -532,6 +604,17 @@ function toPost(p: (typeof POSTS)[number]) {
     content: { html: `Indhold for ${p.title}` },
     ownerProfile: { fullName: 'Afsender', institutionCode: p.institutionCode },
     sharedWithGroups: [],
+    // One post with something to download, one without.
+    attachments:
+      p.id === 7001
+        ? [
+            {
+              id: 501,
+              name: 'Ugeplan uge 33.pdf',
+              file: { name: 'Ugeplan uge 33.pdf', url: signed('Ugeplan uge 33.pdf') },
+            },
+          ]
+        : [],
   };
 }
 

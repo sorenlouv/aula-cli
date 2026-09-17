@@ -73,8 +73,9 @@ const COMMAND_OPTIONS = {
   groups: [...TEXT, ...CACHED, 'child'],
   contacts: [...TEXT, ...CACHED, 'child', 'group', 'role'],
   birthdays: [...TEXT, ...CACHED, 'limit', 'child', 'group'],
-  attachments: [...TEXT, ...CACHED, 'page'],
+  attachments: [...TEXT, ...CACHED],
   attachment: [...TEXT, ...CACHED, 'out'],
+  'post-attachment': [...TEXT, ...CACHED, 'out'],
   commonfiles: [...TEXT, ...CACHED, 'limit'],
   commonfile: [...TEXT, ...CACHED, 'out'],
   widgets: [...TEXT, ...CACHED],
@@ -119,6 +120,7 @@ const POSITIONALS: Partial<Record<CliCommand, { min: number; max?: number; usage
   thread: { min: 1, max: 1, usage: 'thread <threadId>' },
   attachments: { min: 1, max: 1, usage: 'attachments <threadId>' },
   attachment: { min: 1, max: 2, usage: 'attachment <threadId> [index]' },
+  'post-attachment': { min: 1, max: 2, usage: 'post-attachment <postId> [index]' },
   commonfile: { min: 1, max: 1, usage: 'commonfile <id|title>' },
   raw: { min: 1, usage: 'raw <method> [key=value ...]' },
 };

@@ -8,7 +8,7 @@ import { test } from 'node:test';
  * that drift in the first place.
  */
 const escapeRe = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-import { listAttachments, safeFilename } from './attachments.ts';
+import { describeAttachments, listAttachments, safeFilename } from './attachments.ts';
 import {
   AulaApiError,
   AulaAuthError,
@@ -24,6 +24,7 @@ import { htmlToText, preview } from './html.ts';
 import { cmd } from './runtime.ts';
 import { addLocalDays, localIsoDate } from './integrations/types.ts';
 import {
+  commonFileUrl,
   normaliseCommonFile,
   normaliseSchedule,
   mapLimit,
@@ -318,19 +319,26 @@ test("a shared file is read off the right level of Aula's double nesting", () =>
   const f = normaliseCommonFile(COMMON_FILE);
   assert.equal(f.title, '2e skema uge 33-43 2026');
   assert.equal(f.filename, '2e Uge 33-43 2026.pdf');
-  assert.equal(f.url, 'https://media-prod.aula.dk/signed', 'url lives on the inner file');
+  assert.equal(
+    commonFileUrl(COMMON_FILE),
+    'https://media-prod.aula.dk/signed',
+    'url lives on the inner file',
+  );
+  // `commonfiles` prints this shape, and a presigned URL is never the model's
+  // to carry: `commonfile <id>` fetches the bytes and returns a path.
+  assert.ok(!('url' in f), 'the printed shape must not carry the signature');
   assert.equal(f.uploadedBy, 'Yrsa Storm Bille');
   assert.equal(f.status, 'available');
   assert.deepEqual(f.groups, ['2E']);
 });
 
-test('a shared file still awaiting its virus scan reports no url', () => {
-  const pending = normaliseCommonFile({
+test('a shared file still awaiting its virus scan has no url to download from', () => {
+  const pending = {
     ...COMMON_FILE,
     file: { ...COMMON_FILE.file, status: 'pending', file: null },
-  });
-  assert.equal(pending.url, null);
-  assert.equal(pending.status, 'pending');
+  };
+  assert.equal(commonFileUrl(pending), null);
+  assert.equal(normaliseCommonFile(pending).status, 'pending');
 });
 
 // The shelf carries near-identical names across years. Quietly downloading last
@@ -1372,6 +1380,30 @@ test('attachments are indexed across all three kinds Aula models', () => {
       [2, 'link'],
     ],
   );
+});
+
+// The form payloads carry. `attachments.ts` always said a presigned URL must not
+// round-trip through a model, while every message and post handed it one.
+test('the payload form of an attachment has a position and no signed URL', () => {
+  const wire = [
+    { id: 7, name: 'seddel.pdf', file: { name: 'seddel.pdf', url: 'https://cf/1?Signature=x' } },
+    { name: 'foto.jpg', media: { name: 'foto.jpg', url: 'https://cf/2?Signature=y' } },
+    { name: 'Tilmelding', link: { name: 'Tilmelding', url: 'https://x.dk' } },
+    { name: 'broken' },
+  ];
+  // Numbered from where this message starts within its thread.
+  assert.deepEqual(describeAttachments(wire, 5), [
+    { index: 5, id: 7, name: 'seddel.pdf', kind: 'file', link: null },
+    { index: 6, id: null, name: 'foto.jpg', kind: 'media', link: null },
+    // A link is an ordinary address somebody pasted: content, not a download.
+    { index: 7, id: null, name: 'Tilmelding', kind: 'link', link: 'https://x.dk' },
+  ]);
+  // One page of a thread cannot know where it starts.
+  assert.deepEqual(
+    describeAttachments(wire, null).map((a) => a.index),
+    [null, null, null],
+  );
+  assert.doesNotMatch(JSON.stringify(describeAttachments(wire)), /Signature/);
 });
 
 test('attachment filenames cannot escape the download directory', () => {

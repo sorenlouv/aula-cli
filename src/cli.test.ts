@@ -598,6 +598,137 @@ test('--contract answers with no login and no request', () => {
   assert.equal(result.requests.length, 0);
 });
 
+// ---------------------------------------------------------------- attachments
+
+// A presigned URL is the authorisation itself, and one mangled character is a
+// 403 that reads like an auth failure — `attachments.ts` has always said they
+// must not round-trip through a model. Every payload carried them anyway, and a
+// post's attachment had no download command, so copying the URL out of the JSON
+// was the only way to fetch it.
+test('no payload carries a signed URL', () => {
+  const box = sandbox({ FAKE_AULA_COMMON_FILES: '3' });
+  for (const args of [
+    ['digest'],
+    ['thread', '5001'],
+    ['messages', '--full'],
+    ['posts'],
+    ['attachments', '5001'],
+    ['commonfiles'],
+    ['thread', '5001', '--text'],
+    ['posts', '--text'],
+  ]) {
+    const result = box.run(...args, '--no-cache');
+    assert.equal(result.code, 0, `${args.join(' ')}: ${result.stderr}`);
+    assert.doesNotMatch(result.stdout, /Signature=/, `${args.join(' ')} leaked a signed URL`);
+    assert.doesNotMatch(result.stdout, /files\.eksempel\.dk/, args.join(' '));
+  }
+});
+
+test('attachments are numbered across the thread, the same way everywhere', () => {
+  const box = sandbox();
+  const expected = [
+    { index: 0, id: 401, name: 'Tilmelding', kind: 'link' },
+    { index: 1, id: 402, name: 'Pakkeliste.pdf', kind: 'file' },
+    { index: 2, id: 403, name: 'Sovepose.jpg', kind: 'media' },
+  ];
+  const pick = (rows: any[]) =>
+    rows.map((a) => ({ index: a.index, id: a.id, name: a.name, kind: a.kind }));
+
+  const listed = json(box.run('attachments', '5001', '--no-cache'));
+  assert.deepEqual(pick(listed.attachments), expected);
+  assert.equal(listed.attachments[2].from, 'Far Eksempelsen');
+  // A link is content somebody pasted, not a signed download, so it stays.
+  assert.equal(listed.attachments[0].link, 'https://tilmelding.eksempel.dk/lejrskole');
+  assert.equal(listed.attachments[1].link, null);
+
+  const thread = json(box.run('thread', '5001', '--no-cache'));
+  assert.deepEqual(pick(thread.messages.flatMap((m: any) => m.attachments)), expected);
+
+  const digest = json(box.run('digest', '--no-cache'));
+  const inDigest = digest.threads.find((t: any) => t.id === 5001);
+  assert.deepEqual(pick(inDigest.messages.flatMap((m: any) => m.attachments)), expected);
+});
+
+// A position counts from the thread's first message, so one page of a thread
+// cannot know it. Null is honest; a page-local 0 would download another file.
+test('one page of a thread gives its attachments no index', () => {
+  const box = sandbox({ FAKE_AULA_THREAD_PAGE_SIZE: '2' });
+  const page = json(box.run('thread', '5001', '--page', '1', '--no-cache'));
+  const attachments = page.messages.flatMap((m: any) => m.attachments);
+  assert.equal(attachments.length, 3);
+  assert.ok(attachments.every((a: any) => a.index === null));
+
+  // `attachments` took --page too, and numbered that page from zero.
+  const refused = box.run('attachments', '5001', '--page', '1');
+  assert.equal(refused.code, 2);
+  assert.match(refused.stderr, /does not accept --page/);
+});
+
+test('attachment downloads by index, and never prints where it came from', () => {
+  const box = sandbox();
+  const out = join(box.dir, 'pakkeliste.pdf');
+  const result = box.run('attachment', '5001', '1', '--out', out, '--no-cache');
+  assert.equal(result.code, 0, result.stderr);
+  const saved = JSON.parse(result.stdout);
+  assert.equal(saved.path, out);
+  assert.equal(saved.filename, 'Pakkeliste.pdf');
+  assert.equal(readFileSync(out, 'utf8'), 'bytes of Pakkeliste.pdf');
+  assert.doesNotMatch(result.stdout, /Signature=/);
+  assert.ok(box.requests().includes('download Pakkeliste.pdf'));
+
+  const link = box.run('attachment', '5001', '0', '--no-cache');
+  assert.equal(link.code, 2, 'a link has no bytes to download');
+  assert.match(link.stderr, /is a link, not a file/);
+});
+
+test("post-attachment downloads a post's file by the index posts shows", () => {
+  const box = sandbox();
+  const { posts } = json(box.run('posts', '--no-cache'));
+  const plan = posts.find((p: any) => p.id === 7001);
+  assert.deepEqual(plan.attachments, [
+    { index: 0, id: 501, name: 'Ugeplan uge 33.pdf', kind: 'file', link: null },
+  ]);
+
+  const out = join(box.dir, 'ugeplan.pdf');
+  const result = box.run('post-attachment', '7001', '0', '--out', out, '--no-cache');
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).filename, 'Ugeplan uge 33.pdf');
+  assert.equal(readFileSync(out, 'utf8'), 'bytes of Ugeplan uge 33.pdf');
+  assert.doesNotMatch(result.stdout, /Signature=/);
+
+  // The index defaults to the first attachment, as it does for `attachment`.
+  const byDefault = box.run('post-attachment', '7001', '--out', out, '--no-cache');
+  assert.equal(byDefault.code, 0, byDefault.stderr);
+});
+
+test('post-attachment names what is wrong with a bad post id or index', () => {
+  const box = sandbox();
+  const noPost = box.run('post-attachment', '7999', '--no-cache');
+  assert.equal(noPost.code, 2);
+  assert.match(noPost.stderr, /No post 7999 is visible to this login/);
+
+  const noIndex = box.run('post-attachment', '7001', '4', '--no-cache');
+  assert.equal(noIndex.code, 2);
+  assert.match(noIndex.stderr, /has 1 attachment\(s\); there is no index 4/);
+  assert.match(noIndex.stderr, /\[0\] Ugeplan uge 33\.pdf/);
+
+  const none = box.run('post-attachment', '7002', '--no-cache');
+  assert.equal(none.code, 2);
+  assert.match(none.stderr, /has 0 attachment\(s\)/);
+});
+
+test('commonfile still downloads, from a URL commonfiles no longer prints', () => {
+  const box = sandbox({ FAKE_AULA_COMMON_FILES: '3' });
+  const { files } = json(box.run('commonfiles', '--no-cache'));
+  assert.ok(files.every((f: any) => !('url' in f)));
+  assert.equal(files[0].status, 'available');
+
+  const out = join(box.dir, 'faelles.pdf');
+  const result = box.run('commonfile', '2', '--out', out, '--no-cache');
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(readFileSync(out, 'utf8'), 'bytes of Faelles fil 2.pdf');
+});
+
 // ------------------------------------------------------------- the exit table
 
 // Exit 4 was in the contract, the skill and `EXIT` for as long as this repo has
@@ -646,12 +777,19 @@ test('digest never exits 4, however little one of its reads returned', () => {
   assert.deepEqual(JSON.parse(result.stdout).posts, []);
 });
 
-// Only positive evidence of emptiness is "nothing". One page of a thread proves
-// nothing about the other pages.
-test('an empty page of a thread is not an empty thread', () => {
-  const box = sandbox({ FAKE_AULA_THREAD_PAGE_SIZE: '2' });
-  const result = box.run('attachments', '5001', '--page', '0', '--no-cache');
+// Only positive evidence of emptiness is "nothing". Every attachment in 5001
+// sits on its second page, so a read that lost that page sees none — and that
+// proves nothing about the thread.
+test('a thread that could not be read to the end is never "no attachments"', () => {
+  const box = sandbox({
+    FAKE_AULA_THREAD_PAGE_SIZE: '2',
+    FAKE_AULA_FAIL_THREAD_PAGE: '5001:1',
+  });
+  const result = box.run('attachments', '5001', '--no-cache');
   assert.equal(result.code, 0, result.stderr);
+  const listed = JSON.parse(result.stdout);
+  assert.deepEqual(listed.attachments, []);
+  assert.equal(listed.messagesIncomplete, true);
 });
 
 // The fixture school has Meebook and nothing else. That is an answer about the
