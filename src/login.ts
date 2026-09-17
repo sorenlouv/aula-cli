@@ -14,13 +14,15 @@ import {
   KEY_ENV,
   TOKEN_PATH,
   clearCookieJar,
-  loadFreshTokens,
+  loadStoredTokens,
   saveCookieJar,
   sessionGuidance,
   sessionHint,
   tokenStore,
 } from './auth.ts';
 import { clearCache } from './cache.ts';
+import { formatWhen } from './cli-helpers.ts';
+import { forgetSessionSeen, readSessionSeen, recordSessionSeen } from './session-seen.ts';
 import { AulaSessionError, failWith, firstLineOf, UsageError } from './errors.ts';
 import { fail, fmt, info, ok, openInBrowser, toJson, warn } from './io.ts';
 import type { LoginPage } from './login-page.ts';
@@ -228,6 +230,9 @@ export async function runLogin(args: LoginArgs): Promise<number> {
           ...(identityName ? { identityName } : {}),
         };
         await tokenStore().save(record);
+        // Tokens were just issued for it, which is Aula accepting the login.
+        // Whether it is stepped up is not observed until something reads.
+        recordSessionSeen({ state: 'accepted', steppedUp: null });
         ok(`Login successful. Tokens encrypted into ${fmt.dim(TOKEN_PATH)}.`);
         if (!process.env[KEY_ENV]) {
           info(`  Set ${fmt.dim(`$${KEY_ENV}`)} to keep the key out of the filesystem.`);
@@ -371,6 +376,7 @@ async function openLoginPage(noOpen: boolean): Promise<LoginPage> {
 
 export async function runLogout(): Promise<number> {
   await tokenStore().clear();
+  forgetSessionSeen();
   ok(`Cleared MitID tokens from ${fmt.dim(TOKEN_PATH)}.`);
   if (existsSync(COOKIE_JAR_PATH)) {
     clearCookieJar();
@@ -383,17 +389,39 @@ export async function runLogout(): Promise<number> {
   return 0;
 }
 
+/**
+ * `status` — what is stored, and what Aula last said about it. Answered from
+ * disk alone: no request, no token refresh, so it can be run beside anything.
+ *
+ * It used to report the access token's remaining minutes, which refresh
+ * themselves and say nothing about whether the login works — and it read them
+ * through the refreshing path, so asking could retire the token of a run
+ * beside it. What matters is whether Aula accepts the login and whether the
+ * session is stepped up, and neither is knowable without asking Aula, so the
+ * answer is the last time a command did (`session-seen.ts`), with its age.
+ */
 export async function runStatus(asText: boolean): Promise<number> {
-  const record = await loadFreshTokens();
-  const now = Math.floor(Date.now() / 1000);
+  const record = await loadStoredTokens();
+  const seen = record ? readSessionSeen() : null;
+  const nowSeconds = Math.floor(Date.now() / 1000);
 
   const status = {
-    tokenStore: TOKEN_PATH,
-    tokenKeyFromEnv: Boolean(process.env[KEY_ENV]),
     loggedIn: Boolean(record),
     username: record?.username ?? null,
     identityName: record?.identityName ?? null,
-    accessTokenExpiresInSeconds: record ? Math.max(0, record.tokens.expires_at - now) : null,
+    /** Aula's last verdict on this login, with when. Null until a command has reached Aula. */
+    session: seen,
+    tokens: record
+      ? {
+          /** When the current pair was issued — the login, or the last silent refresh. */
+          issuedAt: new Date(record.tokens.obtained_at * 1000).toISOString(),
+          accessTokenExpiresAt: new Date(record.tokens.expires_at * 1000).toISOString(),
+          /** Renewed silently by the next read; never a reason to log in. */
+          accessTokenExpired: record.tokens.expires_at <= nowSeconds,
+        }
+      : null,
+    tokenStore: TOKEN_PATH,
+    tokenKeyFromEnv: Boolean(process.env[KEY_ENV]),
     cookieJar: existsSync(COOKIE_JAR_PATH) ? COOKIE_JAR_PATH : null,
   };
 
@@ -402,12 +430,25 @@ export async function runStatus(asText: boolean): Promise<number> {
     return 0;
   }
 
-  if (status.loggedIn) {
-    const mins = Math.round((status.accessTokenExpiresInSeconds ?? 0) / 60);
+  if (record) {
     ok(
-      `Logged in as ${fmt.bold(status.username ?? '?')}${status.identityName ? ` (${status.identityName})` : ''}`,
+      `Logged in as ${fmt.bold(record.username)}${record.identityName ? ` (${record.identityName})` : ''}`,
     );
-    info(`  Access token valid for ${mins} min, then refreshed automatically.`);
+    if (!seen) {
+      info(
+        '  No command has reached Aula with this login yet, so whether Aula accepts it is unknown.',
+      );
+    } else if (seen.state === 'accepted') {
+      const stepUp = seen.steppedUp === null ? 'not yet observed' : seen.steppedUp ? 'yes' : 'no';
+      info(`  Aula last accepted this login ${formatWhen(seen.checkedAt)}; stepped up: ${stepUp}.`);
+    } else {
+      warn(`  Aula rejected this login ${formatWhen(seen.checkedAt)}.`);
+    }
+    info(
+      status.tokens?.accessTokenExpired
+        ? '  Access token expired; the next read renews it silently.'
+        : `  Access token valid until ${formatWhen(status.tokens?.accessTokenExpiresAt)}, then renewed silently.`,
+    );
   } else {
     warn('Not logged in with MitID.');
     info(`  ${fmt.dim(cmd('login'))} starts a session; it needs an approval in the MitID app.`);
@@ -441,6 +482,8 @@ export async function runRefreshStepUp(): Promise<number> {
   try {
     const tokens = await client.attemptSilentReauthorize();
     await store.save({ ...existing, tokens, saved_at: Math.floor(Date.now() / 1000) });
+    // Step-up is what this bought, but it is not observed until a read says so.
+    recordSessionSeen({ state: 'accepted', steppedUp: null });
     await saveCookieJar(http.jar).catch(() => undefined);
     // Everything cached before this point was read by a session that could not
     // see sensitive threads, and those come back *empty* rather than failing —

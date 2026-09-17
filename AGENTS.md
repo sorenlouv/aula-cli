@@ -307,6 +307,25 @@ fallback sources.
   saying "hver torsdag"; one week alone is a one-off. `recurrenceWeekdayOf` in
   `dates.ts` is the one reader of that evidence, shared by the validator and
   the ranker — it was two slightly different copies.
+- **An answer is as old as its oldest part, and says so.** Every cached
+  response is stored with the moment it was fetched (`Stamped` in `cache.ts`),
+  `ResponseCache.oldestHitAt` is the oldest one a process answered from, and
+  `AulaClient.dataFetchedAt()` turns that into the `fetchedAt` on `digest` and
+  on every list envelope. `digest` used to stamp itself `generatedAt: now`
+  whether it had made sixty requests or none — and "did the teacher reply yet?"
+  is a question where ten cached minutes are the whole answer. An entry written
+  before entries carried a time reads as a miss.
+- **`status` answers from disk, and never refreshes anything.** It reported
+  the access token's remaining minutes — which renew themselves and say nothing
+  about whether the login works — and read them through the refreshing path,
+  so asking could retire the token of a run beside it. Whether Aula accepts the
+  login is only knowable by asking Aula, so `session-seen.ts` writes the answer
+  down whenever a command does: `profiles.getProfileContext` succeeding (the
+  bootstrap every uncached read performs, and the only response that states
+  step-up), an `AulaAuthError` at the top level, and a login, logout or
+  `refresh-stepup`. `status` reads that note back. Aula publishes no lifetime
+  for the refresh token or for step-up, so there is no expiry to report; the
+  last observation, with its time, is the substitute.
 - **Two caches, and `cache status` reports both.** Remote *responses* — Aula,
   the vendor weekly plans and the Google Calendar reads — share one TTL'd
   `ResponseCache` in `~/.aula/cache/responses`; the model's *layout* is cached

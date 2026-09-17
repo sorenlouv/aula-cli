@@ -201,9 +201,12 @@ window to a guess at a big enough number. `digest` carries the same fact as
 `collectionLimits.threads` / `.posts`, non-null only when its `--limit` cut
 something.
 
-Responses are cached for 10 minutes. Add `--no-cache` when the user asks
-whether something *just* arrived, or when an earlier answer in this
-conversation may already be stale.
+Responses are cached for 10 minutes, and every answer says how old it is:
+`digest` carries `fetchedAt` beside `generatedAt`, and each list envelope
+carries `fetchedAt` — when the oldest response in it was actually read from
+Aula. When the two are minutes apart, say so ("as of 08:12"). Add `--no-cache`
+when the user asks whether something *just* arrived, or when an earlier answer
+in this conversation may already be stale; `fetchedAt` is then now.
 
 ## Answering well
 
@@ -340,9 +343,18 @@ Every read of Aula needs one. These still answer without one:
 | Command | What it gives you |
 | --- | --- |
 | `aula open` | the newest overview, already on disk |
-| `aula status` | what is stored, and whether it is still usable |
+| `aula status` | what is stored, and what Aula last said about it — no request is made |
 | `aula preferences` | what the overview is written to (`remember` / `forget` work too) |
 | `aula --contract` | what this tool emits |
+
+`status` answers from disk alone. `session` is Aula's last verdict on the
+stored login — `{ state: "accepted" | "rejected", checkedAt, steppedUp }`, or
+`null` when no command has reached Aula with it yet — and `tokens` says when
+the current pair was issued and when the access token expires. An expired
+access token is renewed silently by the next read and is never a reason to log
+in; a `rejected` state, or an exit 5 from a read, is. Aula publishes no lifetime
+for the refresh credential or for step-up, so `checkedAt` is the honest
+substitute: how long ago the login was last known to work.
 
 A new session is `aula login`. **Ask the user before starting it, and never
 start one unprompted:** it opens a page on their machine and costs them an

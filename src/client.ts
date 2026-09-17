@@ -26,6 +26,7 @@ import type {
 } from './types.ts';
 import { localDayDifference } from './integrations/types.ts';
 import { remoteReadSignal } from './transport.ts';
+import { recordSessionSeen } from './session-seen.ts';
 import { errorMessage, isRecord, parseInteger } from './validation.ts';
 import { cmd } from './runtime.ts';
 
@@ -258,6 +259,9 @@ export class AulaClient {
   /** In flight only while a superseded token is being swapped out. */
   #tokenRecovery: Promise<boolean> | undefined;
   #renewToken: (spent: string) => Promise<string | undefined>;
+  #onSessionAccepted: ((steppedUp: boolean | null) => void) | undefined;
+  /** When this client began: the fetch time of anything it read off the wire. */
+  readonly #startedAt = Date.now();
   /** Memoised answer to "is Aula up?" — see `#serviceReachable`. */
   #healthProbe: Promise<boolean | undefined> | undefined;
   #cache: ResponseCache;
@@ -284,6 +288,13 @@ export class AulaClient {
        * default.
        */
       renewToken?: (spent: string) => Promise<string | undefined>;
+      /**
+       * Told every time `profiles.getProfileContext` answers: the one response
+       * that proves Aula accepts this login and says whether it is stepped up.
+       * `create()` wires it to the note `status` reads; a bare client tells
+       * nobody, and touches no disk.
+       */
+      onSessionAccepted?: (steppedUp: boolean | null) => void;
     } = {},
   ) {
     const auth: Auth | undefined =
@@ -304,6 +315,7 @@ export class AulaClient {
     this.#version = version;
     this.#cache = opts.cache ?? ResponseCache.disabled();
     this.#renewToken = opts.renewToken ?? refreshSupersededToken;
+    this.#onSessionAccepted = opts.onSessionAccepted;
   }
 
   /** Builds a client from the stored MitID login — the only credential there is. */
@@ -315,6 +327,7 @@ export class AulaClient {
       ...opts,
       auth,
       cache: openCache({ ...opts.cache, scope: cacheScope(auth) }),
+      onSessionAccepted: (steppedUp) => recordSessionSeen({ state: 'accepted', steppedUp }),
     });
   }
 
@@ -328,6 +341,16 @@ export class AulaClient {
    */
   get cache(): ResponseCache {
     return this.#cache;
+  }
+
+  /**
+   * When the data in this process's answers was actually fetched: the age of
+   * the oldest cached response any of them was built from, or when this client
+   * started reading if every response came off the wire. An answer is as old
+   * as its oldest part.
+   */
+  dataFetchedAt(): string {
+    return new Date(Math.min(this.#cache.oldestHitAt ?? Infinity, this.#startedAt)).toISOString();
   }
 
   /**
@@ -597,7 +620,15 @@ export class AulaClient {
     // problem; trusting the envelope code alone cannot split code 10's three
     // meanings. Both are needed, which is why `res.status` is read below.
     const code = envelope.status?.code ?? -1;
-    if (code === 0) return envelope.data;
+    if (code === 0) {
+      // Whichever way it was called — the session bootstrap, or the `whoami`
+      // wrapper — this answer is Aula accepting the login, and the only place
+      // step-up is stated.
+      if (method === 'profiles.getProfileContext') {
+        this.#onSessionAccepted?.(steppedUpOf(envelope.data));
+      }
+      return envelope.data;
+    }
 
     if (code === STATUS_NOT_AUTHENTICATED || code === 401) {
       throw new AulaAuthError({
@@ -1411,6 +1442,11 @@ async function probeServiceReachable(version: number): Promise<boolean | undefin
   } catch {
     return undefined;
   }
+}
+
+/** `isSteppedUp` off a profile context, or null when the payload does not say. */
+function steppedUpOf(data: unknown): boolean | null {
+  return isRecord(data) && typeof data.isSteppedUp === 'boolean' ? data.isSteppedUp : null;
 }
 
 function defaultApiVersion(): number {

@@ -617,6 +617,85 @@ test('--contract answers with no login and no request', () => {
   assert.equal(result.requests.length, 0);
 });
 
+// ------------------------------------------------------------------ freshness
+
+// `digest` stamped itself `generatedAt: now` whether it had just made sixty
+// requests or made none and served ten-minute-old responses. "Did the teacher
+// reply yet?" is a question where those ten minutes are the whole answer.
+test('fetchedAt is when Aula was read, not when the answer was assembled', () => {
+  const box = sandbox();
+  const before = Date.now();
+  const first = json(box.run('digest'));
+  const after = Date.now();
+  assert.ok(Date.parse(first.fetchedAt) >= before && Date.parse(first.fetchedAt) <= after);
+
+  Bun.sleepSync(1_100);
+  box.reset();
+  const second = json(box.run('digest'));
+  assert.equal(box.requests().length, 0, 'served from cache');
+  // The first run stamps when it began reading; the second, when the oldest
+  // response it reused was stored — milliseconds later, a second earlier than now.
+  const drift = Date.parse(second.fetchedAt) - Date.parse(first.fetchedAt);
+  assert.ok(drift >= 0 && drift < 1_000, `the data is as old as when it was fetched (${drift}ms)`);
+  assert.ok(Date.parse(second.generatedAt) > Date.parse(second.fetchedAt));
+  assert.ok(
+    Date.parse(second.generatedAt) - Date.parse(second.fetchedAt) >= 1_000,
+    'a second run a second later is a second older',
+  );
+
+  const list = json(box.run('messages'));
+  assert.equal(list.fetchedAt, second.fetchedAt, 'the list envelope carries the same stamp');
+
+  const fresh = json(box.run('messages', '--no-cache'));
+  assert.ok(Date.parse(fresh.fetchedAt) > Date.parse(first.fetchedAt), '--no-cache reads anew');
+});
+
+// `status` used to report the access token's remaining minutes, which refresh
+// themselves and say nothing about whether the login works — and it went
+// through the refreshing path to do it.
+test('status answers from disk: no request, and what Aula last said about the login', () => {
+  const box = sandbox();
+  const untouched = json(box.run('status'));
+  assert.equal(untouched.loggedIn, true);
+  assert.equal(untouched.session, null, 'nothing has reached Aula with this login yet');
+  assert.equal(typeof untouched.tokens.accessTokenExpiresAt, 'string');
+  assert.equal(untouched.tokens.accessTokenExpired, false);
+  assert.equal(box.requests().length, 0, 'status must not touch the network');
+
+  box.run('whoami', '--no-cache');
+  box.reset();
+  const accepted = json(box.run('status'));
+  assert.equal(accepted.session.state, 'accepted');
+  assert.equal(accepted.session.steppedUp, true);
+  assert.match(accepted.session.checkedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(box.requests().length, 0);
+
+  const text = box.run('status', '--text');
+  assert.match(text.stderr, /Aula last accepted this login/);
+  assert.match(text.stderr, /stepped up: yes/);
+});
+
+test('status remembers a rejected login, and forgets it at logout', () => {
+  const box = sandbox();
+  box.run('whoami', '--no-cache');
+  box.env.FAKE_AULA_REJECT_TOKEN = '1';
+  assert.equal(box.run('whoami', '--no-cache').code, 5);
+  delete box.env.FAKE_AULA_REJECT_TOKEN;
+
+  const status = json(box.run('status'));
+  assert.equal(status.session.state, 'rejected');
+  assert.equal(status.session.steppedUp, null);
+
+  box.run('logout');
+  assert.equal(json(box.run('status')).session, null);
+});
+
+test('status sees a session that is not stepped up', () => {
+  const box = sandbox({ FAKE_AULA_NO_STEPUP: '1' });
+  box.run('whoami', '--no-cache');
+  assert.equal(json(box.run('status')).session.steppedUp, false);
+});
+
 // ------------------------------------------------------------- the error line
 
 // Every exit without a stdout body ends stderr with one line of compact JSON.
@@ -933,7 +1012,14 @@ test('an empty answer is exit 4 with its body still on stdout', () => {
   for (const { args, body } of cases) {
     const result = box.run(...args, '--no-cache');
     assert.equal(result.code, 4, `${args.join(' ')}: ${result.stderr}`);
-    assert.deepEqual(JSON.parse(result.stdout), body, args.join(' '));
+    const parsed = JSON.parse(result.stdout);
+    if (Array.isArray(body)) {
+      assert.deepEqual(parsed, body, args.join(' '));
+    } else {
+      const { fetchedAt, ...rest } = parsed;
+      assert.deepEqual(rest, body, args.join(' '));
+      assert.match(fetchedAt, /^\d{4}-\d{2}-\d{2}T/, args.join(' '));
+    }
   }
 
   const pickups = box.run('pickup-times', '--no-cache');

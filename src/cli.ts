@@ -46,7 +46,7 @@ import {
   resolveCalendarSelection,
   resolveConfiguredSelection,
 } from './calendar/selection.ts';
-import { AulaClient, AulaMethodError, CALENDAR_MAX_SPAN_DAYS } from './client.ts';
+import { AulaAuthError, AulaClient, AulaMethodError, CALENDAR_MAX_SPAN_DAYS } from './client.ts';
 import { briefSlots, readConfig, updateConfig } from './config.ts';
 import { contractSlice } from './contract.ts';
 import {
@@ -107,6 +107,7 @@ import {
 import { parseSkillTarget, runInstallSkill } from './install-skill.ts';
 import { buildVersion } from './runtime.ts';
 import { runSchedule } from './schedule.ts';
+import { recordSessionSeen } from './session-seen.ts';
 import { coordinateScheduledBrief } from './scheduled-brief.ts';
 import { currentSlotStart } from './slots.ts';
 import { NoProviderError, SUPPORTED_WIDGET_IDS, type WeekPlan } from './integrations/index.ts';
@@ -394,7 +395,7 @@ async function main(): Promise<number> {
       return emitList(
         'threads',
         threads,
-        { truncated: read.truncated, limit: listLimit },
+        { truncated: read.truncated, limit: listLimit, fetchedAt: client.dataFetchedAt() },
         asText,
         renderThreads,
       );
@@ -440,7 +441,7 @@ async function main(): Promise<number> {
       return emitList(
         'posts',
         read.rows,
-        { truncated: read.truncated, limit: listLimit },
+        { truncated: read.truncated, limit: listLimit, fetchedAt: client.dataFetchedAt() },
         asText,
         renderPosts,
       );
@@ -456,7 +457,7 @@ async function main(): Promise<number> {
       return emitList(
         'albums',
         read.rows,
-        { truncated: read.truncated, limit: listLimit },
+        { truncated: read.truncated, limit: listLimit, fetchedAt: client.dataFetchedAt() },
         asText,
         renderAlbums,
       );
@@ -547,7 +548,11 @@ async function main(): Promise<number> {
       });
       const all = upcomingBirthdays(contacts);
       const shown = limit === undefined ? all : all.slice(0, limit);
-      const cut = { truncated: shown.length < all.length, limit };
+      const cut = {
+        truncated: shown.length < all.length,
+        limit,
+        fetchedAt: client.dataFetchedAt(),
+      };
       return emitList('birthdays', shown, cut, asText, (rows) =>
         rows.length === 0
           ? '(no birthdays shared in these classes)'
@@ -661,7 +666,11 @@ async function main(): Promise<number> {
       const family = await resolveFamily(client);
       const all = (await collectCommonFiles(client, family)).map(normaliseCommonFile);
       const files = limit === undefined ? all : all.slice(0, limit);
-      const cut = { truncated: files.length < all.length, limit };
+      const cut = {
+        truncated: files.length < all.length,
+        limit,
+        fetchedAt: client.dataFetchedAt(),
+      };
       return emitList('files', files, cut, asText, renderCommonFiles);
     }
 
@@ -783,7 +792,12 @@ async function main(): Promise<number> {
         ...(limit !== undefined ? { limit } : {}),
         ...(values.child ? { child: values.child } : {}),
       });
-      return emit(digest, asText, renderDigest);
+      // `generatedAt` is when this payload was assembled; `fetchedAt` is when
+      // the oldest response inside it was read from Aula. They were one field,
+      // stamped now, on a digest that may have made no request at all.
+      const { generatedAt, ...rest } = digest;
+      const stamped = { generatedAt, fetchedAt: client.dataFetchedAt(), ...rest };
+      return emit(stamped, asText, renderDigest);
     }
 
     case 'new': {
@@ -1742,10 +1756,14 @@ function renderPlans(plans: WeekPlan[]): string {
     .join('\n\n');
 }
 
-function renderDigest(digest: Awaited<ReturnType<typeof buildDigest>>): string {
+function renderDigest(
+  digest: Awaited<ReturnType<typeof buildDigest>> & { fetchedAt: string },
+): string {
   const a = digest.attention;
   const sections = [
-    `Aula digest — last ${digest.window.days} days (generated ${formatWhen(digest.generatedAt)})`,
+    // The time that matters to a reader is when Aula was read, not when this
+    // text was assembled from what was already on disk.
+    `Aula digest — last ${digest.window.days} days (read from Aula ${formatWhen(digest.fetchedAt)})`,
     `Children: ${digest.family.children.map((c) => `${c.name} (${c.institution})`).join(', ')}` +
       (digest.scope.child ? `  <narrowed to --child ${digest.scope.child}>` : ''),
     '',
@@ -1861,11 +1879,15 @@ function nothingPlanned(plans: WeekPlan[]): boolean {
  *
  * `limit` is null when nothing capped the read — `--since` on its own, or a
  * command with no default cap — and `truncated` is then false by construction.
+ *
+ * `fetchedAt` is when the rows were actually read from Aula: responses are
+ * cached for ten minutes, and "did the teacher reply yet?" is a question where
+ * those ten minutes are the answer. `--no-cache` makes it now.
  */
 function emitList<T>(
   key: string,
   rows: T[],
-  cut: { truncated: boolean; limit: number | undefined },
+  cut: { truncated: boolean; limit: number | undefined; fetchedAt: string },
   asText: boolean,
   render: (rows: T[]) => string,
 ): number {
@@ -1873,7 +1895,14 @@ function emitList<T>(
   // no rows matched, which is exit 4's "resolved, but nothing to report".
   const code = rows.length === 0 ? EXIT.NOTHING : EXIT.OK;
   if (!asText) {
-    console.log(toJson({ [key]: rows, truncated: cut.truncated, limit: cut.limit ?? null }));
+    console.log(
+      toJson({
+        [key]: rows,
+        truncated: cut.truncated,
+        limit: cut.limit ?? null,
+        fetchedAt: cut.fetchedAt,
+      }),
+    );
     return code;
   }
   const note = cut.truncated
@@ -1973,6 +2002,9 @@ try {
   // edit, so it is the one failure whose code is decided here rather than on
   // the class.
   const isAuthFlow = err instanceof AulaAuthFlowError;
+  // Aula refusing the login is the other thing `status` needs to know, and it
+  // is only ever learnt here.
+  if (err instanceof AulaAuthError) recordSessionSeen({ state: 'rejected', steppedUp: null });
   if (err instanceof WidgetError) {
     // A third-party school system, not Aula and not us: the vendor is down or
     // has changed its payload.

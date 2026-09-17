@@ -151,6 +151,18 @@ export async function resolveAuth(): Promise<Auth> {
  * command starts from the fresh pair rather than repeating the round-trip.
  */
 export async function loadFreshTokens(): Promise<StoredTokenRecord | undefined> {
+  const existing = await loadStoredTokens();
+  if (!existing) return undefined;
+  return withFreshTokens({ store: tokenStore(), http: new AulaHttpClient() });
+}
+
+/**
+ * The stored login exactly as it is on disk: decrypted, never refreshed, so
+ * reading it has no side effects. `status` answers from this. It used to go
+ * through {@link loadFreshTokens}, so asking "am I logged in?" could spend the
+ * refresh token and retire the access token of an `aula` run beside it.
+ */
+export async function loadStoredTokens(): Promise<StoredTokenRecord | undefined> {
   const store = tokenStore();
   let existing: StoredTokenRecord | null;
   try {
@@ -170,8 +182,7 @@ export async function loadFreshTokens(): Promise<StoredTokenRecord | undefined> 
     }
     throw err;
   }
-  if (!existing) return undefined;
-  return withFreshTokens({ store, http: new AulaHttpClient() });
+  return existing ?? undefined;
 }
 
 /**

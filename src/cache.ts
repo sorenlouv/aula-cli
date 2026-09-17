@@ -72,6 +72,7 @@ export class ResponseCache {
   #scope: string;
   #store: FlatCache | undefined;
   #dirty = false;
+  #oldestHitAt: number | undefined;
 
   private constructor(settings: CacheSettings) {
     this.enabled = settings.enabled ?? true;
@@ -100,15 +101,34 @@ export class ResponseCache {
    */
   get(namespace: string, key: unknown): unknown {
     if (!this.#store) return undefined;
-    return this.#store.get(this.#key(namespace, key));
+    const entry: unknown = this.#store.get(this.#key(namespace, key));
+    // An entry written before entries carried their time reads as a miss: its
+    // age is exactly what cannot be vouched for, and it is gone within a TTL.
+    if (!isStamped(entry)) return undefined;
+    this.#oldestHitAt = Math.min(this.#oldestHitAt ?? entry.at, entry.at);
+    return entry.value;
   }
 
   set(namespace: string, key: unknown, value: unknown): void {
     // `undefined` cannot survive the round-trip through JSON, so it would come
     // back as a miss anyway — better not to spend a slot on it.
     if (!this.#store || value === undefined) return;
-    this.#store.set(this.#key(namespace, key), value);
+    const entry: Stamped = { at: Date.now(), value };
+    this.#store.set(this.#key(namespace, key), entry);
     this.#dirty = true;
+  }
+
+  /**
+   * When the oldest response this process answered from was fetched, or
+   * undefined when nothing came from cache.
+   *
+   * What lets an answer say how old it is. `digest` stamped itself
+   * `generatedAt: now` whether it had just made sixty requests or made none and
+   * served ten-minute-old responses — and "did the teacher reply yet?" is a
+   * question where those ten minutes are the whole answer.
+   */
+  get oldestHitAt(): number | undefined {
+    return this.#oldestHitAt;
   }
 
   /** Writes the accumulated entries out. Called once, as the process exits. */
@@ -159,6 +179,19 @@ export class ResponseCache {
       .slice(0, 32);
     return `${namespace} ${digest}`;
   }
+}
+
+/** A cached response and the moment it was fetched. */
+type Stamped = { at: number; value: unknown };
+
+function isStamped(entry: unknown): entry is Stamped {
+  return (
+    typeof entry === 'object' &&
+    entry !== null &&
+    'at' in entry &&
+    typeof entry.at === 'number' &&
+    'value' in entry
+  );
 }
 
 export type CacheStats = {
