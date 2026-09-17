@@ -322,11 +322,31 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
       return envelope(PROFILES);
     case 'profiles.getProfileContext':
       return envelope(PROFILE_CONTEXT);
-    case 'messaging.getThreads':
+    case 'messaging.getThreads': {
+      // Twenty to a page, as Aula serves them. The three fixture threads fit on
+      // one, so a cut list could never be exercised end to end until
+      // `FAKE_AULA_EXTRA_THREADS` could push the inbox past a page.
+      const extra = Number(process.env.FAKE_AULA_EXTRA_THREADS ?? 0);
+      const all = [
+        ...THREADS,
+        ...Array.from({ length: Math.max(0, extra) }, (_, index) => ({
+          id: 6001 + index,
+          subject: `Besked ${index + 1}`,
+          read: true,
+          sensitive: false,
+          startedTime: iso(-4),
+          institutionCode: '100001',
+          regardingChildren: [],
+          creator: { fullName: 'Skoleleder' },
+          latestMessage: { sendDateTime: iso(-4), text: { html: 'Til orientering.' } },
+        })),
+      ];
+      const page = Number(url.searchParams.get('page') ?? 0);
       return envelope({
-        threads: Number(url.searchParams.get('page') ?? 0) === 0 ? THREADS : [],
-        moreMessagesExist: false,
+        threads: all.slice(page * 20, (page + 1) * 20),
+        moreMessagesExist: (page + 1) * 20 < all.length,
       });
+    }
     case 'messaging.getMessagesForThread': {
       const threadId = Number(url.searchParams.get('threadId'));
       const page = Number(url.searchParams.get('page') ?? 0);

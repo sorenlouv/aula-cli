@@ -105,6 +105,12 @@ import { type Capability, WidgetError } from './widgets.ts';
 /** Upper bound on `--days` where no endpoint imposes its own — a year of history. */
 const MAX_HISTORY_DAYS = 365;
 
+/**
+ * How many rows `messages`, `posts` and `galleries` return when the caller
+ * bounded the read with neither `--limit` nor `--since`.
+ */
+const DEFAULT_LIST_LIMIT = 20;
+
 const USAGE = `
 aula — your kids' school and daycare, read from Aula (aula.dk)
 
@@ -269,6 +275,11 @@ async function main(): Promise<number> {
     throw new UsageError(`--from (${fromDate}) must not be after --to (${toDate}).`);
   }
   const since = values.since ? parseSince(values.since) : undefined;
+  // A `--since` window is a bound of its own. The default cap used to apply on
+  // top of it, so the skill's own `messages --full --since 30d` answered with
+  // the newest 20 threads of a month and no sign that the rest existed — a
+  // busy class loses the very message being asked about.
+  const listLimit = limit ?? (since ? undefined : DEFAULT_LIST_LIMIT);
   const week = resolveWeek(values.week, values.next === true);
   const ttlMs = parseCacheTtl(values['cache-ttl']);
 
@@ -337,17 +348,23 @@ async function main(): Promise<number> {
 
     case 'messages': {
       const family = await resolveFamily(client);
-      const threads = await collectThreads(client, {
-        limit: limit ?? 20,
+      const read = await collectThreads(client, {
         unreadOnly: values.unread === true,
         family,
+        ...(listLimit !== undefined ? { limit: listLimit } : {}),
         ...(since ? { since } : {}),
         ...(values.child ? { child: values.child } : {}),
       });
-      const result = values.full
-        ? await withFullMessages(client, threads)
-        : threads.map(normaliseThread);
-      return emit(result, asText, renderThreads);
+      const threads: NormalThread[] = values.full
+        ? await withFullMessages(client, read.rows)
+        : read.rows.map(normaliseThread);
+      return emitList(
+        'threads',
+        threads,
+        { truncated: read.truncated, limit: listLimit },
+        asText,
+        renderThreads,
+      );
     }
 
     case 'thread': {
@@ -376,23 +393,35 @@ async function main(): Promise<number> {
 
     case 'posts': {
       const family = await resolveFamily(client);
-      const posts = await collectPosts(client, family, {
-        limit: limit ?? 20,
+      const read = await collectPosts(client, family, {
         important: values.important === true,
+        ...(listLimit !== undefined ? { limit: listLimit } : {}),
         ...(since ? { since } : {}),
         ...(values.child ? { child: values.child } : {}),
       });
-      return emit(posts, asText, renderPosts);
+      return emitList(
+        'posts',
+        read.rows,
+        { truncated: read.truncated, limit: listLimit },
+        asText,
+        renderPosts,
+      );
     }
 
     case 'galleries': {
       const family = await resolveFamily(client);
-      const albums = await collectAlbums(client, family, {
-        limit: limit ?? 20,
+      const read = await collectAlbums(client, family, {
+        ...(listLimit !== undefined ? { limit: listLimit } : {}),
         ...(since ? { since } : {}),
         ...(values.child ? { child: values.child } : {}),
       });
-      return emit(albums, asText, renderAlbums);
+      return emitList(
+        'albums',
+        read.rows,
+        { truncated: read.truncated, limit: listLimit },
+        asText,
+        renderAlbums,
+      );
     }
 
     case 'calendar': {
@@ -473,8 +502,10 @@ async function main(): Promise<number> {
         ...(values.child ? { child: values.child } : {}),
         ...(groupId !== undefined ? { groupId } : {}),
       });
-      const result = upcomingBirthdays(contacts, limit);
-      return emit(result, asText, (rows) =>
+      const all = upcomingBirthdays(contacts);
+      const shown = limit === undefined ? all : all.slice(0, limit);
+      const cut = { truncated: shown.length < all.length, limit };
+      return emitList('birthdays', shown, cut, asText, (rows) =>
         rows.length === 0
           ? '(no birthdays shared in these classes)'
           : rows
@@ -548,8 +579,10 @@ async function main(): Promise<number> {
 
     case 'commonfiles': {
       const family = await resolveFamily(client);
-      const files = await collectCommonFiles(client, family, limit);
-      return emit(files, asText, renderCommonFiles);
+      const all = await collectCommonFiles(client, family);
+      const files = limit === undefined ? all : all.slice(0, limit);
+      const cut = { truncated: files.length < all.length, limit };
+      return emitList('files', files, cut, asText, renderCommonFiles);
     }
 
     case 'commonfile': {
@@ -1645,14 +1678,44 @@ function emit<T>(value: T, asText: boolean, render: (value: T) => string): numbe
 }
 
 /**
+ * What every command that takes `--limit` prints: the rows under their own
+ * name, whether the limit cut them, and the limit that was in force.
+ *
+ * These were bare arrays. Twenty rows then read the same whether twenty or two
+ * hundred qualified, and an agent summarising "the last month of messages" had
+ * no way to know it was holding a fraction of them — a failure that looks
+ * exactly like an answer. The rows keep the key the digest already uses for
+ * them, so `.threads[]` and `.posts[]` mean the same thing in both payloads.
+ *
+ * `limit` is null when nothing capped the read — `--since` on its own, or a
+ * command with no default cap — and `truncated` is then false by construction.
+ */
+function emitList<T>(
+  key: string,
+  rows: T[],
+  cut: { truncated: boolean; limit: number | undefined },
+  asText: boolean,
+  render: (rows: T[]) => string,
+): number {
+  if (!asText) {
+    console.log(
+      JSON.stringify({ [key]: rows, truncated: cut.truncated, limit: cut.limit ?? null }, null, 2),
+    );
+    return 0;
+  }
+  const note = cut.truncated
+    ? `\n\nWARNING: more than ${cut.limit} matched — these are the first ${cut.limit}. ` +
+      'Raise --limit to see the rest.'
+    : '';
+  console.log(`${render(rows)}${note}`);
+  return 0;
+}
+
+/**
  * Common files filter on institution *codes*, not on any of the profile ids —
  * a fourth addressing scheme on top of the three in API.md.
  */
-async function collectCommonFiles(
-  client: AulaClient,
-  family: Family,
-  limit?: number,
-): Promise<NormalCommonFile[]> {
+async function collectCommonFiles(client: AulaClient, family: Family): Promise<NormalCommonFile[]> {
   const collected: CommonFile[] = [];
   const seen = new Set<number>();
   const pageSize = 50;
@@ -1688,7 +1751,7 @@ async function collectCommonFiles(
   // Newest first: the shelf is dominated by years-old policy documents, and the
   // thing being looked for is almost always what was added most recently.
   normalised.sort((a, b) => (b.created ?? '').localeCompare(a.created ?? ''));
-  return limit ? normalised.slice(0, limit) : normalised;
+  return normalised;
 }
 
 function renderCommonFiles(files: NormalCommonFile[]): string {

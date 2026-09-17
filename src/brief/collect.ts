@@ -168,7 +168,7 @@ export async function collect(client: AulaClient, opts: CollectOptions): Promise
       collectAlbums(client, family, {
         limit: 12,
         since: addLocalDays(now, -opts.days),
-      }),
+      }).then((read) => read.rows),
       [],
       'Gallerioversigten',
     ),

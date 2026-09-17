@@ -245,8 +245,11 @@ export type Birthday = {
 /**
  * Birthdays, ordered by how soon they are rather than by calendar date —
  * "who is next" is the only question anybody asks of this list.
+ *
+ * Every row, always: `--limit` is applied by the caller, which is the only
+ * place that can also say the list was cut.
  */
-export function upcomingBirthdays(contacts: BirthdayContact[], limit?: number): Birthday[] {
+export function upcomingBirthdays(contacts: BirthdayContact[]): Birthday[] {
   const today = startOfDay(new Date());
   const rows: Birthday[] = [];
 
@@ -279,7 +282,7 @@ export function upcomingBirthdays(contacts: BirthdayContact[], limit?: number): 
   }
 
   rows.sort((a, b) => a.inDays - b.inDays || a.name.localeCompare(b.name, 'da'));
-  return limit ? rows.slice(0, limit) : rows;
+  return rows;
 }
 
 /**

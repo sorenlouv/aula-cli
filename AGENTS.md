@@ -286,6 +286,14 @@ fallback sources.
   client re-reads the token store, adopts a newer token or buys one, and replays
   once. Keep that order — two runs that both refresh rotate each other's tokens
   forever.
+- **A list that was cut says so, in the payload.** Every command that takes
+  `--limit` prints `{ <rows>, truncated, limit }` through `emitList`, and the
+  collectors in `digest.ts` return `Collected<T>` so the fact cannot be dropped
+  by omission. They were bare arrays, the default cap of 20 applied even on top
+  of a `--since` window, and the only collector that reported a cut did it
+  through an out-parameter that `buildDigest` alone passed — so `messages --full
+  --since 30d`, the skill's own example, answered with a fraction of a busy
+  month that read as all of it. A `--since` window now lifts the default cap.
 - `family.ts` resolves the id sets endpoints want once
   (`postInstitutionProfileIds`, `childInstitutionProfileIds`,
   `institutionCodes`); re-deriving at a call site is how wrong-id failures start.

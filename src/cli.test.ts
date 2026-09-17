@@ -227,7 +227,7 @@ test('digest without --child still covers the whole family', () => {
 
 test('digest --child reaches the standalone commands too', () => {
   const box = sandbox();
-  const posts = json(box.run('posts', '--child', 'Viggo', '--no-cache'));
+  const { posts } = json(box.run('posts', '--child', 'Viggo', '--no-cache'));
   const titles = posts.map((p: any) => p.title);
   assert.ok(titles.includes('Sommerfest i Myretuen'));
   assert.ok(!titles.includes('Ugeplan 2E'));
@@ -443,7 +443,7 @@ test('cached responses belong to one login', () => {
 // so the metadata has to survive the two things Aula does to it: a synthetic
 // first row, and a sort order the payload cannot account for.
 test('galleries drops the synthetic tagged-media row', () => {
-  const albums = json(sandbox().run('galleries', '--no-cache'));
+  const { albums } = json(sandbox().run('galleries', '--no-cache'));
   assert.ok(albums.length > 0, 'sanity: the fake serves albums');
   assert.ok(
     !albums.some((a: any) => a.id === null),
@@ -455,7 +455,7 @@ test('galleries drops the synthetic tagged-media row', () => {
 // Aula orders on mediaCreatedAt and returns creationDate, and the two disagree.
 // Trusting the wire order would put a three-week-old album above yesterday's.
 test('galleries sorts on the date it actually returns, not the wire order', () => {
-  const albums = json(sandbox().run('galleries', '--no-cache'));
+  const { albums } = json(sandbox().run('galleries', '--no-cache'));
   const dates = albums.map((a: any) => a.createdAt);
   assert.deepEqual(
     [...dates].sort((a: string, b: string) => a.localeCompare(b)).reverse(),
@@ -466,7 +466,7 @@ test('galleries sorts on the date it actually returns, not the wire order', () =
 });
 
 test('galleries carries the metadata that makes an album worth reading', () => {
-  const albums = json(sandbox().run('galleries', '--no-cache'));
+  const { albums } = json(sandbox().run('galleries', '--no-cache'));
   const beach = albums.find((a: any) => a.title === 'Tur til stranden');
   assert.equal(beach.id, 9001);
   assert.equal(beach.author, 'Yrsa Storm');
@@ -481,7 +481,7 @@ test('galleries honours --child, --since and --limit', () => {
   const box = sandbox();
   const viggo = json(box.run('galleries', '--child', 'Viggo', '--no-cache'));
   assert.deepEqual(
-    viggo.map((a: any) => a.title),
+    viggo.albums.map((a: any) => a.title),
     ['Sommerfest i Myretuen'],
   );
 
@@ -489,17 +489,19 @@ test('galleries honours --child, --since and --limit', () => {
   // even though it sits above a newer one in the order Aula returns.
   const recent = json(box.run('galleries', '--since', '7d', '--no-cache'));
   assert.deepEqual(
-    recent.map((a: any) => a.title),
+    recent.albums.map((a: any) => a.title),
     ['Tur til stranden', 'Fastelavn i 2E'],
   );
 
   const one = json(box.run('galleries', '--limit', '1', '--no-cache'));
-  assert.equal(one.length, 1);
+  assert.equal(one.albums.length, 1);
   assert.equal(
-    one[0].title,
+    one.albums[0].title,
     'Tur til stranden',
     '--limit keeps the newest, not the first on the wire',
   );
+  assert.equal(one.truncated, true, 'two more albums qualified, and the payload must say so');
+  assert.equal(one.limit, 1);
 });
 
 test('galleries --text renders titles, dates and photographers', () => {
@@ -507,6 +509,79 @@ test('galleries --text renders titles, dates and photographers', () => {
   assert.equal(result.code, 0);
   assert.match(result.stdout, /\[9001\] .* — Tur til stranden/);
   assert.match(result.stdout, /by Yrsa Storm → 2E/);
+});
+
+// ----------------------------------------------------------------- cut lists
+
+// Twenty rows used to read the same whether twenty or two hundred qualified:
+// the list commands printed bare arrays, and the default cap applied even on
+// top of a `--since` window. The skill's own `messages --full --since 30d`
+// therefore answered with a fraction of a busy month and nothing to show for it.
+test('a list cut by the default cap says so, and --since lifts the cap', () => {
+  const box = sandbox({ FAKE_AULA_EXTRA_THREADS: '30' });
+
+  const capped = json(box.run('messages', '--no-cache'));
+  assert.equal(capped.threads.length, 20);
+  assert.equal(capped.truncated, true);
+  assert.equal(capped.limit, 20);
+
+  const windowed = json(box.run('messages', '--since', '30d', '--no-cache'));
+  assert.equal(windowed.threads.length, 33, 'every thread inside the window, not the newest 20');
+  assert.equal(windowed.truncated, false);
+  assert.equal(windowed.limit, null);
+
+  const explicit = json(box.run('messages', '--since', '30d', '--limit', '5', '--no-cache'));
+  assert.equal(explicit.threads.length, 5);
+  assert.equal(explicit.truncated, true, 'a limit the caller chose is still a cut worth stating');
+  assert.equal(explicit.limit, 5);
+});
+
+test('a list that fits is not reported as cut', () => {
+  const box = sandbox();
+  const messages = json(box.run('messages', '--no-cache'));
+  assert.equal(messages.threads.length, 3);
+  assert.equal(messages.truncated, false);
+
+  const posts = json(box.run('posts', '--no-cache'));
+  assert.equal(posts.posts.length, 3);
+  assert.equal(posts.truncated, false);
+  assert.equal(posts.limit, 20);
+});
+
+test('--text says when the list was cut', () => {
+  const result = sandbox({ FAKE_AULA_EXTRA_THREADS: '30' }).run('messages', '--text', '--no-cache');
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /more than 20 matched/);
+  assert.match(result.stdout, /--limit/);
+
+  const whole = sandbox().run('messages', '--text', '--no-cache');
+  assert.doesNotMatch(whole.stdout, /more than/);
+});
+
+test('every command that takes --limit reports the cut it made', () => {
+  const shelf = json(
+    sandbox({ FAKE_AULA_COMMON_FILES: '5' }).run('commonfiles', '--limit', '2', '--no-cache'),
+  );
+  assert.equal(shelf.files.length, 2);
+  assert.equal(shelf.truncated, true);
+  assert.equal(shelf.limit, 2);
+
+  const birthdays = json(
+    sandbox({ FAKE_AULA_CONTACT_PAGES: '3' }).run(
+      'birthdays',
+      '--group',
+      '5001',
+      '--limit',
+      '1',
+      '--no-cache',
+    ),
+  );
+  assert.equal(birthdays.birthdays.length, 1);
+  assert.equal(birthdays.truncated, true);
+
+  const posts = json(sandbox().run('posts', '--limit', '2', '--no-cache'));
+  assert.equal(posts.posts.length, 2);
+  assert.equal(posts.truncated, true);
 });
 
 // -------------------------------------------------------------------- doctor
@@ -598,8 +673,10 @@ test('contact and shared-file commands have no hidden legacy page ceilings', () 
   );
   assert.equal(contacts.length, 55);
 
-  const files = json(sandbox({ FAKE_AULA_COMMON_FILES: '550' }).run('commonfiles'));
-  assert.equal(files.length, 550);
+  const shelf = json(sandbox({ FAKE_AULA_COMMON_FILES: '550' }).run('commonfiles'));
+  assert.equal(shelf.files.length, 550);
+  assert.equal(shelf.truncated, false);
+  assert.equal(shelf.limit, null, 'nothing capped the read, so no limit is claimed');
 });
 
 // ------------------------------------------------------------- hosted copy

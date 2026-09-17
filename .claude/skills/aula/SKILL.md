@@ -160,6 +160,26 @@ Options: `--text`, `--limit <n>`, `--since <7d|3w|2026-08-01>`,
 `--unread`, `--important`, `--group <id>`, `--out <path>`, `--no-cache`,
 `--cache-ttl <seconds>`.
 
+**A list says when it was cut, and you must read that.** Every command that
+takes `--limit` — `messages`, `posts`, `galleries`, `commonfiles`, `birthdays` —
+answers with its rows under their own name plus two fields:
+
+```json
+{ "threads": [ … ], "truncated": true, "limit": 20 }
+```
+
+The row keys are `threads`, `posts`, `albums`, `files` and `birthdays`.
+`truncated: true` means more rows matched than you are holding: raise `--limit`
+before you summarise, or say plainly that you are looking at the newest `limit`
+only. Never report a truncated list as everything there is.
+
+`messages`, `posts` and `galleries` return the newest 20 when you give neither
+`--limit` nor `--since`. A `--since` window lifts that cap — `--since 30d`
+returns every row in the month and `limit` comes back `null` — so prefer a
+window to a guess at a big enough number. `digest` carries the same fact as
+`collectionLimits.threads` / `.posts`, non-null only when its `--limit` cut
+something.
+
 Responses are cached for 10 minutes. Add `--no-cache` when the user asks
 whether something *just* arrived, or when an earlier answer in this
 conversation may already be stale.

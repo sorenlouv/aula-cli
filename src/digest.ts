@@ -175,7 +175,16 @@ export type DigestOptions = {
   family?: Family;
 };
 
-type LimitTracker = { hit: boolean };
+/**
+ * A list read, and whether `limit` cut it short of what the window held.
+ *
+ * The collectors used to return bare arrays and report a cut through an
+ * optional out-parameter that only `buildDigest` passed — so `messages`,
+ * `posts` and `galleries` answered with 20 rows whether 20 or 200 qualified,
+ * and nothing in the payload could tell the two apart. Returning the fact with
+ * the rows means a caller has to drop it on purpose rather than by omission.
+ */
+export type Collected<T> = { rows: T[]; truncated: boolean };
 
 type RecoveredRead<T> = { value: T; warning: string | null };
 
@@ -202,12 +211,9 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
   // the caller explicitly asks for one; otherwise a busy 60-day period must
   // not lose sources merely because it crossed an estimated daily average.
   const historyLimit = opts.limit;
-  const threadLimit: LimitTracker = { hit: false };
-  const postLimit: LimitTracker = { hit: false };
 
   const threadSummaries = collectThreads(client, {
     ...(historyLimit !== undefined ? { limit: historyLimit } : {}),
-    limitTracker: threadLimit,
     since,
     unreadOnly: false,
     family,
@@ -216,13 +222,13 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
   // Start the per-thread detail reads as soon as the summaries resolve. They
   // are normally the slowest part of a digest and need not wait for calendar,
   // presence or vendor reads to finish first.
-  const threads = threadSummaries.then((summaries) => withFullMessages(client, summaries));
+  const threads = threadSummaries.then((read) => withFullMessages(client, read.rows));
 
-  const [fullThreads, posts, calendarRead, presenceRead, plans] = await Promise.all([
+  const [threadRead, fullThreads, postRead, calendarRead, presenceRead, plans] = await Promise.all([
+    threadSummaries,
     threads,
     collectPosts(client, family, {
       ...(historyLimit !== undefined ? { limit: historyLimit } : {}),
-      limitTracker: postLimit,
       since,
       ...(opts.child ? { child: opts.child } : {}),
     }),
@@ -251,6 +257,7 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
       ),
     ).then((weeks) => weeks.flat()),
   ]);
+  const posts = postRead.rows;
   const events = calendarRead.value;
   const presence = presenceRead.value;
   const fetchWarnings = [calendarRead.warning, presenceRead.warning].filter(
@@ -313,8 +320,8 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
     fetchWarnings,
     calendarAvailable: calendarRead.warning === null,
     collectionLimits: {
-      posts: postLimit.hit ? (historyLimit ?? null) : null,
-      threads: threadLimit.hit ? (historyLimit ?? null) : null,
+      posts: postRead.truncated ? (historyLimit ?? null) : null,
+      threads: threadRead.truncated ? (historyLimit ?? null) : null,
     },
   };
 }
@@ -323,7 +330,6 @@ export async function buildDigest(client: AulaClient, opts: DigestOptions) {
 
 export type ThreadFilter = {
   limit?: number;
-  limitTracker?: LimitTracker;
   since?: Date;
   unreadOnly: boolean;
   child?: string;
@@ -334,7 +340,7 @@ export type ThreadFilter = {
 export async function collectThreads(
   client: AulaClient,
   filter: ThreadFilter,
-): Promise<ThreadSummary[]> {
+): Promise<Collected<ThreadSummary>> {
   const wanted = selectChildren(filter.family, filter.child);
   const wantedProfileIds = new Set(wanted.map((c) => c.profileId));
   const restrictToChild = filter.child !== undefined;
@@ -371,8 +377,7 @@ export async function collectThreads(
       // Read one qualifying row past the cap so a caller can distinguish a
       // genuinely complete N-row window from a silently truncated one.
       if (filter.limit !== undefined && collected.length > filter.limit) {
-        if (filter.limitTracker) filter.limitTracker.hit = true;
-        return collected.slice(0, filter.limit);
+        return { rows: collected.slice(0, filter.limit), truncated: true };
       }
     }
 
@@ -382,7 +387,7 @@ export async function collectThreads(
     // window there is nothing useful further back.
     if (filter.since && pageWentPastWindow) break;
   }
-  return collected;
+  return { rows: collected, truncated: false };
 }
 
 export async function collectPosts(
@@ -390,12 +395,11 @@ export async function collectPosts(
   family: Family,
   opts: {
     limit?: number;
-    limitTracker?: LimitTracker;
     since?: Date;
     important?: boolean;
     child?: string;
   },
-) {
+): Promise<Collected<ReturnType<typeof normalisePost>>> {
   const pageSize = 10;
   const collected: Post[] = [];
   // Aula filters posts by the id set you ask with, so narrowing to one child is
@@ -429,8 +433,7 @@ export async function collectPosts(
       }
       collected.push(post);
       if (opts.limit !== undefined && collected.length > opts.limit) {
-        if (opts.limitTracker) opts.limitTracker.hit = true;
-        return collected.slice(0, opts.limit).map(normalisePost);
+        return { rows: collected.slice(0, opts.limit).map(normalisePost), truncated: true };
       }
     }
 
@@ -438,7 +441,7 @@ export async function collectPosts(
     if (newRows === 0) throw new Error(`Aula repeated post page ${index} with more=true.`);
     if (opts.since && wentPastWindow) break;
   }
-  return collected.map(normalisePost);
+  return { rows: collected.map(normalisePost), truncated: false };
 }
 
 /**
@@ -456,8 +459,8 @@ export async function collectPosts(
 export async function collectAlbums(
   client: AulaClient,
   family: Family,
-  opts: { limit: number; since?: Date; child?: string },
-) {
+  opts: { limit?: number; since?: Date; child?: string },
+): Promise<Collected<ReturnType<typeof normaliseAlbum>>> {
   const pageSize = 100;
   const children = selectChildren(family, opts.child);
   const childInstitutionProfileIds = children.map((c) => c.id);
@@ -479,15 +482,16 @@ export async function collectAlbums(
     if (newRows === 0) throw new Error(`Aula repeated album page ${index}.`);
   }
 
-  return collected
+  const inWindow = collected
     .filter((a) => {
       if (!opts.since) return true;
       const at = Date.parse(a.creationDate ?? '');
       return !Number.isFinite(at) || at >= opts.since.getTime();
     })
     .map(normaliseAlbum)
-    .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
-    .slice(0, opts.limit);
+    .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+  const rows = opts.limit === undefined ? inWindow : inWindow.slice(0, opts.limit);
+  return { rows, truncated: rows.length < inWindow.length };
 }
 
 export async function loadCalendar(
