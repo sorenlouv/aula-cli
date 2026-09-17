@@ -60,7 +60,7 @@ ranking what actually matters to this family is your job.
 | `presence` | Today's check-in/check-out per child |
 | `pickup-times` | The recurring komme/gå plan (drop-off and pickup times) |
 | `groups` | Which groups and classes each child belongs to |
-| `contacts [--group id]` | Class contact list ("kontaktliste") |
+| `contacts [--group id] [--role child\|guardian]` | Class contact list ("kontaktliste"); `--role guardian` carries each guardian's `address` when the family shared one |
 | `birthdays` | Classmates' birthdays, soonest first |
 | `notifications` | Unread badges Aula is currently showing |
 | `attachments <threadId>` | List a thread's attachments, each with its `index` |

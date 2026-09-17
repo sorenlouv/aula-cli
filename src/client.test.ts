@@ -26,6 +26,7 @@ import { addLocalDays, localIsoDate } from './integrations/types.ts';
 import {
   commonFileUrl,
   normaliseCommonFile,
+  normaliseContact,
   normaliseSchedule,
   mapLimit,
   parseKeyValues,
@@ -1300,10 +1301,10 @@ test('birthdays are ordered by how soon they are, wrapping the year', () => {
   };
 
   const rows = upcomingBirthdays([
-    { fullName: 'Eksempel Sent', birthday: localDate(-1), group: '5A' },
-    { fullName: 'Eksempel Snart', birthday: localDate(3), group: '5A' },
+    { name: 'Eksempel Sent', birthday: localDate(-1), group: '5A' },
+    { name: 'Eksempel Snart', birthday: localDate(3), group: '5A' },
     // No birthday shared — dropped rather than rendered as "unknown".
-    { fullName: 'Ukendt', group: '5A' },
+    { name: 'Ukendt', birthday: null, group: '5A' },
   ]);
 
   assert.deepEqual(
@@ -1312,6 +1313,46 @@ test('birthdays are ordered by how soon they are, wrapping the year', () => {
   );
   assert.equal(rows[0]?.inDays, 3);
   assert.ok((rows[1]?.inDays ?? 0) > 300, 'a birthday just past wraps to next year');
+});
+
+// `contacts` printed the wire object with a group stapled on, so its keys were
+// Aula's to change and the bridge address was under `postalDistrict`.
+test('a contact row has fixed keys, and the address the bridge needs', () => {
+  const row = normaliseContact(
+    {
+      profileId: 77,
+      institutionProfileId: 7701,
+      fullName: '  Forælder Eksempelsen ',
+      role: 'guardian',
+      institutionName: 'Eksempelskolen',
+      address: { street: 'Eksempelvej 1', postalCode: '2000', postalDistrict: 'Frederiksberg' },
+      mobilePhone: '12345678',
+      relations: [{ profileId: 111, name: 'Alma Eksempelsen', role: 'child' }, { name: '' }],
+      // Wire keys nobody asked for do not leak into the row.
+      metadata: '2E',
+    },
+    { id: 5001, name: '2E' },
+  );
+  assert.deepEqual(row, {
+    profileId: 77,
+    institutionProfileId: 7701,
+    name: 'Forælder Eksempelsen',
+    role: 'guardian',
+    group: '2E',
+    groupId: 5001,
+    institution: 'Eksempelskolen',
+    birthday: null,
+    email: null,
+    mobilePhone: '12345678',
+    homePhone: null,
+    address: { street: 'Eksempelvej 1', postalCode: '2000', city: 'Frederiksberg' },
+    relations: [{ profileId: 111, name: 'Alma Eksempelsen', role: 'child' }],
+  });
+  // An address the family did not share is null, not three nulls.
+  assert.equal(
+    normaliseContact({ fullName: 'X', address: {} }, { id: 1, name: 'g' }).address,
+    null,
+  );
 });
 
 // ---------------------------------------------------------------- CLI parsing

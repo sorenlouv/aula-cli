@@ -384,6 +384,11 @@ fallback sources.
   index is null for one `--page` or an incomplete read — `attachments` used to
   take `--page` and number that page from zero, positions `attachment` then
   resolved against the whole thread.
+- **`contacts` rows are ours, not Aula's.** It printed the wire object with a
+  `group` stapled on — the one command whose keys Aula could rename, and the
+  one carrying the fleet's bridge (`--role guardian` → `address`), under
+  `postalDistrict`. `normaliseContact` in `cli-helpers.ts` is the shape now,
+  and `contract.json` declares it.
 - `family.ts` resolves the id sets endpoints want once
   (`postInstitutionProfileIds`, `childInstitutionProfileIds`,
   `institutionCodes`); re-deriving at a call site is how wrong-id failures start.

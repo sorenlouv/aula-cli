@@ -696,6 +696,48 @@ test('status sees a session that is not stepped up', () => {
   assert.equal(json(box.run('status')).session.steppedUp, false);
 });
 
+// ----------------------------------------------------------------- contacts
+
+// The fleet's one bridge out of this tool: a guardian's address, when the
+// family chose to share it. It has to be found without guessing at wire keys.
+test('contacts rows are normalised, and --role guardian carries the address', () => {
+  const box = sandbox();
+  const guardians = json(
+    box.run('contacts', '--role', 'guardian', '--group', '5001', '--no-cache'),
+  );
+  assert.equal(guardians.length, 1);
+  const [row] = guardians;
+  assert.deepEqual(Object.keys(row), [
+    'profileId',
+    'institutionProfileId',
+    'name',
+    'role',
+    'group',
+    'groupId',
+    'institution',
+    'birthday',
+    'email',
+    'mobilePhone',
+    'homePhone',
+    'address',
+    'relations',
+  ]);
+  assert.deepEqual(row.address, {
+    street: 'Eksempelvej 1',
+    postalCode: '2000',
+    city: 'Frederiksberg',
+  });
+  assert.equal(row.group, 'group 5001');
+  assert.deepEqual(row.relations, [{ profileId: 1, name: 'Klassekammerat', role: 'child' }]);
+
+  const children = json(box.run('contacts', '--group', '5001', '--no-cache'));
+  assert.equal(children[0].address, null, 'a child shares no address');
+  assert.equal(children[0].birthday, '2016-05-04');
+
+  const text = box.run('contacts', '--role', 'guardian', '--group', '5001', '--text', '--no-cache');
+  assert.match(text.stdout, /Eksempelvej 1, 2000 Frederiksberg/);
+});
+
 // ------------------------------------------------------------- weekly plans
 
 // A failed vendor read and a quiet week are the same `items: []` on the wire.

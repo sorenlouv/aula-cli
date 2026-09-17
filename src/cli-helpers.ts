@@ -241,8 +241,55 @@ export function resolveWeek(week: string | undefined, next: boolean): string {
   return next ? weekOffset(1) : isoWeekString();
 }
 
-/** A contact, plus which group's list it came from. */
-export type BirthdayContact = Contact & { group?: string };
+/**
+ * A contact-list row as `contacts` prints it: the keys every other command's
+ * rows have — ours, fixed, English — instead of whatever Aula sent.
+ *
+ * `contacts` was the one command that printed the wire object with a `group`
+ * stapled on, so its keys were Aula's to change and an agent had to guess at
+ * `postalDistrict` and `mobilePhone` while every other row said `city` and
+ * `phone`. `address` is the fleet's bridge (`contacts --role guardian`), so it
+ * is the one field that has to be found without guessing.
+ */
+export function normaliseContact(contact: Contact, group: { id: number; name: string }) {
+  const address = contact.address;
+  return {
+    profileId: contact.profileId ?? null,
+    institutionProfileId: contact.institutionProfileId ?? null,
+    name: contact.fullName?.trim() || '(no name)',
+    role: contact.role ?? null,
+    group: group.name,
+    groupId: group.id,
+    institution: contact.institutionName ?? null,
+    /** `YYYY-MM-DD`; only for children whose guardians share it, and the year may be a placeholder. */
+    birthday: contact.birthday ?? null,
+    email: contact.email ?? null,
+    mobilePhone: contact.mobilePhone ?? null,
+    homePhone: contact.homePhone ?? null,
+    /** Shared only when the family chose to; the bridge into the public-register tools. */
+    address:
+      address && (address.street || address.postalCode || address.postalDistrict)
+        ? {
+            street: address.street ?? null,
+            postalCode: address.postalCode ?? null,
+            city: address.postalDistrict ?? null,
+          }
+        : null,
+    /** A child's guardians, or a guardian's children. */
+    relations: (contact.relations ?? [])
+      .filter((relation) => relation.name)
+      .map((relation) => ({
+        profileId: relation.profileId ?? null,
+        name: relation.name ?? '',
+        role: relation.role ?? null,
+      })),
+  };
+}
+
+export type NormalContact = ReturnType<typeof normaliseContact>;
+
+/** What `upcomingBirthdays` needs of a contact. */
+export type BirthdayContact = Pick<NormalContact, 'name' | 'birthday' | 'group'>;
 
 export type Birthday = {
   name: string;
@@ -265,7 +312,7 @@ export function upcomingBirthdays(contacts: BirthdayContact[]): Birthday[] {
   const rows: Birthday[] = [];
 
   for (const contact of contacts) {
-    if (!contact.birthday || !contact.fullName) continue;
+    if (!contact.birthday) continue;
     // Parsed by hand rather than through `new Date`, which reads a bare
     // `YYYY-MM-DD` as UTC midnight and so lands on the previous day for anyone
     // west of Greenwich.
@@ -284,8 +331,8 @@ export function upcomingBirthdays(contacts: BirthdayContact[]): Birthday[] {
       birthYear > 1900 && birthYear < today.getFullYear() ? next.getFullYear() - birthYear : null;
 
     rows.push({
-      name: contact.fullName,
-      group: contact.group ?? contact.mainGroupName ?? '',
+      name: contact.name,
+      group: contact.group,
       date: `${parts[2]}-${parts[3]}`,
       inDays,
       turns,

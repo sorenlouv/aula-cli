@@ -578,11 +578,28 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
             : [],
         );
       }
-      return envelope(
-        Number(url.searchParams.get('page') ?? 1) === 1
-          ? [{ profileId: 1, fullName: 'Klassekammerat', birthday: '2016-05-04' }]
-          : [],
-      );
+      if (Number(url.searchParams.get('page') ?? 1) !== 1) return envelope([]);
+      // The guardian list is the fleet's bridge: an address, when the family
+      // chose to share one, under Aula's own `postalDistrict`.
+      if (url.searchParams.get('filter') === 'guardian') {
+        return envelope([
+          {
+            profileId: 2,
+            fullName: 'Forælder Klassekammerat',
+            role: 'guardian',
+            mobilePhone: '12345678',
+            address: {
+              street: 'Eksempelvej 1',
+              postalCode: '2000',
+              postalDistrict: 'Frederiksberg',
+            },
+            relations: [{ profileId: 1, name: 'Klassekammerat', role: 'child' }],
+          },
+        ]);
+      }
+      return envelope([
+        { profileId: 1, fullName: 'Klassekammerat', role: 'child', birthday: '2016-05-04' },
+      ]);
     case 'notifications.getNotificationsForActiveProfile':
       return envelope([]);
     case 'commonFiles.getCommonFiles': {

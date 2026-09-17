@@ -10,13 +10,14 @@ import {
   usageFor,
 } from './cli-options.ts';
 import {
-  type BirthdayContact,
   commonFileUrl,
   formatDate,
   formatWhen,
   indent,
   type NormalCommonFile,
+  type NormalContact,
   normaliseCommonFile,
+  normaliseContact,
   normaliseSchedule,
   parseKeyValues,
   parseSince,
@@ -1392,8 +1393,6 @@ function parseCacheTtl(raw: string | undefined): number {
 
 // --------------------------------------------------------- groups & contacts
 
-type ContactRow = BirthdayContact & { group: string; groupId: number };
-
 /** Pages the contact list, which is 1-based and stops on an empty page. */
 async function collectContacts(
   client: AulaClient,
@@ -1426,7 +1425,7 @@ async function loadContacts(
   client: AulaClient,
   family: Family,
   opts: { child?: string; groupId?: number; role: string },
-): Promise<ContactRow[]> {
+): Promise<NormalContact[]> {
   let targets: Array<{ id: number; name: string }>;
   if (opts.groupId !== undefined) {
     targets = [{ id: opts.groupId, name: `group ${opts.groupId}` }];
@@ -1444,7 +1443,7 @@ async function loadContacts(
     }
   }
 
-  const rows: ContactRow[] = [];
+  const rows: NormalContact[] = [];
   const seen = new Set<string>();
   for (const target of targets) {
     for (const contact of await collectContacts(client, target.id, opts.role)) {
@@ -1453,7 +1452,7 @@ async function loadContacts(
       const key = `${target.id}:${contact.profileId ?? contact.fullName}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      rows.push({ ...contact, group: target.name, groupId: target.id });
+      rows.push(normaliseContact(contact, target));
     }
   }
   return rows;
@@ -1695,18 +1694,21 @@ function renderSchedule(schedule: ReturnType<typeof normaliseSchedule>): string 
     .join('\n');
 }
 
-function renderContacts(contacts: ContactRow[]): string {
+function renderContacts(contacts: NormalContact[]): string {
   if (contacts.length === 0) return '(no contacts shared for this group)';
   return contacts
     .map((c) => {
       const details = [c.mobilePhone, c.homePhone, c.email].filter(Boolean).join(' · ');
-      const relations = (c.relations ?? [])
-        .map((r) => r.name)
-        .filter(Boolean)
-        .join(', ');
+      const address = c.address
+        ? [c.address.street, [c.address.postalCode, c.address.city].filter(Boolean).join(' ')]
+            .filter(Boolean)
+            .join(', ')
+        : '';
+      const relations = c.relations.map((r) => r.name).join(', ');
       return (
-        `${c.fullName ?? 'unknown'} — ${c.group}${c.birthday ? `  (b. ${c.birthday})` : ''}\n` +
+        `${c.name} — ${c.group}${c.birthday ? `  (b. ${c.birthday})` : ''}\n` +
         `${details ? `    ${details}\n` : ''}` +
+        `${address ? `    ${address}\n` : ''}` +
         `${relations ? `    related: ${relations}\n` : ''}`
       ).trimEnd();
     })
