@@ -14,6 +14,7 @@ test('weekly-plan capabilities keep distinct keys and every task field', () => {
       capability: 'weekly-letter',
       widgetId: '0029',
       isoWeek: '2026-W33',
+      status: 'ok',
       items: [{ title: 'Ugebrev', content: 'Velkommen tilbage.', kind: 'weekly-letter' }],
     },
     {
@@ -21,6 +22,7 @@ test('weekly-plan capabilities keep distinct keys and every task field', () => {
       capability: 'tasks',
       widgetId: '0030',
       isoWeek: '2026-W33',
+      status: 'ok',
       items: [
         {
           subject: '5A',
@@ -55,6 +57,7 @@ test('dated plan keys survive reordering across days', () => {
     capability: 'weekly-plan',
     widgetId: '0001',
     isoWeek: '2026-W35',
+    status: 'ok',
     items,
   };
   const keys = (entries: typeof items) =>

@@ -88,10 +88,20 @@ contract while nothing emitted it — `Object.values(EXIT)` was all that kept th
 contract test green — so an empty inbox left at exit 0. `emit` takes a
 `nothing` flag and `emitList` derives it; the body is still printed, because
 `body_on` is `[0, 4]`. Pass it only on positive evidence of emptiness: not for
-one page of a thread, not for a vendor plan carrying `warnings` (a failed fetch
-has the same `items: []` as a quiet week), and never for `digest`. A capability
-no school offers (`NoProviderError`) is 4 with `[]`; it used to be a stack trace
-at exit 1.
+one page of a thread, not for a vendor plan whose `status` is `failed`, and
+never for `digest`. A capability no school offers (`NoProviderError`) is 4 with
+`[]`; it used to be a stack trace at exit 1.
+
+**A vendor plan states its `status`, and a read that failed outright is exit
+1.** A failed fetch and a quiet week are the same `items: []` on the wire; the
+difference lived in whether `warnings` happened to be non-empty, which the
+skill told the agent to check in prose, and which the one warning that is not a
+failure ("the vendor was not asked") got wrong. `graded` in
+`integrations/index.ts` stamps `ok` / `partial` / `failed` / `skipped`; the plan
+commands (`emitPlans`) print a body at exit 0 or 4 when anything is readable or
+nothing failed, and exit 1 with no body when nothing readable came back and a
+vendor failed — the vendor's reason goes to stderr. `digest` never exits for
+one part; its `weeklyPlans[].status` is what cannot be misread.
 
 **Who typed the method name decides the code.** `AulaMethodError` — the
 read-only guard refusing a name, or Aula answering 404 for one — is exit 1 from

@@ -74,6 +74,7 @@ const PROFILES = {
  *   FAKE_AULA_EXTRA_THREADS=<n>  this many more threads, twenty to a page
  *   FAKE_AULA_BROKER_EXPIRED=1  the silent re-authorise lands on the broker's login page
  *   FAKE_AULA_STALE_TOKEN=1  every widget token is rejected once as expired
+ *   FAKE_AULA_MEEBOOK_REFUSES=1  Meebook answers 200 with a per-child exception and no plan
  *   FAKE_AULA_REJECT_TOKEN=1 Aula will not accept the access token
  *   FAKE_AULA_DOWN=1         Aula is broken for everyone, credentials or not
  *   FAKE_AULA_UNREACHABLE=1  no answer arrives at all, as with no network
@@ -355,14 +356,28 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
       }
     }
     const wanted = new Set(url.searchParams.getAll('childFilter[]'));
+    // Meebook's own failure mode: HTTP 200, a person, and an instruction where
+    // the plan should be — the same shape as a quiet week, apart from the text.
+    const refuses = process.env.FAKE_AULA_MEEBOOK_REFUSES === '1';
     return new Response(
       JSON.stringify(
-        CHILDREN.filter((c) => wanted.has(c.userId)).map((c) => ({
-          id: c.id,
-          name: c.name,
-          unilogin: c.userId,
-          weekPlan: [{ date: 'mandag', tasks: [{ type: 'task', title: `Opgave til ${c.name}` }] }],
-        })),
+        CHILDREN.filter((c) => wanted.has(c.userId)).map((c) =>
+          refuses
+            ? {
+                id: c.id,
+                name: c.name,
+                unilogin: c.userId,
+                exceptionMessage: 'Åbn Meebook i Aula én gang, så vi kan koble jer sammen.',
+              }
+            : {
+                id: c.id,
+                name: c.name,
+                unilogin: c.userId,
+                weekPlan: [
+                  { date: 'mandag', tasks: [{ type: 'task', title: `Opgave til ${c.name}` }] },
+                ],
+              },
+        ),
       ),
       { status: 200, headers: { 'content-type': 'application/json' } },
     );

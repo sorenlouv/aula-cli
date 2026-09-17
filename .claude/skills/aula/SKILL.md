@@ -155,24 +155,29 @@ actually uses, and what to run for each:
 `homework` is the safe default when they just say *lektier* — it reads all
 three vendors, and which one a school uses is not something they know.
 
-**A weekly plan carries a `warnings` array, and you must read it.** The vendors
-fail independently of Aula, and a failed fetch has the same shape as a quiet
-week: `items: []`. They are not the same thing and must never be reported the
-same way:
+**A weekly plan carries a `status`, and you must read it.** The vendors fail
+independently of Aula, and a failed fetch has the same shape as a quiet week:
+`items: []`. `status` is what tells them apart:
 
-- `items: []` **and no warnings** → the vendor answered; the week is genuinely
-  empty. Say so plainly.
-- `items: []` **with warnings** → the fetch failed. Say so — "the weekly plan
-  could not be fetched (the vendor answered HTTP 500), so I can't see whether
-  anything is planned" — and never claim the week is empty.
-- **Items present with warnings** → partial. Report what you have *and* which
-  child is missing. Daycare children are excluded from the vendors
-  automatically (weekly plans are school products), so a warning naming a
-  child is a real fetch problem for a school child — never dismiss it as "the
-  little ones just don't have a plan".
+- `ok` → the vendor answered for every child asked; `items` is the plan, and
+  an empty one is a genuinely empty week. Say so plainly.
+- `partial` → items are real, and `warnings` names the child that is missing.
+  Report what you have *and* who is missing. Daycare children are left out of
+  the vendors automatically (weekly plans are school products), so a warning
+  naming a child is a real fetch problem for a school child — never dismiss it
+  as "the little ones just don't have a plan".
+- `failed` → nothing readable came back and `warnings` says why. This is never
+  an empty week. Say so — "the weekly plan could not be fetched (the vendor
+  answered HTTP 500), so I can't see whether anything is planned".
+- `skipped` → the vendor was not asked, because no selected child attends a
+  school. An answer: there is nothing to read.
 
-The same applies to `digest`: read `weeklyPlans[].warnings`, and a plan whose
-`provider` is `"unavailable"` means that whole capability threw.
+`weekly-plan`, `weekly-letter`, `tasks`, `assignments`, `reminders` and
+`homework` exit 1 with no body when nothing readable came back and a vendor
+failed — the vendor's reason is on stderr, and a failed read is never cached,
+so trying again in a few minutes is right. `digest` never exits for one part:
+read `weeklyPlans[].status` there, and a plan whose `provider` is
+`"unavailable"` is a capability that threw before any vendor answered.
 
 `raw <method> [k=v ...]` reaches any Aula *read* method that has no wrapper.
 

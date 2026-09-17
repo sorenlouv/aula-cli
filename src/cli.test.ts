@@ -696,6 +696,47 @@ test('status sees a session that is not stepped up', () => {
   assert.equal(json(box.run('status')).session.steppedUp, false);
 });
 
+// ------------------------------------------------------------- weekly plans
+
+// A failed vendor read and a quiet week are the same `items: []` on the wire.
+// The difference lived in `warnings`, which an agent had to remember to read,
+// and the whole thing left at exit 0 — a body that read as "nothing planned".
+test('a weekly plan that could not be read is exit 1, never an empty week', () => {
+  const box = sandbox({ FAKE_AULA_MEEBOOK_REFUSES: '1' });
+  const result = box.run('weekly-plan', '--no-cache');
+  assert.equal(result.code, 1, result.stderr);
+  assert.equal(result.stdout, '', 'no body: a read that did not happen is not an answer');
+  assert.match(result.stderr, /Åbn Meebook i Aula/, 'the vendor’s own reason is on stderr');
+  const line = errorLineOf(result.stderr);
+  assert.equal(line.code, 'UPSTREAM');
+  assert.match(line.message, /weekly-plan could not be read/);
+  assert.match(line.hint ?? '', /never cached/);
+});
+
+test('a plan carries its status, so a digest cannot be misread either', () => {
+  const box = sandbox();
+  const ok = json(box.run('weekly-plan', '--no-cache'));
+  assert.equal(ok[0].status, 'ok');
+  assert.ok(ok[0].items.length > 0);
+
+  box.env.FAKE_AULA_MEEBOOK_REFUSES = '1';
+  const digest = json(box.run('digest', '--no-cache'));
+  const plan = digest.weeklyPlans.find((p: any) => p.capability === 'weekly-plan');
+  assert.equal(plan.status, 'failed');
+  assert.deepEqual(plan.items, []);
+  assert.ok(plan.warnings.length > 0);
+});
+
+// The one warning that is not a failure: the vendor was never asked, because no
+// selected child attends a school. That is an answer.
+test('a plan the vendor was not asked for is skipped, and exit 4', () => {
+  const result = sandbox().run('weekly-plan', '--child', 'Viggo', '--no-cache');
+  assert.equal(result.code, 4, result.stderr);
+  const [plan] = JSON.parse(result.stdout);
+  assert.equal(plan.status, 'skipped');
+  assert.deepEqual(plan.items, []);
+});
+
 // ------------------------------------------------------------- the error line
 
 // Every exit without a stdout body ends stderr with one line of compact JSON.

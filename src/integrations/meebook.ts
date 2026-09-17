@@ -17,7 +17,7 @@
 
 import { type WidgetTokens, widgetFetch } from '../widgets.ts';
 import { expectOptionalType, isArrayOf, isOptional, isRecord, isString } from '../validation.ts';
-import type { IntegrationContext, WeekPlan, WeekPlanItem } from './types.ts';
+import type { IntegrationContext, FetchedPlan, WeekPlanItem } from './types.ts';
 
 const MEEBOOK_URL = 'https://app.meebook.com/aulaapi/relatedweekplan/all';
 
@@ -81,7 +81,7 @@ export async function getWeekPlan(
   ctx: IntegrationContext,
   tokens: WidgetTokens,
   widgetId: string,
-): Promise<WeekPlan> {
+): Promise<FetchedPlan> {
   const warnings: string[] = [];
 
   const params = new URLSearchParams({

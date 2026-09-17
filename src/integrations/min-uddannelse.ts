@@ -13,7 +13,7 @@
 import { htmlToText } from '../html.ts';
 import { expectOptionalType, isArrayOf, isOptional, isRecord, isString } from '../validation.ts';
 import { type WidgetTokens, widgetFetch } from '../widgets.ts';
-import type { IntegrationContext, WeekPlan, WeekPlanItem } from './types.ts';
+import type { IntegrationContext, FetchedPlan, WeekPlanItem } from './types.ts';
 
 const TASKS_URL = 'https://api.minuddannelse.net/aula/opgaveliste';
 const WEEKLY_LETTER_URL = 'https://api.minuddannelse.net/aula/ugebrev';
@@ -126,7 +126,7 @@ export async function getTasks(
   ctx: IntegrationContext,
   tokens: WidgetTokens,
   widgetId: string,
-): Promise<WeekPlan> {
+): Promise<FetchedPlan> {
   const data = await fetchMu(TASKS_URL, ctx, widgetId, tokens, (value) =>
     expectOptionalType(value, isMuTasksResponse, 'a MinUddannelse assignment response', {}),
   );
@@ -155,7 +155,7 @@ export async function getWeeklyLetter(
   ctx: IntegrationContext,
   tokens: WidgetTokens,
   widgetId: string,
-): Promise<WeekPlan> {
+): Promise<FetchedPlan> {
   const data = await fetchMu(WEEKLY_LETTER_URL, ctx, widgetId, tokens, (value) =>
     expectOptionalType(
       value,

@@ -102,6 +102,7 @@ export async function readManyPlans(
           widgetId: '',
           isoWeek: opts.isoWeek,
           items: [],
+          status: 'failed',
           warnings: [`${capability} kunne ikke hentes: ${message}`],
         };
         return [failed];

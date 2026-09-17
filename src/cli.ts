@@ -752,7 +752,7 @@ async function main(): Promise<number> {
         console.error(err.message);
         return [];
       });
-      return emit(plans, asText, renderPlans, nothingPlanned(plans));
+      return emitPlans(plans, asText);
     }
 
     case 'homework': {
@@ -763,7 +763,7 @@ async function main(): Promise<number> {
         ...(fromDate ? { fromDate } : {}),
         ...(toDate ? { toDate } : {}),
       });
-      return emit(plans, asText, renderPlans, nothingPlanned(plans));
+      return emitPlans(plans, asText);
     }
 
     case 'raw': {
@@ -1725,10 +1725,17 @@ function renderPlans(plans: WeekPlan[]): string {
         // the week is empty when the fetch failed is how an answer like "der er
         // ingen ugeplan for uge 33" gets given about a week that contains
         // "husk skiftetøj og badeting".
-        return warnings
-          ? `${head}\n  COULD NOT BE READ — the vendor did not answer. ` +
+        switch (plan.status) {
+          case 'failed':
+            return (
+              `${head}\n  COULD NOT BE READ — the vendor did not answer. ` +
               `This is NOT an empty week; the plan may contain items.\n${warnings}`
-          : `${head}\n  (nothing published — the vendor answered, the week is genuinely empty)`;
+            );
+          case 'skipped':
+            return `${head}\n  (not asked — no selected child attends a school)\n${warnings}`;
+          default:
+            return `${head}\n  (nothing published — the vendor answered, the week is genuinely empty)`;
+        }
       }
       // Grouped by child, then by the vendor's own date label — the shape a
       // parent reads it in, rather than the flat list the APIs return.
@@ -1857,14 +1864,30 @@ function emitRows<T>(rows: T[], asText: boolean, render: (rows: T[]) => string):
 }
 
 /**
- * Whether a set of vendor plans amounts to "nothing planned".
+ * Prints a set of vendor plans with the exit their statuses earn.
  *
- * A failed vendor read has the same `items: []` as a quiet week and says so
- * only in `warnings`, so a warning anywhere means this is not known to be
- * empty — and an unknown must never leave as exit 4's "a real, final answer".
+ * A failed vendor read has the same `items: []` as a quiet week, and it left
+ * at exit 0 with the difference in `warnings` — a body that read as "nothing
+ * planned" to anyone who did not check. Now: anything readable is exit 0 with
+ * the body, and `status` says which plans are partial; nothing readable and no
+ * failure is exit 4; nothing readable and a failure is exit 1 with no body —
+ * a read that did not happen is not an answer, however it is dressed.
  */
-function nothingPlanned(plans: WeekPlan[]): boolean {
-  return plans.every((plan) => plan.items.length === 0 && (plan.warnings ?? []).length === 0);
+function emitPlans(plans: WeekPlan[], asText: boolean): number {
+  const anyItems = plans.some((plan) => plan.items.length > 0);
+  const failed = plans.filter((plan) => plan.status === 'failed');
+  if (!anyItems && failed.length > 0) {
+    for (const plan of failed) {
+      for (const warning of plan.warnings ?? []) console.error(`${plan.capability}: ${warning}`);
+    }
+    const capabilities = [...new Set(failed.map((plan) => plan.capability))].join(', ');
+    throw new CliError(
+      'UPSTREAM',
+      `The ${capabilities} could not be read: ${failed[0]?.warnings?.[0] ?? 'the vendor did not answer'}`,
+      'A failed vendor read is never cached, so try again in a few minutes; --child narrows it to one child.',
+    );
+  }
+  return emit(plans, asText, renderPlans, !anyItems);
 }
 
 /**
