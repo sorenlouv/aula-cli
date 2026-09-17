@@ -52,6 +52,13 @@ They are the public contract, shared with `cvr`, `bolig`, `tinglysning` and
 `dgs` and recorded in `../contract.json`; change them only in lockstep with
 that file and `../AGENTS.md`.
 
+**`aula --contract` prints this tool's slice of that file**, as every sibling
+does — it was `Unknown command "--contract"`, exit 2, while the fleet's own
+instructions said each tool answers it. `src/contract.ts` *imports* the vendored
+`contract.json` rather than reading it, because the compiled binary has no
+checkout beside it (see Releasing). No `join_keys` in the output: this tool sits
+outside the join graph on purpose.
+
 **Exit 4 is returned, not just declared.** It sat in `EXIT`, the skill and the
 contract while nothing emitted it — `Object.values(EXIT)` was all that kept the
 contract test green — so an empty inbox left at exit 0. `emit` takes a
@@ -408,7 +415,8 @@ compiled branch is testable from a checkout; use that rather than adding a
 mode-specific test path.
 
 New files the binary must carry — templates, fixtures, anything read at
-runtime — have to be imported (`with { type: 'text' }`), not read from disk.
+runtime — have to be imported (`with { type: 'text' }`, or `type: 'json'` as
+`src/contract.ts` does), not read from disk.
 `import.meta.dir` is a virtual path in a compiled binary, so `readFileSync`
 against it compiles happily and fails only for the user.
 

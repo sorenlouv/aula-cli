@@ -332,6 +332,9 @@ a code without knowing which tool it came from:
 | 4 | resolved, but nothing to report | a real answer — the JSON is still on stdout; record it and move on |
 | 5 | credentials or setup | run `aula login`; never retry unchanged |
 
+`aula --contract` prints the same table as JSON — the codes this tool can
+return and which of them carry a body on stdout — with no login and no request.
+
 **Exit 4 is not a failure.** A read that worked and came back empty — no unread
 threads, no albums in the window, a school with no weekly-letter widget — exits
 4 with its usual JSON on stdout (`[]`, or `{ "threads": [], … }`). Say that there

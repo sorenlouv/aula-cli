@@ -584,6 +584,20 @@ test('every command that takes --limit reports the cut it made', () => {
   assert.equal(posts.truncated, true);
 });
 
+// Every sibling answers `--contract`, and the fleet's instructions say this one
+// does too. It was `Unknown command "--contract"`, exit 2.
+test('--contract answers with no login and no request', () => {
+  const result = runWithoutLogin('--contract');
+  assert.equal(result.code, 0, result.stderr);
+  const slice = JSON.parse(result.stdout);
+  const vendored = JSON.parse(readFileSync(join(ROOT, 'contract.json'), 'utf8'));
+  assert.equal(slice.contract, vendored.contract);
+  assert.deepEqual(slice.exit_codes, vendored.tools.aula.exit_codes);
+  assert.deepEqual(slice.body_on, vendored.tools.aula.body_on);
+  assert.match(slice.bridge.boundary, /never here/);
+  assert.equal(result.requests.length, 0);
+});
+
 // ------------------------------------------------------------- the exit table
 
 // Exit 4 was in the contract, the skill and `EXIT` for as long as this repo has
