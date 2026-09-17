@@ -46,13 +46,7 @@ import {
   resolveCalendarSelection,
   resolveConfiguredSelection,
 } from './calendar/selection.ts';
-import {
-  AulaApiError,
-  AulaAuthError,
-  AulaClient,
-  AulaMethodError,
-  CALENDAR_MAX_SPAN_DAYS,
-} from './client.ts';
+import { AulaClient, AulaMethodError, CALENDAR_MAX_SPAN_DAYS } from './client.ts';
 import { briefSlots, readConfig, updateConfig } from './config.ts';
 import { contractSlice } from './contract.ts';
 import {
@@ -90,8 +84,16 @@ import { cmd } from './runtime.ts';
 import { ClaudeMissingError } from './llm/claude.ts';
 import { BRIEF_DIR, loadState, recordDeploy, saveState, slotIsComplete } from './brief/state.ts';
 import { runDoctor } from './doctor.ts';
-import { AulaSessionError, EXIT, UsageError } from './errors.ts';
-import { fmt, openInBrowser } from './io.ts';
+import {
+  CliError,
+  ensureErrorLine,
+  errorLineFor,
+  EXIT,
+  failWith,
+  firstLineOf,
+  UsageError,
+} from './errors.ts';
+import { fmt, openInBrowser, toJson } from './io.ts';
 import { AulaAuthFlowError } from './vendor/aula-auth/index.ts';
 import { resolveFamily, selectChildren, type Family } from './family.ts';
 import { runLogin, runLogout, runRefreshStepUp, runStatus } from './login.ts';
@@ -242,7 +244,7 @@ async function main(): Promise<number> {
   // so it has to answer with no login, no network and no command. Every
   // sibling answers it; here it was `Unknown command "--contract"`, exit 2.
   if (command === '--contract') {
-    console.log(JSON.stringify(contractSlice(), null, 2));
+    console.log(toJson(contractSlice()));
     return 0;
   }
 
@@ -340,7 +342,16 @@ async function main(): Promise<number> {
   // The scheduler's own entry point: waits through sleep, then runs the brief.
   if (command === 'scheduled-run') {
     const outcome = await coordinateScheduledBrief();
-    return outcome.status === 'complete' ? 0 : 1;
+    if (outcome.status === 'complete') return EXIT.OK;
+    // Nobody reads this at a terminal — launchd runs it — but the log it lands
+    // in is what somebody opens when the overview did not turn up.
+    return failWith({
+      code: 'UPSTREAM',
+      message:
+        `The scheduled overview did not complete after ${outcome.attempts} attempt(s) ` +
+        `(${outcome.status}).`,
+      hint: `Run \`${cmd('new')}\` to see what is failing.`,
+    });
   }
   if (command === 'schedule') {
     return runSchedule({ remove: values.remove === true, ...(values.at ? { at: values.at } : {}) });
@@ -592,7 +603,8 @@ async function main(): Promise<number> {
       }
       const detail = await readFullThread(client, threadId);
       if (detail.incomplete) {
-        throw new Error(
+        throw new CliError(
+          'UPSTREAM',
           `Could not read every message in thread ${threadId}: ${detail.warning ?? 'unknown reason'}. ` +
             'Re-read the thread before choosing an attachment index.',
         );
@@ -821,8 +833,7 @@ async function main(): Promise<number> {
       // `command` is `never` here: the switch above is exhaustive over the
       // declared commands, and this branch exists for the argv that got past
       // parsing anyway. String() is what makes that sayable.
-      console.error(`Unknown command "${String(command)}".\n\n${USAGE}`);
-      return 1;
+      throw new UsageError(`Unknown command "${String(command)}".`, `Run \`${cmd('--help')}\`.`);
   }
 }
 
@@ -893,10 +904,14 @@ function runOpen(web: boolean): number {
   if (web) {
     const url = readTarget();
     if (!url) {
-      console.error(
-        `No hosted copy is configured — \`${cmd('publish')}\` sets one up. \`${cmd('open')}\` shows the local page.`,
+      // 5, not 1. Exit 1 says "a source is down, retry later", and no retry
+      // configures a hosted copy; "setup required — do not retry unchanged" is
+      // what this is.
+      throw new CliError(
+        'SETUP',
+        'No hosted copy is configured.',
+        `\`${cmd('publish')}\` sets one up; \`${cmd('open')}\` shows the local page.`,
       );
-      return 1;
     }
     // Same courtesy as the local page below: say when the link is stale rather
     // than let a day-old brief read as today's.
@@ -913,8 +928,11 @@ function runOpen(web: boolean): number {
 
   const path = join(BRIEF_DIR, 'latest.html');
   if (!existsSync(path)) {
-    console.error(`No overview found at ${path} — run \`${cmd('new')}\` to generate one.`);
-    return 1;
+    throw new CliError(
+      'SETUP',
+      `No overview found at ${path}.`,
+      `Run \`${cmd('new')}\` to generate one.`,
+    );
   }
   const day = localIsoDate(new Date(statSync(path).mtimeMs));
   const today = localIsoDate(new Date());
@@ -949,10 +967,11 @@ async function runPublish(off: boolean): Promise<number> {
   }
   const artifactPath = join(BRIEF_DIR, 'artifact.html');
   if (!existsSync(artifactPath)) {
-    console.error(
-      `No overview to publish yet — run \`${cmd('new')}\` first, then \`${cmd('publish')}\`.`,
+    throw new CliError(
+      'SETUP',
+      'No overview to publish yet.',
+      `Run \`${cmd('new')}\` first, then \`${cmd('publish')}\`.`,
     );
-    return 1;
   }
 
   console.error(
@@ -962,8 +981,7 @@ async function runPublish(off: boolean): Promise<number> {
   );
   const result = await deployArtifact(artifactPath, { title: BRIEF_TITLE, create: !target });
   if (result.status !== 'ok') {
-    console.error(`Publishing failed: ${result.reason}`);
-    return 1;
+    throw new CliError('UPSTREAM', `Publishing failed: ${result.reason}`);
   }
   // Saved only after a deploy that worked — the URL is only known from the reply.
   if (!target) setTarget(result.url);
@@ -1043,13 +1061,23 @@ async function runCalendars(positionals: string[]): Promise<number> {
       // agent looping the morning brief on a missing connector retries a state
       // that no amount of waiting changes. Nothing here is fixed except by a
       // person clicking Connect.
-      return EXIT.SETUP;
+      return failWith({
+        code: 'SETUP',
+        message: firstLineOf(err.observed),
+        hint:
+          'If Google Calendar is not connected, the user connects it in Claude: ' +
+          `Settings → Connectors → Google Calendar → Connect. Then run \`${cmd('calendars')}\` again.`,
+      });
     }
     if (err instanceof CalendarSelectionError) {
       // 2: the name came off the command line and is wrong or ambiguous, which
       // is the definition of a usage error. It shared exit 1 with an outage.
       console.error(err.message);
-      return EXIT.USAGE;
+      return failWith({
+        code: 'USAGE',
+        message: firstLineOf(err.message),
+        hint: `\`${cmd('calendars')}\` lists the exact names.`,
+      });
     }
     // Already a full remedy naming the dependency and how to install it —
     // prefixing it would bury the headline `doctor` and the skill read first.
@@ -1058,10 +1086,15 @@ async function runCalendars(positionals: string[]): Promise<number> {
       // on the next attempt. `claudeMissingRemedy` says as much in prose; the
       // exit code should not contradict it.
       console.error(err.message);
-      return EXIT.SETUP;
+      return failWith({
+        code: 'SETUP',
+        message: firstLineOf(err.message),
+        hint: 'Install Claude Code, then run the command again.',
+      });
     }
-    console.error(`Could not ask Claude for your calendars: ${errorMessage(err)}`);
-    return EXIT.ERROR;
+    const message = `Could not ask Claude for your calendars: ${errorMessage(err)}`;
+    console.error(message);
+    return failWith({ code: 'UPSTREAM', message: firstLineOf(message), hint: 'Try again later.' });
   }
 }
 
@@ -1213,7 +1246,13 @@ async function setCalendars(refs: string[]): Promise<number> {
   const { days: receiptDays } = overviewWindow(localIsoDate(receiptNow));
   const load = await loadPersonalEvents(started, calendarWindow(receiptNow, receiptDays));
   for (const warning of load.warnings) console.error(warning);
-  if (load.warnings.length > 0) return 1;
+  if (load.warnings.length > 0) {
+    return failWith({
+      code: 'UPSTREAM',
+      message: 'The calendars were saved, but reading them back failed.',
+      hint: `The reasons are above; \`${cmd('doctor --text')}\` reads them again.`,
+    });
+  }
 
   // Per calendar, not just a total: one silently empty calendar is exactly
   // what a single combined number would hide.
@@ -1364,7 +1403,7 @@ async function collectContacts(
       collected.push(contact);
       newRows++;
     }
-    if (newRows === 0) throw new Error(`Aula repeated contact page ${page}.`);
+    if (newRows === 0) throw new CliError('UPSTREAM', `Aula repeated contact page ${page}.`);
   }
   return collected;
 }
@@ -1790,7 +1829,7 @@ function renderBrief(result: {
  * and never by `digest`, whose payload is a dozen reads at once.
  */
 function emit<T>(value: T, asText: boolean, render: (value: T) => string, nothing = false): number {
-  console.log(asText ? render(value) : JSON.stringify(value, null, 2));
+  console.log(asText ? render(value) : toJson(value));
   return nothing ? EXIT.NOTHING : EXIT.OK;
 }
 
@@ -1834,9 +1873,7 @@ function emitList<T>(
   // no rows matched, which is exit 4's "resolved, but nothing to report".
   const code = rows.length === 0 ? EXIT.NOTHING : EXIT.OK;
   if (!asText) {
-    console.log(
-      JSON.stringify({ [key]: rows, truncated: cut.truncated, limit: cut.limit ?? null }, null, 2),
-    );
+    console.log(toJson({ [key]: rows, truncated: cut.truncated, limit: cut.limit ?? null }));
     return code;
   }
   const note = cut.truncated
@@ -1864,7 +1901,8 @@ async function collectCommonFiles(client: AulaClient, family: Family): Promise<C
     });
     expectedTotal ??= page.totalAmount;
     if (page.totalAmount !== expectedTotal) {
-      throw new Error(
+      throw new CliError(
+        'UPSTREAM',
         `Aula changed the shared-file total while paging (${expectedTotal} to ${page.totalAmount}).`,
       );
     }
@@ -1877,11 +1915,12 @@ async function collectCommonFiles(client: AulaClient, family: Family): Promise<C
     }
     if (collected.length >= expectedTotal) break;
     if (page.commonFiles.length === 0) {
-      throw new Error(
+      throw new CliError(
+        'UPSTREAM',
         `Aula reported ${expectedTotal} shared files but returned ${collected.length}.`,
       );
     }
-    if (newRows === 0) throw new Error(`Aula repeated shared-file page ${index}.`);
+    if (newRows === 0) throw new CliError('UPSTREAM', `Aula repeated shared-file page ${index}.`);
   }
   // Newest first: the shelf is dominated by years-old policy documents, and the
   // thing being looked for is almost always what was added most recently.
@@ -1925,46 +1964,34 @@ function reportProblem(message: string): void {
 }
 
 try {
-  process.exitCode = await main();
+  const code = await main();
+  ensureErrorLine(code);
+  process.exitCode = code;
 } catch (err) {
-  if (err instanceof UsageError) {
-    // 2, like every sibling: "fix the command line". This used to be 1, which
-    // the fleet reserves for "a source is down, retry later" — so a typo and
-    // an outage were the same code.
-    reportProblem(err.message);
-    process.exitCode = EXIT.USAGE;
-  } else if (
-    err instanceof AulaAuthError ||
-    err instanceof AulaSessionError ||
-    // The vendored login flow's own hierarchy — a failed refresh-stepup or
-    // token refresh is a credentials problem, not a bug, so no stack trace.
-    err instanceof AulaAuthFlowError
-  ) {
-    // 5, the fleet's "setup required — do not retry unchanged". Expired
-    // credentials are fixed by `aula login`, never by retrying.
-    reportProblem(err.message);
-    process.exitCode = EXIT.SETUP;
-  } else if (err instanceof AulaApiError) {
-    // No "Aula API error:" prefix any more. It labelled the failure without
-    // saying anything about it, and it pushed the part worth reading — which
-    // is now a plain-language headline — into the middle of the line.
-    // 1, the fleet's "a source is down or blocking". An Aula outage is exactly
-    // that; it used to be 3, which every sibling reads as "refine the query
-    // and retry" — advice that cannot help when the server is down.
-    reportProblem(err.message);
-    process.exitCode = EXIT.ERROR;
-  } else if (err instanceof WidgetError) {
+  // The vendored login flow's own hierarchy — a failed refresh-stepup or token
+  // refresh is a credentials problem, not a bug. That package is not ours to
+  // edit, so it is the one failure whose code is decided here rather than on
+  // the class.
+  const isAuthFlow = err instanceof AulaAuthFlowError;
+  if (err instanceof WidgetError) {
     // A third-party school system, not Aula and not us: the vendor is down or
-    // has changed its payload. Same class of "not a bug in this tool" as an
-    // Aula API error, so it gets the same treatment rather than a stack trace.
+    // has changed its payload.
     console.error(`Widget error (${err.widgetId}): ${err.message}`);
-    process.exitCode = EXIT.ERROR;
+  } else if (err instanceof CliError || isAuthFlow) {
+    // Planned-for failures print as a plain message. No "Aula API error:"
+    // prefix: it labelled the failure without saying anything about it, and it
+    // pushed the headline into the middle of the line.
+    reportProblem(err.message);
   } else {
     // An unexpected error is a bug in this client, so the stack is the useful
     // part and it is printed raw rather than dressed up as advice.
     console.error(err instanceof Error ? (err.stack ?? err.message) : String(err));
-    process.exitCode = EXIT.ERROR;
   }
+  // The exit follows from the code, never the other way round: 2 for USAGE —
+  // it was 1 once, the same as an outage; 5 for SETUP, which no retry fixes;
+  // 1 for a source that is down (it was 3, which the fleet reads as "refine
+  // the query"), for a vendor, and for a bug.
+  process.exitCode = failWith(errorLineFor(err, { isAuthFlow }));
 } finally {
   // Written once, here, rather than per response: flat-cache keeps the whole
   // file in memory and rewrites it whole, so saving on every `set` would cost

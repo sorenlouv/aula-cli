@@ -11,6 +11,7 @@
 import { describeAttachments } from './attachments.ts';
 import { type AulaClient, CALENDAR_MAX_SPAN_DAYS } from './client.ts';
 import { mapLimit, presenceStatus, presenceStatusDanish, startOfDay } from './cli-helpers.ts';
+import { CliError } from './errors.ts';
 import {
   integrationContext,
   postIdsFor,
@@ -351,7 +352,10 @@ export async function collectThreads(
     const { threads, moreMessagesExist } = await client.getThreads(page);
     if (threads.length === 0) {
       if (moreMessagesExist)
-        throw new Error(`Aula returned an empty thread page ${page} with more=true.`);
+        throw new CliError(
+          'UPSTREAM',
+          `Aula returned an empty thread page ${page} with more=true.`,
+        );
       break;
     }
 
@@ -382,7 +386,8 @@ export async function collectThreads(
     }
 
     if (!moreMessagesExist) break;
-    if (newRows === 0) throw new Error(`Aula repeated thread page ${page} with more=true.`);
+    if (newRows === 0)
+      throw new CliError('UPSTREAM', `Aula repeated thread page ${page} with more=true.`);
     // Threads come back newest-first, so once a whole page is older than the
     // window there is nothing useful further back.
     if (filter.since && pageWentPastWindow) break;
@@ -416,7 +421,7 @@ export async function collectPosts(
     });
     if (posts.length === 0) {
       if (hasMorePosts)
-        throw new Error(`Aula returned an empty post page ${index} with more=true.`);
+        throw new CliError('UPSTREAM', `Aula returned an empty post page ${index} with more=true.`);
       break;
     }
 
@@ -438,7 +443,8 @@ export async function collectPosts(
     }
 
     if (!hasMorePosts) break;
-    if (newRows === 0) throw new Error(`Aula repeated post page ${index} with more=true.`);
+    if (newRows === 0)
+      throw new CliError('UPSTREAM', `Aula repeated post page ${index} with more=true.`);
     if (opts.since && wentPastWindow) break;
   }
   return { rows: collected.map(normalisePost), truncated: false };
@@ -474,7 +480,8 @@ export async function findPost(
     const before = seen.size;
     for (const post of posts) seen.add(post.id);
     if (!hasMorePosts) return undefined;
-    if (seen.size === before) throw new Error(`Aula repeated post page ${index} with more=true.`);
+    if (seen.size === before)
+      throw new CliError('UPSTREAM', `Aula repeated post page ${index} with more=true.`);
   }
 }
 
@@ -513,7 +520,7 @@ export async function collectAlbums(
       newRows++;
     }
     if (page.length < pageSize) break;
-    if (newRows === 0) throw new Error(`Aula repeated album page ${index}.`);
+    if (newRows === 0) throw new CliError('UPSTREAM', `Aula repeated album page ${index}.`);
   }
 
   const inWindow = collected
@@ -662,7 +669,7 @@ export async function readFullThread(
     }
   }
 
-  if (!first) throw new Error(`Thread ${threadId} returned no page.`);
+  if (!first) throw new CliError('UPSTREAM', `Thread ${threadId} returned no page.`);
   return {
     ...first,
     messages: [...messages.values()],

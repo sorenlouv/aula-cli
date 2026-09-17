@@ -19,8 +19,8 @@ import {
   tokenStore,
 } from './auth.ts';
 import { clearCache } from './cache.ts';
-import { EXIT, UsageError } from './errors.ts';
-import { fail, fmt, info, ok, openInBrowser, warn } from './io.ts';
+import { failWith, firstLineOf, UsageError } from './errors.ts';
+import { fail, fmt, info, ok, openInBrowser, toJson, warn } from './io.ts';
 import type { LoginPage } from './login-page.ts';
 import { errorMessage } from './validation.ts';
 import {
@@ -302,7 +302,13 @@ export async function runLogin(args: LoginArgs): Promise<number> {
     // literal 2, left over from the scheme in which 2 meant credentials; on the
     // shared table 2 is "fix the command line", and `login` takes no arguments
     // to fix.
-    return EXIT.SETUP;
+    return failWith({
+      code: 'SETUP',
+      message: `Login failed: ${firstLineOf(message)}`,
+      hint: parallel
+        ? 'MitID saw a parallel session: the user rejects any pending approval in the MitID app, closes aula.dk tabs and waits a minute before another attempt.'
+        : 'Do not simply retry: every abandoned attempt leaves a pending approval on the user’s phone.',
+    });
   }
 }
 
@@ -390,7 +396,7 @@ export async function runStatus(asText: boolean): Promise<number> {
   };
 
   if (!asText) {
-    console.log(JSON.stringify(status, null, 2));
+    console.log(toJson(status));
     return 0;
   }
 
@@ -442,7 +448,11 @@ export async function runRefreshStepUp(): Promise<number> {
       info(`  Run ${fmt.dim(cmd('login'))} to step up again.`);
       // 5, not the literal 2 the old scheme left here: nothing about the command
       // line is wrong, and no retry brings a dead broker session back.
-      return EXIT.SETUP;
+      return failWith({
+        code: 'SETUP',
+        message: 'The broker session has expired, so step-up cannot be refreshed silently.',
+        hint: `Only \`${cmd('login')}\` restores it, and that costs the user a MitID approval on their phone: ask them first.`,
+      });
     }
     throw err;
   }

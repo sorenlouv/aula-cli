@@ -1,5 +1,5 @@
 {
-  "contract": 6,
+  "contract": 7,
   "_readme": [
     "The cross-repo contract, as data rather than prose.",
     "",
@@ -17,32 +17,80 @@
   ],
 
   "exit_codes": {
-    "_note": "Shared by cvr, bolig, tinglysning and dgs. aula is deliberately disjoint; see its own entry. WHICH STREAM a code writes to is per tool, not shared: read body_on.",
+    "_note": "One table for every tool in the fleet, the account tools included. WHICH exits carry a JSON body on stdout is per tool: read body_on. Every other exit ends stderr with the error line described under error_body.",
     "0": "success — the JSON body is on stdout",
-    "1": "error: a source is down or blocking. Retry later; the entity may still exist",
+    "1": "error: a source is down, blocking, or answered something unreadable. Retry later; the entity may still exist",
     "2": "usage error: fix the command line",
-    "3": "nothing, or too many things, matched. Refine using the candidates \u2014 on stdout where this tool's body_on includes 3, on stderr otherwise. The two halves of the fleet differ, and reading the wrong stream looks exactly like no candidates at all",
+    "3": "nothing, or too many things, matched. The candidates are on stdout, as exit_3_body describes, each carrying the id to re-run with",
     "4": "resolved, but nothing to report. A real, final answer — record it and move on",
-    "5": "setup required: credentials or a missing browser. Do not retry unchanged"
+    "5": "setup required: credentials, a session, or a missing browser. Do not retry unchanged"
+  },
+
+  "exit_3_body": {
+    "_note": [
+      "Exit 3 used to differ by tool: bolig printed candidate objects, tinglysning",
+      "printed bare label strings, and cvr printed prose on stderr and left stdout",
+      "empty. An agent reading the wrong stream saw nothing, which reads exactly",
+      "like 'there were no candidates' and ends a search that should have narrowed.",
+      "One shape now, on stdout, for every tool whose exit_codes include 3."
+    ],
+    "keys": ["error", "query", "hint", "candidates"],
+    "error": {
+      "not_found": "nothing matched. `candidates` holds fuzzy did-you-mean guesses and may be empty",
+      "ambiguous": "several matched. `candidates` is the narrowing list"
+    },
+    "nullable": ["hint"],
+    "candidate_keys": {
+      "_note": "Every candidate is an object: `label`, plus the identifier the SAME tool accepts as input, so picking one needs no second resolution.",
+      "bolig": ["label", "id", "accessAddressId"],
+      "tinglysning": ["label", "id", "accessAddressId"],
+      "cvr": ["label", "cvr", "unit"]
+    }
+  },
+
+  "error_body": {
+    "_note": [
+      "Every exit without a stdout body ends STDERR with one line of compact JSON.",
+      "It is on stderr on purpose: an error envelope on stdout would answer",
+      "`jq '.people | length'` with 0, which is a failure reading as an answer.",
+      "Prose and usage text may precede it; it is always the last line."
+    ],
+    "stream": "stderr",
+    "shape": { "error": { "code": "string", "message": "string", "hint": "string | null" } },
+    "codes": {
+      "USAGE": "exit 2 — the command line is wrong; `hint` says how",
+      "SETUP": "exit 5 — credentials, a session or a browser is missing. For the account tools `hint` names the offline commands that still work and says to ask the user before any login",
+      "NETWORK": "exit 1 — the source could not be reached",
+      "UPSTREAM": "exit 1 — the source answered with an error, or with a shape this tool cannot read",
+      "BLOCKED": "exit 1 — bot protection, a rate limit or a waiting room",
+      "BUG": "exit 1 — this tool's own fault"
+    }
+  },
+
+  "stdout": {
+    "json": "compact (one line) when stdout is not a TTY, indented at a TTY. Pipe through `jq .` to read it.",
+    "help": "`--help` prints to stdout and exits 0; a usage error prints usage to stderr and exits 2."
   },
 
   "join_keys": {
-    "_note": "DAWA UUIDs at two granularities. Match on these, never on the printed address, which is lossy.",
+    "_note": "DAWA UUIDs at two granularities. Match on these, never on the printed address, which is lossy. Paths are keyed by command, matching tools.<tool>.commands.",
     "door": {
       "meaning": "the street door; equal for every home behind it",
       "paths": {
-        "bolig": ".address.accessAddressId",
-        "tinglysning": ".accessAddressId",
-        "dgs": ".people[].accessAddressId"
+        "bolig": { "default": ".address.accessAddressId" },
+        "tinglysning": { "default": ".accessAddressId" },
+        "dgs": { "search": ".people[].accessAddressId", "person": ".accessAddressId" },
+        "cvr": { "company": ".access_address_id" }
       }
     },
     "home": {
       "meaning": "the individual dwelling; the only join that is exact in a block of flats",
       "paths": {
-        "bolig": ".address.id",
-        "tinglysning": ".addressUnitId",
-        "dgs": ".people[].addressUnitId"
-      }
+        "bolig": { "default": ".address.id" },
+        "tinglysning": { "default": ".addressUnitId" },
+        "dgs": { "search": ".people[].addressUnitId", "person": ".addressUnitId" }
+      },
+      "_cvr": "cvr emits no home key: the register records a floor but never a door, so a company address cannot name one dwelling."
     }
   },
 

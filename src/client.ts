@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { type Auth, loginInstructions, refreshSupersededToken, resolveAuth } from './auth.ts';
 import { type CacheSettings, ResponseCache, openCache } from './cache.ts';
-import { type Remedy, formatRemedy } from './errors.ts';
+import { CliError, type ErrorCode, type Remedy, formatRemedy, remedyHint } from './errors.ts';
 import type {
   Album,
   CalendarEvent,
@@ -20,7 +20,7 @@ import type {
 } from './types.ts';
 import { localDayDifference } from './integrations/types.ts';
 import { remoteReadSignal } from './transport.ts';
-import { isRecord, parseInteger } from './validation.ts';
+import { errorMessage, isRecord, parseInteger } from './validation.ts';
 import { cmd } from './runtime.ts';
 
 const FALLBACK_API_VERSION = 24;
@@ -164,11 +164,26 @@ const NEVER_CACHED = new Set<string>(['aulaToken.getAulaToken']);
  * method is a programming mistake, not something to go and fix — and every
  * failure that *does* have a fix is expected to spell it out.
  */
-export class AulaApiError extends Error {
+export class AulaApiError extends CliError {
+  /** Aula's own status code from the envelope — not the error line's code, which is `errorCode`. */
   readonly code: number;
   readonly method: string;
-  constructor(method: string, code: number, problem: string | Remedy) {
-    super(typeof problem === 'string' ? problem : formatRemedy(problem));
+  constructor(
+    method: string,
+    code: number,
+    problem: string | Remedy,
+    /**
+     * `UPSTREAM` unless the throw site knows better: Aula answered, with an
+     * error or a shape this client cannot read. `NETWORK` is the one site where
+     * no answer arrived at all.
+     */
+    errorCode: ErrorCode = 'UPSTREAM',
+  ) {
+    super(
+      errorCode,
+      typeof problem === 'string' ? problem : formatRemedy(problem),
+      typeof problem === 'string' ? null : remedyHint(problem),
+    );
     this.name = 'AulaApiError';
     this.code = code;
     this.method = method;
@@ -187,16 +202,22 @@ export class AulaApiError extends Error {
  */
 export class AulaMethodError extends AulaApiError {
   constructor(method: string, code: number, problem: string | Remedy) {
-    super(method, code, problem);
+    // `BUG`, because this only reaches the error line from a typed wrapper —
+    // `raw` turns it into a usage error before it gets there.
+    super(method, code, problem, 'BUG');
     this.name = 'AulaMethodError';
   }
 }
 
-export class AulaAuthError extends Error {
+export class AulaAuthError extends CliError {
   /** Always ends with the fix, because MitID is the only credential there is. */
   constructor(problem: string | Remedy, guidance: string = loginInstructions()) {
     super(
+      'SETUP',
       typeof problem === 'string' ? `${problem}\n\n${guidance}` : formatRemedy(withLogin(problem)),
+      typeof problem === 'string'
+        ? guidance.replaceAll(/\s*\n\s*/g, ' ')
+        : remedyHint(withLogin(problem)),
     );
     this.name = 'AulaAuthError';
   }
@@ -522,6 +543,22 @@ export class AulaClient {
       body: httpMethod === 'POST' ? JSON.stringify(opts.body) : undefined,
       redirect: 'manual',
       signal: remoteReadSignal(),
+    }).catch((err: unknown) => {
+      // No answer arrived: no route, a DNS failure, or the read deadline. This
+      // used to escape as whatever `fetch` threw, straight into the "bug in
+      // this client" branch — a raw stack at exit 1 for a laptop with no wifi.
+      throw new AulaApiError(
+        method,
+        0,
+        {
+          headline: 'Could not reach Aula.',
+          detail:
+            `${method} got no answer at all (${errorMessage(err)}), so this says nothing ` +
+            `about your login or about whether Aula is up.`,
+          action: 'Check the network connection and try again.',
+        },
+        'NETWORK',
+      );
     });
     this.#storeCookies(res);
 

@@ -353,6 +353,22 @@ a code without knowing which tool it came from:
 | 4 | resolved, but nothing to report | a real answer — the JSON is still on stdout; record it and move on |
 | 5 | credentials or setup | run `aula login`; never retry unchanged |
 
+**On exits 1, 2 and 5 the last line of stderr is JSON** — read it instead of the
+prose above it:
+
+```json
+{"error":{"code":"SETUP","message":"Not logged in — …","hint":"…"}}
+```
+
+`code` is `USAGE` (exit 2), `SETUP` (exit 5), or for exit 1 one of `NETWORK` (no
+answer arrived — retry), `UPSTREAM` (Aula or a school vendor answered with an
+error) and `BUG` (this tool's fault — report it, do not retry). `hint` is the
+next action, or null. Nothing is on stdout on those exits, except `doctor`,
+whose report is still there when a check failed.
+
+JSON on stdout is a single line when you run it; pipe it through `jq` to query
+or read it.
+
 `aula --contract` prints the same table as JSON — the codes this tool can
 return and which of them carry a body on stdout — with no login and no request.
 

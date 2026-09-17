@@ -9,7 +9,17 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { formatRemedy, wrap } from './errors.ts';
+import {
+  CliError,
+  ERROR_CODES,
+  errorLineFor,
+  EXIT,
+  EXIT_FOR,
+  formatRemedy,
+  remedyHint,
+  UsageError,
+  wrap,
+} from './errors.ts';
 
 test('the headline is the whole first line, so a one-line report is still useful', () => {
   const message = formatRemedy({
@@ -70,4 +80,47 @@ test('a word longer than the width gets a line of its own rather than looping', 
 
 test('line breaks the caller wrote are kept', () => {
   assert.equal(wrap('short\nlines', 40), 'short\nlines');
+});
+
+// ------------------------------------------------------------ the error line
+
+test('an error answers for its own error line: the code is on the class', () => {
+  const line = errorLineFor(new UsageError('No child matches "Nobody".\nKnown children: …'));
+  assert.deepEqual(line, { code: 'USAGE', message: 'No child matches "Nobody".', hint: null });
+
+  const coded = errorLineFor(new CliError('NETWORK', 'Could not reach Aula.', 'Try again.'));
+  assert.deepEqual(coded, {
+    code: 'NETWORK',
+    message: 'Could not reach Aula.',
+    hint: 'Try again.',
+  });
+});
+
+// Anything nobody planned for is a bug in this client, and says so — the one
+// code whose hint is not a next action but whose problem it is.
+test('an unplanned error is BUG, and the vendored login flow is SETUP', () => {
+  const bug = errorLineFor(new TypeError('x is not a function'));
+  assert.equal(bug.code, 'BUG');
+  assert.equal(bug.message, 'x is not a function');
+  assert.match(bug.hint ?? '', /bug in aula-cli/);
+
+  const flow = errorLineFor(new Error('Silent SSO landed on MitID'), { isAuthFlow: true });
+  assert.equal(flow.code, 'SETUP');
+});
+
+test('every code has an exit, and only the three failing ones', () => {
+  assert.deepEqual(new Set(Object.keys(EXIT_FOR)), new Set<string>(ERROR_CODES));
+  assert.deepEqual(new Set(Object.values(EXIT_FOR)), new Set([EXIT.ERROR, EXIT.USAGE, EXIT.SETUP]));
+});
+
+test('a remedy becomes a one-line hint: the action and what to run', () => {
+  assert.equal(
+    remedyHint({ headline: 'x', action: 'Check the ids:', commands: ['aula whoami'] }),
+    'Check the ids: aula whoami',
+  );
+  assert.equal(
+    remedyHint({ headline: 'x', fallback: 'Wait and try again.' }),
+    'Wait and try again.',
+  );
+  assert.equal(remedyHint({ headline: 'x' }), null);
 });

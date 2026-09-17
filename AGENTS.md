@@ -52,6 +52,20 @@ They are the public contract, shared with `cvr`, `bolig`, `tinglysning` and
 `dgs` and recorded in `../contract.json`; change them only in lockstep with
 that file and `../AGENTS.md`.
 
+**Every exit without a body ends stderr with the error line** —
+`{"error":{"code","message","hint"}}`, one line of compact JSON, after whatever
+prose came before it. The code is on the error class (`CliError.errorCode`), not
+worked out from the message when it is printed, and the exit follows from the
+code (`EXIT_FOR`), never the other way round. It used to be worked out from
+nothing: the catch chain picked an exit by `instanceof`, everything else an
+agent could branch on was prose, and a laptop with no network got a raw stack
+through the "bug in this client" branch — `fetch` rejecting is now `NETWORK`.
+Codes are `USAGE`, `SETUP`, `NETWORK`, `UPSTREAM` and `BUG`; no `BLOCKED`,
+because Aula has no bot wall this client has met. A site that prints its own
+prose and returns a code calls `failWith`; `ensureErrorLine` is the net under a
+forgotten one. `doctor` is the one exit 1 that also has a body. On stdout, JSON
+is one line unless a terminal is reading it (`toJson`).
+
 **`aula --contract` prints this tool's slice of that file**, as every sibling
 does — it was `Unknown command "--contract"`, exit 2, while the fleet's own
 instructions said each tool answers it. `src/contract.ts` *imports* the vendored

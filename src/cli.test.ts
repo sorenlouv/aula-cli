@@ -106,6 +106,24 @@ function runWithoutLogin(...args: string[]): RunResult {
   };
 }
 
+type ErrorLine = { code: string; message: string; hint: string | null };
+
+/**
+ * The last line of stderr, parsed — what an agent is told to read instead of
+ * the prose above it. Throws when that line is not the error line, which is the
+ * assertion: "always the last line" has to hold for every failing exit.
+ */
+function errorLineOf(stderr: string): ErrorLine {
+  const last = stderr.trimEnd().split('\n').at(-1) ?? '';
+  const parsed = JSON.parse(last) as { error: ErrorLine };
+  assert.deepEqual(Object.keys(parsed), ['error'], last);
+  assert.deepEqual(Object.keys(parsed.error), ['code', 'message', 'hint'], last);
+  assert.equal(typeof parsed.error.message, 'string');
+  assert.ok(parsed.error.message.length > 0, 'a message worth reading');
+  assert.ok(!parsed.error.message.includes('\n'), 'one sentence, one line');
+  return parsed.error;
+}
+
 function json(result: RunResult): any {
   assert.equal(result.code, 0, `expected success, got ${result.code}:\n${result.stderr}`);
   return JSON.parse(result.stdout);
@@ -596,6 +614,130 @@ test('--contract answers with no login and no request', () => {
   assert.deepEqual(slice.body_on, vendored.tools.aula.body_on);
   assert.match(slice.bridge.boundary, /never here/);
   assert.equal(result.requests.length, 0);
+});
+
+// ------------------------------------------------------------- the error line
+
+// Every exit without a stdout body ends stderr with one line of compact JSON.
+// Until it did, everything an agent could branch on beyond the exit number was
+// prose — and for a laptop with no network, a raw stack that called it a bug.
+test('every failing exit ends stderr with the error line, and its code names the exit', () => {
+  const cases: Array<{
+    name: string;
+    run: () => RunResult;
+    exit: number;
+    code: string;
+    message: RegExp;
+  }> = [
+    {
+      name: 'an unknown command',
+      run: () => runWithoutLogin('not-a-command'),
+      exit: 2,
+      code: 'USAGE',
+      message: /Unknown command/,
+    },
+    {
+      name: 'an unknown flag',
+      run: () => runWithoutLogin('messages', '--nope'),
+      exit: 2,
+      code: 'USAGE',
+      message: /--nope/,
+    },
+    {
+      name: 'a flag the command does not take',
+      run: () => sandbox().run('thread', '5001', '--child', 'Alma'),
+      exit: 2,
+      code: 'USAGE',
+      message: /does not accept --child/,
+    },
+    {
+      name: 'no stored login',
+      run: () => runWithoutLogin('whoami'),
+      exit: 5,
+      code: 'SETUP',
+      message: /Not logged in/,
+    },
+    {
+      name: 'a login Aula will not accept',
+      run: () => sandbox({ FAKE_AULA_REJECT_TOKEN: '1' }).run('whoami'),
+      exit: 5,
+      code: 'SETUP',
+      message: /rejected your login/,
+    },
+    {
+      name: 'Aula answering badly',
+      run: () => sandbox({ FAKE_AULA_DOWN: '1' }).run('whoami'),
+      exit: 1,
+      code: 'UPSTREAM',
+      message: /having trouble/,
+    },
+    {
+      name: 'no answer at all',
+      run: () => sandbox({ FAKE_AULA_UNREACHABLE: '1' }).run('whoami'),
+      exit: 1,
+      code: 'NETWORK',
+      message: /Could not reach Aula/,
+    },
+    {
+      name: 'a method Aula refuses',
+      run: () => sandbox({ FAKE_AULA_FAIL: 'posts.getAllPosts' }).run('posts', '--no-cache'),
+      exit: 1,
+      code: 'UPSTREAM',
+      message: /would not let you read/,
+    },
+  ];
+
+  for (const { name, run, exit, code, message } of cases) {
+    const result = run();
+    assert.equal(result.code, exit, `${name}: ${result.stderr}`);
+    const line = errorLineOf(result.stderr);
+    assert.equal(line.code, code, name);
+    assert.match(line.message, message, name);
+    assert.equal(result.stdout, '', `${name}: an error never puts anything on stdout`);
+  }
+});
+
+// No network is not a bug in this client. It used to leave as whatever `fetch`
+// threw, through the branch that prints a stack.
+test('an unreachable Aula is reported in plain language, without a stack', () => {
+  const result = sandbox({ FAKE_AULA_UNREACHABLE: '1' }).run('whoami');
+  assert.doesNotMatch(result.stderr, /\n\s+at /);
+  assert.match(errorLineOf(result.stderr).hint ?? '', /network/i);
+});
+
+test('exits 0 and 4 carry a body and no error line', () => {
+  const box = sandbox();
+  for (const args of [['whoami'], ['notifications']]) {
+    const result = box.run(...args, '--no-cache');
+    assert.ok(result.code === 0 || result.code === 4, args.join(' '));
+    assert.doesNotMatch(result.stderr, /\{"error":/, args.join(' '));
+  }
+});
+
+// `doctor` is the one exit 1 with a body: the report is the point of the
+// command. The line still closes stderr, and says where the detail is.
+test('a failing doctor keeps its report on stdout and still ends with the error line', () => {
+  const result = sandbox({ FAKE_AULA_FAIL: 'presence.getDailyOverview' }).run('doctor');
+  assert.equal(result.code, 1);
+  assert.equal(JSON.parse(result.stdout).ok, false);
+  const line = errorLineOf(result.stderr);
+  assert.equal(line.code, 'UPSTREAM');
+  assert.match(line.message, /1 of \d+ checks failed/);
+  assert.match(line.hint ?? '', /stdout/);
+});
+
+// A pipe is where nobody reads indentation, and where an agent pays for it in
+// tokens on every call.
+test('JSON is one line when stdout is not a terminal', () => {
+  const box = sandbox();
+  for (const args of [['whoami'], ['messages'], ['digest'], ['status']]) {
+    const result = box.run(...args);
+    assert.equal(result.code, 0, `${args.join(' ')}: ${result.stderr}`);
+    assert.equal(result.stdout.trimEnd().split('\n').length, 1, args.join(' '));
+    assert.doesNotThrow(() => JSON.parse(result.stdout), args.join(' '));
+  }
+  const contract = runWithoutLogin('--contract');
+  assert.equal(contract.stdout.trimEnd().split('\n').length, 1);
 });
 
 // ---------------------------------------------------------------- attachments
@@ -1117,7 +1259,10 @@ test('publish takes no arguments — there is one way to get a url, and it is pu
 test('publish with no overview yet says what to do first', () => {
   const box = sandboxWithClaude('ok', ARTIFACT);
   const result = box.run('publish');
-  assert.equal(result.code, 1);
+  // 5, "setup required — do not retry unchanged". It was 1, which says a source
+  // is down and a retry may help; no retry writes the overview `publish` needs.
+  assert.equal(result.code, 5);
+  assert.equal(errorLineOf(result.stderr).code, 'SETUP');
   assert.ok(result.stderr.includes(cmd('new')), result.stderr);
 });
 

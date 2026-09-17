@@ -14,6 +14,7 @@
  */
 
 import type { AulaClient } from './client.ts';
+import { CliError } from './errors.ts';
 import { remoteReadSignal } from './transport.ts';
 import type { ProfileContext } from './types.ts';
 import { errorMessage } from './validation.ts';
@@ -135,11 +136,13 @@ export const WIDGET_ENDPOINTS: Readonly<Record<string, 'GET' | 'POST'>> = Object
   'https://systematic-momo.dk/api/aula/reminders/v1': 'GET',
 });
 
-export class WidgetError extends Error {
+export class WidgetError extends CliError {
   readonly widgetId: string;
   readonly status: number | undefined;
   constructor(widgetId: string, message: string, status?: number) {
-    super(message);
+    // A third-party school system answered with an error, or with a payload
+    // this client cannot read: the vendor's fault, not Aula's and not ours.
+    super('UPSTREAM', message);
     this.name = 'WidgetError';
     this.widgetId = widgetId;
     if (status !== undefined) this.status = status;

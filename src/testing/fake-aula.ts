@@ -76,6 +76,7 @@ const PROFILES = {
  *   FAKE_AULA_STALE_TOKEN=1  every widget token is rejected once as expired
  *   FAKE_AULA_REJECT_TOKEN=1 Aula will not accept the access token
  *   FAKE_AULA_DOWN=1         Aula is broken for everyone, credentials or not
+ *   FAKE_AULA_UNREACHABLE=1  no answer arrives at all, as with no network
  */
 const PROFILE_CONTEXT = {
   id: 901,
@@ -369,6 +370,13 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
 
   const method = url.searchParams.get('method') ?? '';
   record(method);
+
+  // What `fetch` does with no route to the host: it rejects, and there is no
+  // response to read a status off. Distinct from FAKE_AULA_DOWN, where Aula
+  // answers — badly.
+  if (process.env.FAKE_AULA_UNREACHABLE === '1') {
+    throw new TypeError('fetch failed');
+  }
 
   if (method === process.env.FAKE_AULA_FAIL) {
     return new Response(JSON.stringify({ status: { code: 403 }, data: null }), {
