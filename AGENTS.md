@@ -81,7 +81,13 @@ does — it was `Unknown command "--contract"`, exit 2, while the fleet's own
 instructions said each tool answers it. `src/contract.ts` *imports* the vendored
 `contract.json` rather than reading it, because the compiled binary has no
 checkout beside it (see Releasing). No `join_keys` in the output: this tool sits
-outside the join graph on purpose.
+outside the join graph on purpose. Since contract 7 the slice declares every
+agent-facing command — keys, `nested` by jq path, `nullable`, `on_exit_4`,
+`notes`, and the `error_codes` the error line can carry — and
+`src/contract.test.ts` holds each declaration to the output the code produces
+against the fake Aula, in both directions: a declared key that is missing
+fails, and an emitted object nothing declares fails. Change a shape and the
+slice, or the test says which side is wrong.
 
 **Exit 4 is returned, not just declared.** It sat in `EXIT`, the skill and the
 contract while nothing emitted it — `Object.values(EXIT)` was all that kept the

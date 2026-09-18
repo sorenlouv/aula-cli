@@ -21,11 +21,23 @@
 import fleet from '../contract.json' with { type: 'json' };
 
 /**
- * No `join_keys`, unlike `bolig`, `tinglysning` and `dgs`. Those are the DAWA
- * paths the public-register tools compose on, and this tool sits outside that
- * graph on purpose: it reads the user's own children's school, and no join key
- * leads into it. Printing the table here would suggest otherwise.
+ * The slice, and the fleet-wide sections its output is an instance of: what
+ * the error line looks like, and how stdout behaves. Without
+ * them the slice names `error_codes` and `body_on` but not what either looks
+ * like, and the agent that asked is holding a checkout-less binary with
+ * nowhere else to look.
+ *
+ * No `exit_3_body`: this tool never exits 3. No `join_keys`, unlike `bolig`,
+ * `tinglysning` and `dgs`: those are the DAWA paths the public-register tools
+ * compose on, and this tool sits outside that graph on purpose — it reads the
+ * user's own children's school, and no join key leads into it. Printing the
+ * table here would suggest otherwise.
  */
 export function contractSlice(): Record<string, unknown> {
-  return { contract: fleet.contract, ...fleet.tools.aula };
+  return {
+    contract: fleet.contract,
+    ...fleet.tools.aula,
+    error_body: fleet.error_body,
+    stdout: fleet.stdout,
+  };
 }

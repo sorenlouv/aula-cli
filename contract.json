@@ -15,7 +15,6 @@
     "Bump `contract` whenever anything below changes, and update the siblings",
     "and AGENTS.md in the same pass — that is the repos' standing agreement."
   ],
-
   "exit_codes": {
     "_note": "One table for every tool in the fleet, the account tools included. WHICH exits carry a JSON body on stdout is per tool: read body_on. Every other exit ends stderr with the error line described under error_body.",
     "0": "success — the JSON body is on stdout",
@@ -25,7 +24,6 @@
     "4": "resolved, but nothing to report. A real, final answer — record it and move on",
     "5": "setup required: credentials, a session, or a missing browser. Do not retry unchanged"
   },
-
   "exit_3_body": {
     "_note": [
       "Exit 3 used to differ by tool: bolig printed candidate objects, tinglysning",
@@ -34,20 +32,38 @@
       "like 'there were no candidates' and ends a search that should have narrowed.",
       "One shape now, on stdout, for every tool whose exit_codes include 3."
     ],
-    "keys": ["error", "query", "hint", "candidates"],
+    "keys": [
+      "error",
+      "query",
+      "hint",
+      "candidates"
+    ],
     "error": {
       "not_found": "nothing matched. `candidates` holds fuzzy did-you-mean guesses and may be empty",
       "ambiguous": "several matched. `candidates` is the narrowing list"
     },
-    "nullable": ["hint"],
+    "nullable": [
+      "hint"
+    ],
     "candidate_keys": {
       "_note": "Every candidate is an object: `label`, plus the identifier the SAME tool accepts as input, so picking one needs no second resolution.",
-      "bolig": ["label", "id", "accessAddressId"],
-      "tinglysning": ["label", "id", "accessAddressId"],
-      "cvr": ["label", "cvr", "unit"]
+      "bolig": [
+        "label",
+        "id",
+        "accessAddressId"
+      ],
+      "tinglysning": [
+        "label",
+        "id",
+        "accessAddressId"
+      ],
+      "cvr": [
+        "label",
+        "cvr",
+        "unit"
+      ]
     }
   },
-
   "error_body": {
     "_note": [
       "Every exit without a stdout body ends STDERR with one line of compact JSON.",
@@ -56,7 +72,13 @@
       "Prose and usage text may precede it; it is always the last line."
     ],
     "stream": "stderr",
-    "shape": { "error": { "code": "string", "message": "string", "hint": "string | null" } },
+    "shape": {
+      "error": {
+        "code": "string",
+        "message": "string",
+        "hint": "string | null"
+      }
+    },
     "codes": {
       "USAGE": "exit 2 — the command line is wrong; `hint` says how",
       "SETUP": "exit 5 — credentials, a session or a browser is missing. For the account tools `hint` names the offline commands that still work and says to ask the user before any login",
@@ -66,40 +88,63 @@
       "BUG": "exit 1 — this tool's own fault"
     }
   },
-
   "stdout": {
     "json": "compact (one line) when stdout is not a TTY, indented at a TTY. Pipe through `jq .` to read it.",
     "help": "`--help` prints to stdout and exits 0; a usage error prints usage to stderr and exits 2."
   },
-
   "join_keys": {
     "_note": "DAWA UUIDs at two granularities. Match on these, never on the printed address, which is lossy. Paths are keyed by command, matching tools.<tool>.commands.",
     "door": {
       "meaning": "the street door; equal for every home behind it",
       "paths": {
-        "bolig": { "default": ".address.accessAddressId" },
-        "tinglysning": { "default": ".accessAddressId" },
-        "dgs": { "search": ".people[].accessAddressId", "person": ".accessAddressId" },
-        "cvr": { "company": ".access_address_id" }
+        "bolig": {
+          "default": ".address.accessAddressId"
+        },
+        "tinglysning": {
+          "default": ".accessAddressId"
+        },
+        "dgs": {
+          "search": ".people[].accessAddressId",
+          "person": ".accessAddressId"
+        },
+        "cvr": {
+          "company": ".access_address_id"
+        }
       }
     },
     "home": {
       "meaning": "the individual dwelling; the only join that is exact in a block of flats",
       "paths": {
-        "bolig": { "default": ".address.id" },
-        "tinglysning": { "default": ".addressUnitId" },
-        "dgs": { "search": ".people[].addressUnitId", "person": ".addressUnitId" }
+        "bolig": {
+          "default": ".address.id"
+        },
+        "tinglysning": {
+          "default": ".addressUnitId"
+        },
+        "dgs": {
+          "search": ".people[].addressUnitId",
+          "person": ".addressUnitId"
+        }
       },
       "_cvr": "cvr emits no home key: the register records a floor but never a door, so a company address cannot name one dwelling."
     }
   },
-
   "tools": {
     "cvr": {
       "repo": "cvr",
       "language": "go",
-      "exit_codes": [0, 1, 2, 3, 4, 5],
-      "body_on": [0, 4],
+      "exit_codes": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "body_on": [
+        0,
+        4
+      ],
       "progress_on_stderr": false,
       "commands": {
         "company": {
@@ -132,8 +177,22 @@
             "warnings"
           ]
         },
-        "search": { "shape": "array", "item_keys": ["cvr", "name", "status", "source"] },
-        "filings": { "shape": "array", "item_keys": ["period_end", "documents"] },
+        "search": {
+          "shape": "array",
+          "item_keys": [
+            "cvr",
+            "name",
+            "status",
+            "source"
+          ]
+        },
+        "filings": {
+          "shape": "array",
+          "item_keys": [
+            "period_end",
+            "documents"
+          ]
+        },
         "financials": {
           "shape": "object",
           "keys": [
@@ -157,12 +216,21 @@
         }
       }
     },
-
     "bolig": {
       "repo": "bolig",
       "language": "typescript",
-      "exit_codes": [0, 1, 2, 3, 4],
-      "body_on": [0, 3, 4],
+      "exit_codes": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "body_on": [
+        0,
+        3,
+        4
+      ],
       "accepts_uuid": "a bare DAWA uuid in the positional argument skips resolution entirely",
       "progress_on_stderr": true,
       "commands": {
@@ -178,7 +246,9 @@
             "warnings",
             "sources"
           ],
-          "nullable": ["property"],
+          "nullable": [
+            "property"
+          ],
           "notes": {
             "warnings": "empty array is a real claim: every hop answered. Non-empty means part of the result is missing rather than absent.",
             "history": "an empty history beside a history warning is 'not looked up', not 'never traded'"
@@ -186,12 +256,22 @@
         }
       }
     },
-
     "tinglysning": {
       "repo": "tinglysning",
       "language": "typescript",
-      "exit_codes": [0, 1, 2, 3, 4, 5],
-      "body_on": [0, 3, 4],
+      "exit_codes": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "body_on": [
+        0,
+        3,
+        4
+      ],
       "progress_on_stderr": true,
       "commands": {
         "default": {
@@ -212,7 +292,12 @@
             "publicAssessment",
             "warnings"
           ],
-          "nullable": ["addressUnitId", "charges", "chargesTotal", "publicAssessment"],
+          "nullable": [
+            "addressUnitId",
+            "charges",
+            "chargesTotal",
+            "publicAssessment"
+          ],
           "_charges": [
             "What is registered AGAINST the property (Hæftelser), beside who owns it.",
             "`principal` is what the deed was REGISTERED for, never the balance still",
@@ -233,12 +318,20 @@
         }
       }
     },
-
     "dgs": {
       "repo": "dgs",
       "language": "typescript",
-      "exit_codes": [0, 1, 2, 4, 5],
-      "body_on": [0, 4],
+      "exit_codes": [
+        0,
+        1,
+        2,
+        4,
+        5
+      ],
+      "body_on": [
+        0,
+        4
+      ],
       "progress_on_stderr": true,
       "never_emits": {
         "3": "an ambiguous name is answered with a ranked list at exit 0; there is no candidate list to refine from"
@@ -246,30 +339,1242 @@
       "commands": {
         "search": {
           "shape": "object",
-          "keys": ["query", "page", "count", "hasMore", "people", "warnings"]
+          "keys": [
+            "query",
+            "page",
+            "count",
+            "hasMore",
+            "people",
+            "warnings"
+          ]
         },
         "person": {
           "shape": "object",
-          "keys": ["id", "name", "warnings"],
+          "keys": [
+            "id",
+            "name",
+            "warnings"
+          ],
           "note": "a miss emits the same envelope with found:false; a hit omits `found`",
-          "optional": ["address", "street", "postalCode", "city", "phone", "url", "accessAddressId", "addressUnitId", "givenName", "familyName", "coordinates"]
+          "optional": [
+            "address",
+            "street",
+            "postalCode",
+            "city",
+            "phone",
+            "url",
+            "accessAddressId",
+            "addressUnitId",
+            "givenName",
+            "familyName",
+            "coordinates"
+          ]
         }
       }
     },
-
     "aula": {
       "repo": "aula-cli",
       "language": "typescript",
-      "exit_codes": [0, 1, 2, 4, 5],
-      "body_on": [0, 4],
-      "_note": "aula now uses the shared table. It previously had a disjoint scheme (1 usage AND bug, 2 credentials, 3 API error), which meant a code could not be read without first knowing which tool produced it. An Aula outage is exit 1 (a source is down); expired credentials are exit 5 (run `aula login`). --json is accepted and ignored.",
+      "exit_codes": [
+        0,
+        1,
+        2,
+        4,
+        5
+      ],
+      "body_on": [
+        0,
+        4
+      ],
+      "error_codes": [
+        "USAGE",
+        "SETUP",
+        "NETWORK",
+        "UPSTREAM",
+        "BUG"
+      ],
+      "progress_on_stderr": true,
+      "_note": "The account tool: it reads the user's own children's school and daycare, logged in as the user, and sits outside the join graph on purpose — no join key leads into it, and --contract prints no join_keys. Exit 5 is a missing or rejected session, and its error line never says to log in: a login costs the user a MitID approval on their phone, and the hint names what still answers without one and says to ask the user first. Exit 4 is a read that worked and came back empty, body still printed. `doctor` is the one exit 1 that also has a body (its report). --json is accepted and ignored; JSON is the default, one line on a pipe.",
       "bridge": {
         "command": "contacts --role guardian",
-        "emits": "that guardian's address, when the family chose to share it in Aula",
+        "emits": "that guardian's `address` — `{ street, postalCode, city }`, or null — when the family chose to share it in Aula. Text, not a DAWA id: it goes to bolig or dgs as a query.",
         "boundary": "aula is only ever called with a name the USER typed. A name discovered by another tool goes to dgs or cvr, never here."
+      },
+      "commands": {
+        "digest": {
+          "shape": "object",
+          "keys": [
+            "generatedAt",
+            "fetchedAt",
+            "window",
+            "week",
+            "scope",
+            "family",
+            "attention",
+            "threads",
+            "posts",
+            "calendar",
+            "weeklyPlans",
+            "presence",
+            "fetchWarnings",
+            "calendarAvailable",
+            "collectionLimits"
+          ],
+          "nested": {
+            ".window": {
+              "keys": [
+                "from",
+                "to",
+                "days"
+              ]
+            },
+            ".scope": {
+              "keys": [
+                "child",
+                "children"
+              ],
+              "nullable": [
+                "child"
+              ]
+            },
+            ".family": {
+              "keys": [
+                "guardian",
+                "children",
+                "sessionIsSteppedUp",
+                "widgets"
+              ]
+            },
+            ".family.children[]": {
+              "keys": [
+                "name",
+                "shortName",
+                "institution"
+              ]
+            },
+            ".attention": {
+              "keys": [
+                "unreadThreads",
+                "sensitiveThreads",
+                "importantPosts",
+                "eventsAwaitingResponse",
+                "eventsWithinSevenDays"
+              ]
+            },
+            ".attention.unreadThreads[]": {
+              "keys": [
+                "id",
+                "subject"
+              ]
+            },
+            ".attention.sensitiveThreads[]": {
+              "keys": [
+                "id",
+                "subject"
+              ]
+            },
+            ".attention.importantPosts[]": {
+              "keys": [
+                "id",
+                "title"
+              ]
+            },
+            ".attention.eventsAwaitingResponse[]": {
+              "keys": [
+                "id",
+                "title",
+                "start",
+                "responseStatus",
+                "responseDeadline"
+              ],
+              "nullable": [
+                "responseStatus",
+                "responseDeadline"
+              ]
+            },
+            ".attention.eventsWithinSevenDays[]": {
+              "keys": [
+                "id",
+                "title",
+                "start",
+                "child"
+              ]
+            },
+            ".threads[]": {
+              "keys": [
+                "id",
+                "subject",
+                "unread",
+                "sensitive",
+                "muted",
+                "startedAt",
+                "lastMessageAt",
+                "institution",
+                "regarding",
+                "createdBy",
+                "latestMessagePreview",
+                "totalMessageCount",
+                "moreMessagesExist",
+                "messages",
+                "messagesUnavailable",
+                "messagesIncomplete",
+                "messageReadWarning"
+              ],
+              "nullable": [
+                "startedAt",
+                "lastMessageAt",
+                "institution",
+                "createdBy",
+                "totalMessageCount",
+                "messageReadWarning"
+              ]
+            },
+            ".threads[].messages[]": {
+              "keys": [
+                "id",
+                "at",
+                "from",
+                "fromRole",
+                "type",
+                "text",
+                "attachments"
+              ],
+              "nullable": [
+                "from",
+                "fromRole"
+              ]
+            },
+            ".threads[].messages[].attachments[]": {
+              "keys": [
+                "index",
+                "id",
+                "name",
+                "kind",
+                "link"
+              ],
+              "nullable": [
+                "index",
+                "id",
+                "link"
+              ]
+            },
+            ".posts[]": {
+              "keys": [
+                "id",
+                "title",
+                "publishedAt",
+                "expiresAt",
+                "important",
+                "author",
+                "institution",
+                "groups",
+                "commentCount",
+                "text",
+                "attachments"
+              ],
+              "nullable": [
+                "publishedAt",
+                "expiresAt",
+                "author",
+                "institution"
+              ]
+            },
+            ".posts[].attachments[]": {
+              "keys": [
+                "index",
+                "id",
+                "name",
+                "kind",
+                "link"
+              ],
+              "nullable": [
+                "index",
+                "id",
+                "link"
+              ]
+            },
+            ".calendar[]": {
+              "keys": [
+                "id",
+                "title",
+                "start",
+                "end",
+                "allDay",
+                "type",
+                "location",
+                "createdBy",
+                "institution",
+                "responseRequired",
+                "responseStatus",
+                "responseDeadline",
+                "children"
+              ],
+              "nullable": [
+                "end",
+                "type",
+                "location",
+                "createdBy",
+                "institution",
+                "responseStatus",
+                "responseDeadline"
+              ]
+            },
+            ".weeklyPlans[]": {
+              "keys": [
+                "provider",
+                "capability",
+                "widgetId",
+                "isoWeek",
+                "items",
+                "status"
+              ],
+              "optional": [
+                "warnings"
+              ]
+            },
+            ".weeklyPlans[].items[]": {
+              "keys": [],
+              "optional": [
+                "childName",
+                "date",
+                "subject",
+                "title",
+                "content",
+                "kind",
+                "url"
+              ]
+            },
+            ".presence[]": {
+              "keys": [
+                "child",
+                "institution",
+                "status",
+                "statusDanish",
+                "location",
+                "checkInTime",
+                "checkOutTime",
+                "plannedEntry",
+                "plannedExit",
+                "exitWith",
+                "comment",
+                "vacationNote"
+              ],
+              "nullable": [
+                "child",
+                "institution",
+                "location",
+                "checkInTime",
+                "checkOutTime",
+                "plannedEntry",
+                "plannedExit",
+                "exitWith",
+                "comment",
+                "vacationNote"
+              ]
+            },
+            ".collectionLimits": {
+              "keys": [
+                "posts",
+                "threads"
+              ],
+              "nullable": [
+                "posts",
+                "threads"
+              ]
+            }
+          },
+          "notes": {
+            "digest": "never exits 4 or 1 for one of its parts: a dozen reads in one payload, each degraded on its own. `fetchWarnings` names a calendar or presence read that failed (its array is then []), `calendarAvailable` says whether the calendar read worked, and `weeklyPlans[].status` says which plans are partial or failed.",
+            "fetchedAt": "when the oldest response in the payload was read from Aula; `generatedAt` is when the payload was assembled. Minutes apart means the answer came from the ten-minute cache.",
+            "attention": "the signals Aula itself flags, as a starting point and not the answer. `sessionIsSteppedUp: false` under `family` means sensitive threads may be masked or missing.",
+            "threads": "every message body is included (`messages[]`); `messagesUnavailable` is a thread Aula refused, `messagesIncomplete` a thread that lost a page, `messageReadWarning` says why. `latestMessagePreview` is cut mid-word by Aula itself.",
+            "collectionLimits": "non-null only when `--limit` cut that list: the limit that did. Null means the window bounded the read.",
+            "attachments": "an attachment is a position, never a URL: `index` is what `attachment <threadId> <index>` (numbered across the whole thread) and `post-attachment <postId> <index>` (numbered within the post) take; both save the file and print its path. `kind` is file, media or link; `link` is set only for a link, which is an ordinary web address someone pasted. `index` is null when only part of a thread was read (one --page, or messagesIncomplete true): the position cannot be known, so re-read before downloading.",
+            "weeklyPlans": "`status` is what tells a failed vendor read from a quiet week — both are `items: []`. ok: the vendor answered for every child asked. partial: items are real and `warnings` names who is missing. failed: nothing readable came back and `warnings` says why — never an empty week. skipped: the vendor was not asked, because no selected child attends a school. `provider: \"unavailable\"` is a capability that threw before any vendor answered. `items[]` keys are whatever the vendor gave: every one is optional, and `date` may be an ISO date or the vendor's own Danish label."
+          }
+        },
+        "messages": {
+          "shape": "object",
+          "keys": [
+            "threads",
+            "truncated",
+            "limit",
+            "fetchedAt"
+          ],
+          "nullable": [
+            "limit"
+          ],
+          "on_exit_4": {
+            "null": [],
+            "nullable": [
+              "limit"
+            ],
+            "empty": [
+              "threads"
+            ]
+          },
+          "nested": {
+            ".threads[]": {
+              "keys": [
+                "id",
+                "subject",
+                "unread",
+                "sensitive",
+                "muted",
+                "startedAt",
+                "lastMessageAt",
+                "institution",
+                "regarding",
+                "createdBy",
+                "latestMessagePreview"
+              ],
+              "nullable": [
+                "startedAt",
+                "lastMessageAt",
+                "institution",
+                "createdBy",
+                "totalMessageCount",
+                "messageReadWarning"
+              ],
+              "optional": [
+                "totalMessageCount",
+                "moreMessagesExist",
+                "messages",
+                "messagesUnavailable",
+                "messagesIncomplete",
+                "messageReadWarning"
+              ]
+            },
+            ".threads[].messages[]": {
+              "keys": [
+                "id",
+                "at",
+                "from",
+                "fromRole",
+                "type",
+                "text",
+                "attachments"
+              ],
+              "nullable": [
+                "from",
+                "fromRole"
+              ]
+            },
+            ".threads[].messages[].attachments[]": {
+              "keys": [
+                "index",
+                "id",
+                "name",
+                "kind",
+                "link"
+              ],
+              "nullable": [
+                "index",
+                "id",
+                "link"
+              ]
+            }
+          },
+          "notes": {
+            "envelope": "`truncated: true` means more rows matched than are here — raise --limit, or narrow with --since where the command takes it. `limit` is null when nothing capped the read (`--since` alone, or a command with no default cap). `fetchedAt` is when the oldest response in the answer was read from Aula; responses are cached ten minutes, and --no-cache makes it now.",
+            "threads": "newest first. `latestMessagePreview` is cut mid-word by Aula itself; the `optional` keys appear with --full, which reads every message (`messages[]` as in `thread`), and `messageReadWarning` is then nullable.",
+            "attachments": "an attachment is a position, never a URL: `index` is what `attachment <threadId> <index>` (numbered across the whole thread) and `post-attachment <postId> <index>` (numbered within the post) take; both save the file and print its path. `kind` is file, media or link; `link` is set only for a link, which is an ordinary web address someone pasted. `index` is null when only part of a thread was read (one --page, or messagesIncomplete true): the position cannot be known, so re-read before downloading."
+          }
+        },
+        "thread": {
+          "shape": "object",
+          "keys": [
+            "id",
+            "subject",
+            "sensitive",
+            "startedAt",
+            "totalMessageCount",
+            "moreMessagesExist",
+            "messagesIncomplete",
+            "messageReadWarning",
+            "participants",
+            "messages"
+          ],
+          "nullable": [
+            "startedAt",
+            "totalMessageCount",
+            "messagesIncomplete",
+            "messageReadWarning"
+          ],
+          "nested": {
+            ".messages[]": {
+              "keys": [
+                "id",
+                "at",
+                "from",
+                "fromRole",
+                "type",
+                "text",
+                "attachments"
+              ],
+              "nullable": [
+                "from",
+                "fromRole"
+              ]
+            },
+            ".messages[].attachments[]": {
+              "keys": [
+                "index",
+                "id",
+                "name",
+                "kind",
+                "link"
+              ],
+              "nullable": [
+                "index",
+                "id",
+                "link"
+              ]
+            }
+          },
+          "notes": {
+            "messages": "every page, in order, unless --page names one — then `messagesIncomplete` is null (one page says nothing about the rest) and every attachment `index` is null.",
+            "attachments": "an attachment is a position, never a URL: `index` is what `attachment <threadId> <index>` (numbered across the whole thread) and `post-attachment <postId> <index>` (numbered within the post) take; both save the file and print its path. `kind` is file, media or link; `link` is set only for a link, which is an ordinary web address someone pasted. `index` is null when only part of a thread was read (one --page, or messagesIncomplete true): the position cannot be known, so re-read before downloading."
+          }
+        },
+        "posts": {
+          "shape": "object",
+          "keys": [
+            "posts",
+            "truncated",
+            "limit",
+            "fetchedAt"
+          ],
+          "nullable": [
+            "limit"
+          ],
+          "on_exit_4": {
+            "null": [],
+            "nullable": [
+              "limit"
+            ],
+            "empty": [
+              "posts"
+            ]
+          },
+          "nested": {
+            ".posts[]": {
+              "keys": [
+                "id",
+                "title",
+                "publishedAt",
+                "expiresAt",
+                "important",
+                "author",
+                "institution",
+                "groups",
+                "commentCount",
+                "text",
+                "attachments"
+              ],
+              "nullable": [
+                "publishedAt",
+                "expiresAt",
+                "author",
+                "institution"
+              ]
+            },
+            ".posts[].attachments[]": {
+              "keys": [
+                "index",
+                "id",
+                "name",
+                "kind",
+                "link"
+              ],
+              "nullable": [
+                "index",
+                "id",
+                "link"
+              ]
+            }
+          },
+          "notes": {
+            "envelope": "`truncated: true` means more rows matched than are here — raise --limit, or narrow with --since where the command takes it. `limit` is null when nothing capped the read (`--since` alone, or a command with no default cap). `fetchedAt` is when the oldest response in the answer was read from Aula; responses are cached ten minutes, and --no-cache makes it now.",
+            "posts": "newest first; `important` is Aula's own flag. `groups` names who a post was shared with.",
+            "attachments": "an attachment is a position, never a URL: `index` is what `attachment <threadId> <index>` (numbered across the whole thread) and `post-attachment <postId> <index>` (numbered within the post) take; both save the file and print its path. `kind` is file, media or link; `link` is set only for a link, which is an ordinary web address someone pasted. `index` is null when only part of a thread was read (one --page, or messagesIncomplete true): the position cannot be known, so re-read before downloading."
+          }
+        },
+        "galleries": {
+          "shape": "object",
+          "keys": [
+            "albums",
+            "truncated",
+            "limit",
+            "fetchedAt"
+          ],
+          "nullable": [
+            "limit"
+          ],
+          "on_exit_4": {
+            "null": [],
+            "nullable": [
+              "limit"
+            ],
+            "empty": [
+              "albums"
+            ]
+          },
+          "nested": {
+            ".albums[]": {
+              "keys": [
+                "id",
+                "title",
+                "createdAt",
+                "description",
+                "author",
+                "institution",
+                "groups"
+              ],
+              "nullable": [
+                "id",
+                "createdAt",
+                "description",
+                "author",
+                "institution"
+              ]
+            }
+          },
+          "notes": {
+            "envelope": "`truncated: true` means more rows matched than are here — raise --limit, or narrow with --since where the command takes it. `limit` is null when nothing capped the read (`--since` alone, or a command with no default cap). `fetchedAt` is when the oldest response in the answer was read from Aula; responses are cached ten minutes, and --no-cache makes it now.",
+            "albums": "metadata only, never the photos, and no photo count: Aula's cover preview is capped at one and cannot be counted. `createdAt` is the album's creation day, usually the day of the event but it can lag a day. The synthetic id-less bucket Aula prepends is dropped."
+          }
+        },
+        "calendar": {
+          "shape": "array",
+          "item_keys": [
+            "id",
+            "title",
+            "start",
+            "end",
+            "allDay",
+            "type",
+            "location",
+            "createdBy",
+            "institution",
+            "responseRequired",
+            "responseStatus",
+            "responseDeadline",
+            "children"
+          ],
+          "item_nullable": [
+            "end",
+            "type",
+            "location",
+            "createdBy",
+            "institution",
+            "responseStatus",
+            "responseDeadline"
+          ],
+          "on_exit_4": {
+            "_note": "the body is []",
+            "null": [],
+            "nullable": [],
+            "empty": []
+          },
+          "notes": {
+            "window": "forward only: from today, --days ahead, at most 50 — Aula refuses longer windows. `children` names the family's children the event belongs to. `responseRequired` with `responseStatus` other than accepted is an invitation awaiting an answer, and this tool cannot answer it."
+          }
+        },
+        "presence": {
+          "shape": "array",
+          "item_keys": [
+            "child",
+            "institution",
+            "status",
+            "statusDanish",
+            "location",
+            "checkInTime",
+            "checkOutTime",
+            "plannedEntry",
+            "plannedExit",
+            "exitWith",
+            "comment",
+            "vacationNote"
+          ],
+          "item_nullable": [
+            "child",
+            "institution",
+            "location",
+            "checkInTime",
+            "checkOutTime",
+            "plannedEntry",
+            "plannedExit",
+            "exitWith",
+            "comment",
+            "vacationNote"
+          ],
+          "on_exit_4": {
+            "_note": "the body is []",
+            "null": [],
+            "nullable": [],
+            "empty": []
+          },
+          "notes": {
+            "status": "today only. `status` is the English gloss and `statusDanish` the label Aula's own module shows: Ikke kommet, Syg, Ferie/fri, Kommet/til stede, På tur, Sover, Gået. An institution that does not use komme/gå answers nothing (exit 4)."
+          }
+        },
+        "pickup-times": {
+          "shape": "object",
+          "keys": [
+            "window",
+            "days"
+          ],
+          "on_exit_4": {
+            "null": [],
+            "nullable": [],
+            "empty": [
+              "days"
+            ]
+          },
+          "nested": {
+            ".window": {
+              "keys": [
+                "from",
+                "to"
+              ]
+            },
+            ".days[]": {
+              "keys": [
+                "child",
+                "date",
+                "entryTime",
+                "exitTime",
+                "pickupType",
+                "exitWith",
+                "comment"
+              ],
+              "nullable": [
+                "child",
+                "date",
+                "entryTime",
+                "exitTime",
+                "pickupType",
+                "exitWith",
+                "comment"
+              ]
+            }
+          },
+          "notes": {
+            "days": "the recurring komme/gå plan a guardian registered, one row per child per day — what is planned, where `presence` is what happened today. `pickupType` is Aula's henteform in English: collected by a named person, may leave alone within a window, leaves alone at the exit time, leaves with a named person."
+          }
+        },
+        "groups": {
+          "shape": "array",
+          "item_keys": [
+            "child",
+            "childId",
+            "className",
+            "classGroupId",
+            "groups"
+          ],
+          "item_nullable": [
+            "className",
+            "classGroupId"
+          ],
+          "on_exit_4": {
+            "_note": "one row per child, each with `groups: []`",
+            "null": [],
+            "nullable": [],
+            "empty": [
+              "[].groups"
+            ]
+          },
+          "nested": {
+            "[].groups[]": {
+              "keys": [
+                "id",
+                "name"
+              ]
+            }
+          },
+          "notes": {
+            "classGroupId": "the group `contacts` and `birthdays` read by default; null when Aula does not label a class, and --group <id> then names one."
+          }
+        },
+        "contacts": {
+          "shape": "array",
+          "item_keys": [
+            "profileId",
+            "institutionProfileId",
+            "name",
+            "role",
+            "group",
+            "groupId",
+            "institution",
+            "birthday",
+            "email",
+            "mobilePhone",
+            "homePhone",
+            "address",
+            "relations"
+          ],
+          "item_nullable": [
+            "profileId",
+            "institutionProfileId",
+            "role",
+            "institution",
+            "birthday",
+            "email",
+            "mobilePhone",
+            "homePhone",
+            "address"
+          ],
+          "on_exit_4": {
+            "_note": "the body is []",
+            "null": [],
+            "nullable": [],
+            "empty": []
+          },
+          "nested": {
+            "[].address": {
+              "keys": [
+                "street",
+                "postalCode",
+                "city"
+              ],
+              "nullable": [
+                "street",
+                "postalCode",
+                "city"
+              ]
+            },
+            "[].relations[]": {
+              "keys": [
+                "profileId",
+                "name",
+                "role"
+              ],
+              "nullable": [
+                "profileId",
+                "role"
+              ]
+            }
+          },
+          "notes": {
+            "role": "--role child (the default) lists the class; --role guardian lists the parents, and is the fleet's bridge: `address` is the guardian's own, when the family chose to share it, and null otherwise. `birthday` is shared only for children, and its year may be a placeholder. `relations` are a child's guardians or a guardian's children."
+          }
+        },
+        "birthdays": {
+          "shape": "object",
+          "keys": [
+            "birthdays",
+            "truncated",
+            "limit",
+            "fetchedAt"
+          ],
+          "nullable": [
+            "limit"
+          ],
+          "on_exit_4": {
+            "null": [],
+            "nullable": [
+              "limit"
+            ],
+            "empty": [
+              "birthdays"
+            ]
+          },
+          "nested": {
+            ".birthdays[]": {
+              "keys": [
+                "name",
+                "group",
+                "date",
+                "inDays",
+                "turns"
+              ],
+              "nullable": [
+                "turns"
+              ]
+            }
+          },
+          "notes": {
+            "envelope": "`truncated: true` means more rows matched than are here — raise --limit, or narrow with --since where the command takes it. `limit` is null when nothing capped the read (`--since` alone, or a command with no default cap). `fetchedAt` is when the oldest response in the answer was read from Aula; responses are cached ten minutes, and --no-cache makes it now.",
+            "birthdays": "classmates whose guardians shared a birthday, soonest first. `date` is MM-DD (Aula shares day and month only); `turns` is null when the year is a placeholder."
+          }
+        },
+        "notifications": {
+          "shape": "array",
+          "item_keys": [
+            "type",
+            "area",
+            "child",
+            "institution",
+            "threadId",
+            "postId",
+            "triggered"
+          ],
+          "item_nullable": [
+            "child",
+            "threadId",
+            "postId",
+            "triggered"
+          ],
+          "on_exit_4": {
+            "_note": "the body is []",
+            "null": [],
+            "nullable": [],
+            "empty": []
+          },
+          "notes": {
+            "type": "the badges Aula is showing right now; `type` is Aula's notificationEventType (NewMedia dominates)."
+          }
+        },
+        "attachments": {
+          "shape": "object",
+          "keys": [
+            "attachments",
+            "messagesIncomplete",
+            "messageReadWarning"
+          ],
+          "nullable": [
+            "messageReadWarning"
+          ],
+          "on_exit_4": {
+            "null": [
+              "messageReadWarning"
+            ],
+            "nullable": [],
+            "empty": [
+              "attachments"
+            ]
+          },
+          "nested": {
+            ".attachments[]": {
+              "keys": [
+                "index",
+                "id",
+                "name",
+                "kind",
+                "link",
+                "from",
+                "at"
+              ],
+              "nullable": [
+                "index",
+                "id",
+                "link",
+                "from",
+                "at"
+              ]
+            }
+          },
+          "notes": {
+            "attachments": "every attachment in the thread, in message order, with who sent it and when. an attachment is a position, never a URL: `index` is what `attachment <threadId> <index>` (numbered across the whole thread) and `post-attachment <postId> <index>` (numbered within the post) take; both save the file and print its path. `kind` is file, media or link; `link` is set only for a link, which is an ordinary web address someone pasted. `index` is null when only part of a thread was read (one --page, or messagesIncomplete true): the position cannot be known, so re-read before downloading. Exit 4 only when the whole thread was read and holds none; a read that lost a page (`messagesIncomplete: true`) is exit 0 with what it found."
+          }
+        },
+        "attachment": {
+          "shape": "object",
+          "keys": [
+            "path",
+            "bytes",
+            "filename",
+            "mediaType"
+          ],
+          "nullable": [
+            "mediaType"
+          ],
+          "notes": {
+            "path": "the file, downloaded in-process from the presigned URL and saved under ~/.aula/attachments unless --out names a path. Read a PDF with `pdftotext -layout`. A link (kind link) has no bytes and is refused as a usage error."
+          }
+        },
+        "post-attachment": {
+          "shape": "object",
+          "keys": [
+            "path",
+            "bytes",
+            "filename",
+            "mediaType"
+          ],
+          "nullable": [
+            "mediaType"
+          ],
+          "notes": {
+            "path": "as `attachment`, for a post's attachment: `post-attachment <postId> [index]`, the index `posts` shows. An unknown post id, or an index the post does not have, is a usage error naming what it does have."
+          }
+        },
+        "commonfiles": {
+          "shape": "object",
+          "keys": [
+            "files",
+            "truncated",
+            "limit",
+            "fetchedAt"
+          ],
+          "nullable": [
+            "limit"
+          ],
+          "on_exit_4": {
+            "null": [],
+            "nullable": [
+              "limit"
+            ],
+            "empty": [
+              "files"
+            ]
+          },
+          "nested": {
+            ".files[]": {
+              "keys": [
+                "id",
+                "title",
+                "filename",
+                "created",
+                "institution",
+                "uploadedBy",
+                "status",
+                "groups"
+              ],
+              "nullable": [
+                "filename",
+                "created",
+                "institution",
+                "uploadedBy",
+                "status"
+              ]
+            }
+          },
+          "notes": {
+            "envelope": "`truncated: true` means more rows matched than are here — raise --limit, or narrow with --since where the command takes it. `limit` is null when nothing capped the read (`--since` alone, or a command with no default cap). `fetchedAt` is when the oldest response in the answer was read from Aula; responses are cached ten minutes, and --no-cache makes it now.",
+            "files": "Fælles Filer, newest first: timetables (skema), holiday plans, policies. No URL: `commonfile <id|text from the title>` downloads one. `status` other than available is a file the virus scan has not passed, which cannot be fetched yet."
+          }
+        },
+        "commonfile": {
+          "shape": "object",
+          "keys": [
+            "path",
+            "bytes",
+            "filename",
+            "mediaType"
+          ],
+          "nullable": [
+            "mediaType"
+          ],
+          "notes": {
+            "path": "as `attachment`, for a shared file. An ambiguous title is refused with the candidates rather than guessed at — the shelf holds near-identical names across years."
+          }
+        },
+        "widgets": {
+          "shape": "array",
+          "item_keys": [
+            "widgetId",
+            "name",
+            "provider",
+            "capability",
+            "supported"
+          ],
+          "item_nullable": [
+            "provider",
+            "capability"
+          ],
+          "on_exit_4": {
+            "_note": "the body is []",
+            "null": [],
+            "nullable": [],
+            "empty": []
+          },
+          "notes": {
+            "supported": "which vendor widgets the family's institutions expose, and whether this tool has an integration for each (`supported`). `capability` is what the integration answers: weekly-plan, weekly-letter, tasks, assignments or reminders."
+          }
+        },
+        "weekly-plan": {
+          "shape": "array",
+          "item_keys": [
+            "provider",
+            "capability",
+            "widgetId",
+            "isoWeek",
+            "items",
+            "status"
+          ],
+          "item_optional": [
+            "warnings"
+          ],
+          "on_exit_4": {
+            "_note": "one plan per vendor, each with `items: []` and status ok or skipped; [] when no vendor serves the capability",
+            "null": [],
+            "nullable": [],
+            "empty": [
+              "[].items"
+            ]
+          },
+          "nested": {
+            "[].items[]": {
+              "keys": [],
+              "optional": [
+                "childName",
+                "date",
+                "subject",
+                "title",
+                "content",
+                "kind",
+                "url"
+              ]
+            }
+          },
+          "notes": {
+            "plans": "one plan per vendor that serves the capability, for --week (this ISO week by default; --next for next). The same shape for weekly-letter, tasks, assignments, reminders and homework (which reads the three homework capabilities at once). Exit 1 with no body when nothing readable came back and a vendor failed; the vendor's reason is on stderr, and a failed read is never cached. `status` is what tells a failed vendor read from a quiet week — both are `items: []`. ok: the vendor answered for every child asked. partial: items are real and `warnings` names who is missing. failed: nothing readable came back and `warnings` says why — never an empty week. skipped: the vendor was not asked, because no selected child attends a school. `provider: \"unavailable\"` is a capability that threw before any vendor answered. `items[]` keys are whatever the vendor gave: every one is optional, and `date` may be an ISO date or the vendor's own Danish label."
+          }
+        },
+        "whoami": {
+          "shape": "object",
+          "keys": [
+            "guardian",
+            "children",
+            "institutions",
+            "postInstitutionProfileIds",
+            "childInstitutionProfileIds",
+            "institutionCodes",
+            "widgets",
+            "isSteppedUp",
+            "mitidUsername"
+          ],
+          "nullable": [
+            "mitidUsername"
+          ],
+          "nested": {
+            ".guardian": {
+              "keys": [
+                "profileId",
+                "userId",
+                "name",
+                "institutionProfileIds"
+              ]
+            },
+            ".children[]": {
+              "keys": [
+                "id",
+                "profileId",
+                "name",
+                "shortName",
+                "institutionCode",
+                "institutionName"
+              ],
+              "optional": [
+                "userId",
+                "institutionType",
+                "mainGroupName",
+                "institutionProfile"
+              ]
+            },
+            ".institutions[]": {
+              "keys": [
+                "institutionCode",
+                "institutionName",
+                "institutionProfileId",
+                "groups"
+              ],
+              "optional": [
+                "institutionType"
+              ]
+            },
+            ".institutions[].groups[]": {
+              "keys": [
+                "id",
+                "name"
+              ]
+            },
+            ".widgets[]": {
+              "keys": [
+                "widgetId",
+                "name"
+              ],
+              "optional": [
+                "provider",
+                "capability",
+                "needsMitidUsername"
+              ]
+            }
+          },
+          "notes": {
+            "ids": "the four id spaces Aula uses, resolved once: a child's `id` is the institution-profile id nearly every endpoint wants, `profileId` the person, `userId` the token the vendor widgets key on. `isSteppedUp: false` means sensitive threads may be masked or missing — `refresh-stepup` restores it while the broker session lives. `mitidUsername` is what Meebook, Systematic and SkolePortal key their session on; null means those vendors fall back to the guardian id and say so in `warnings`."
+          }
+        },
+        "status": {
+          "shape": "object",
+          "keys": [
+            "loggedIn",
+            "username",
+            "identityName",
+            "session",
+            "tokens",
+            "tokenStore",
+            "tokenKeyFromEnv",
+            "cookieJar"
+          ],
+          "nullable": [
+            "username",
+            "identityName",
+            "session",
+            "tokens",
+            "cookieJar"
+          ],
+          "nested": {
+            ".session": {
+              "keys": [
+                "state",
+                "checkedAt",
+                "steppedUp"
+              ],
+              "nullable": [
+                "steppedUp"
+              ]
+            },
+            ".tokens": {
+              "keys": [
+                "issuedAt",
+                "accessTokenExpiresAt",
+                "accessTokenExpired"
+              ]
+            }
+          },
+          "notes": {
+            "session": "answered from disk, with no request and no token refresh, so it can run beside anything. `session` is Aula's last verdict on the stored login — state accepted or rejected, when, and whether the session was stepped up (null when not yet observed) — or null when no command has reached Aula with it. An expired access token is renewed silently by the next read and is never a reason to log in; a rejected state, or exit 5 from a read, is — and a login is the user's to agree to. Aula publishes no lifetime for the refresh token or for step-up, so `checkedAt` is the honest substitute."
+          }
+        },
+        "doctor": {
+          "shape": "object",
+          "keys": [
+            "ok",
+            "generatedAt",
+            "apiVersion",
+            "summary",
+            "checks"
+          ],
+          "nested": {
+            ".summary": {
+              "keys": [
+                "passed",
+                "warned",
+                "skipped",
+                "failed",
+                "totalMs"
+              ]
+            },
+            ".checks[]": {
+              "keys": [
+                "name",
+                "status",
+                "ms",
+                "detail"
+              ],
+              "optional": [
+                "note"
+              ]
+            }
+          },
+          "notes": {
+            "checks": "every endpoint called for real, never from cache. `status` is ok, warn, skip or fail; warn is a call that worked but answered something API.md names as a known symptom (an empty feed from a wrong id set, a session that is not stepped up), and `note` says what it will do to your output. The report is on stdout on exit 1 as well — the one exit 1 in this tool with a body — and the error line still closes stderr."
+          }
+        }
       }
     },
-
     "vurderingsportalen": {
       "repo": "vurderingsportalen",
       "archived": true,

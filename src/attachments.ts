@@ -130,7 +130,7 @@ export type DownloadResult = {
   path: string;
   bytes: number;
   filename: string;
-  mediaType?: string;
+  mediaType: string | null;
 };
 
 export async function downloadAttachment(opts: {
@@ -176,12 +176,11 @@ export async function downloadAttachment(opts: {
   // Same reasoning as the session file: this is personal data about children.
   writeFileSync(path, bytes, { mode: 0o600 });
 
-  const mediaType = res.headers.get('content-type') ?? opts.attachment.mediaType;
   return {
     path,
     bytes: bytes.byteLength,
     filename,
-    ...(mediaType ? { mediaType } : {}),
+    mediaType: res.headers.get('content-type') ?? opts.attachment.mediaType ?? null,
   };
 }
 

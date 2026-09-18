@@ -378,7 +378,9 @@ async function main(): Promise<number> {
 
     case 'whoami': {
       const family = await resolveFamily(client);
-      return emit(family, asText, renderWhoami);
+      // Every key present, null when unset: `undefined` drops out of JSON, and
+      // a key that is sometimes absent is one a reader has to guess about.
+      return emit({ ...family, mitidUsername: family.mitidUsername ?? null }, asText, renderWhoami);
     }
 
     case 'messages': {
@@ -412,8 +414,8 @@ async function main(): Promise<number> {
         id: detail.id,
         subject: detail.subject ?? '(no subject)',
         sensitive: detail.sensitive,
-        startedAt: detail.threadStartedDateTime,
-        totalMessageCount: detail.totalMessageCount,
+        startedAt: detail.threadStartedDateTime ?? null,
+        totalMessageCount: detail.totalMessageCount ?? null,
         moreMessagesExist: detail.moreMessagesExist,
         messagesIncomplete: page === undefined ? Boolean(detail.moreMessagesExist) : null,
         messageReadWarning:
@@ -1537,7 +1539,9 @@ function parseContactRole(raw: string | undefined): 'child' | 'guardian' {
 
 // ---------------------------------------------------------------- rendering
 
-function renderWhoami(family: Family): string {
+function renderWhoami(
+  family: Omit<Family, 'mitidUsername'> & { mitidUsername: string | null },
+): string {
   const lines = [
     `Guardian: ${family.guardian.name} (${family.guardian.userId})`,
     `Session stepped up: ${family.isSteppedUp} ${family.isSteppedUp ? '' : '(sensitive threads will be unreadable)'}`,

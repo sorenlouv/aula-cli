@@ -581,7 +581,7 @@ export async function withFullMessages(client: AulaClient, threads: ThreadSummar
     if (!detail) {
       return {
         ...base,
-        totalMessageCount: undefined,
+        totalMessageCount: null,
         moreMessagesExist: false,
         messages: emptyMessages(),
         messagesUnavailable: true,
@@ -591,7 +591,7 @@ export async function withFullMessages(client: AulaClient, threads: ThreadSummar
     }
     return {
       ...base,
-      totalMessageCount: detail.totalMessageCount,
+      totalMessageCount: detail.totalMessageCount ?? null,
       moreMessagesExist: detail.incomplete,
       messages: normaliseMessages(detail.messages, { wholeThread: !detail.incomplete }),
       messagesUnavailable: false,

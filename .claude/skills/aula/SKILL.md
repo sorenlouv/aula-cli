@@ -396,8 +396,11 @@ whose report is still there when a check failed.
 JSON on stdout is a single line when you run it; pipe it through `jq` to query
 or read it.
 
-`aula --contract` prints the same table as JSON — the codes this tool can
-return and which of them carry a body on stdout — with no login and no request.
+`aula --contract` prints what this tool emits, as JSON, with no login and no
+request: the exit codes and which carry a body, the error line's shape and
+codes, and under `commands` every read command's top-level keys, what is inside
+them (`nested`, by jq path), which are nullable, what the exit-4 body looks
+like, and `notes` on reading them. Ask it rather than guessing at a key.
 
 **Exit 4 is not a failure.** A read that worked and came back empty — no unread
 threads, no albums in the window, a school with no weekly-letter widget — exits
