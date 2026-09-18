@@ -181,10 +181,25 @@ read `weeklyPlans[].status` there, and a plan whose `provider` is
 
 `raw <method> [k=v ...]` reaches any Aula *read* method that has no wrapper.
 
-Options: `--text`, `--limit <n>`, `--since <7d|3w|2026-08-01>`,
-`--child <name|shortName|id>`, `--days <n>`, `--week`, `--next`, `--full`,
-`--unread`, `--important`, `--group <id>`, `--out <path>`, `--no-cache`,
-`--cache-ttl <seconds>`.
+Options — `aula <command> --help` says which a command takes, what each
+defaults to, and what the JSON holds:
+
+| Option | Meaning |
+| --- | --- |
+| `--text` | Human-readable text instead of JSON |
+| `--limit <n>` | At most n rows; the payload says when this cut the list |
+| `--since <7d\|3w\|2026-08-01>` | Rows on or after this; lifts the default cap |
+| `--child <name\|shortName\|id>` | One child only |
+| `--days <n>` | How many days (`digest`, `calendar`, `pickup-times`; calendar at most 50) |
+| `--week <2026-W33>` / `--next` | Which ISO week a plan is read for (this week by default) |
+| `--from <YYYY-MM-DD>` / `--to <YYYY-MM-DD>` | A window, for `pickup-times` and the plan commands |
+| `--full` | Every message body, not only the preview Aula cuts short |
+| `--unread` / `--important` | Unread threads only / posts Aula flags important only |
+| `--page <n>` | One page of a thread instead of all of it (attachment `index` is then null) |
+| `--group <id>` / `--role <child\|guardian>` | Which contact list: a group from `groups`, and which side of it |
+| `--widget <id>` | Read one vendor widget directly, bypassing detection |
+| `--out <path>` | Where a download is written |
+| `--no-cache` / `--cache-ttl <seconds>` | Read from Aula regardless of the cache / how old a cached response may be (600) |
 
 **A list says when it was cut, and you must read that.** Every command that
 takes `--limit` — `messages`, `posts`, `galleries`, `commonfiles`, `birthdays` —
@@ -263,7 +278,8 @@ and the daily brief get their sense of what matters.
 
 - **Never edit `preferences.md` yourself, and never put these wishes in
   `CLAUDE.md` or your own memory instead.** The daily brief runs `claude -p`
-  with no tools at 06:30; this file is the only channel that reaches it. A
+  with no tools at the slot times; this file is the only channel that reaches
+  it. A
   preference recorded anywhere else silently does nothing. `remember` also
   catches duplicates and keeps the format the brief can read.
 
@@ -331,11 +347,12 @@ layout. `--no-llm` produces a rules-only page. `aula open` shows the
 newest page without regenerating, and
 `open --web` opens the hosted copy where one is configured — `aula
 publish` sets that up (it publishes the newest page and saves the URL in
-`~/.aula/config.json`; `publish --off` stops it). A
-weekday-morning schedule is installed with `aula schedule` (06:30 by
-default, `--at HH:MM` to change, `--remove` to stop; launchd on macOS, Task
-Scheduler on Windows; it retries through the morning if the Mac was asleep).
-Offer both — don't install or publish unasked.
+`~/.aula/config.json`; `publish --off` stops it). `aula schedule` generates
+it automatically at 06:00 and 18:00, every day of the week (`--at HH:MM,HH:MM`
+to change the slot times, `--remove` to stop; launchd on macOS, Task Scheduler
+on Windows); a slot missed because the Mac was off or asleep is caught up
+within minutes of the next wake. Offer both — don't install or publish
+unasked.
 
 ## Session handling
 
@@ -375,7 +392,7 @@ a code without knowing which tool it came from:
 | Code | Meaning | What to do |
 | --- | --- | --- |
 | 0 | success | use the JSON on stdout |
-| 1 | Aula is down or blocking, or a bug in this client | retry later; a stack trace means a bug |
+| 1 | Aula or a vendor is down, or a bug in this client | retry later, unless the error line's code is `BUG` |
 | 2 | usage error | fix the command line |
 | 4 | resolved, but nothing to report | a real answer — the JSON is still on stdout; record it and move on |
 | 5 | no usable session, or setup | never retry unchanged; ask the user before any `aula login` |
@@ -406,8 +423,8 @@ like, and `notes` on reading them. Ask it rather than guessing at a key.
 threads, no albums in the window, a school with no weekly-letter widget — exits
 4 with its usual JSON on stdout (`[]`, or `{ "threads": [], … }`). Say that there
 was nothing; do not retry, and do not treat the non-zero code as an error.
-`digest` never exits 4. A weekly plan whose `warnings` are non-empty is never 4
-either: that is a fetch that failed, not an empty week.
+`digest` never exits 4. A weekly plan whose `status` is `failed` is never 4
+either: that is a fetch that failed, not an empty week, and it exits 1.
 
 `raw` with a method name the read-only guard refuses, or one Aula does not have,
 is exit 2 — fix the name rather than retrying.

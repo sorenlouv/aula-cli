@@ -106,6 +106,9 @@ const COMMAND_OPTIONS = {
 
 export type CliCommand = keyof typeof COMMAND_OPTIONS;
 
+/** Every command the parser knows, off the table that enforces it. */
+export const CLI_COMMANDS = Object.keys(COMMAND_OPTIONS) as CliCommand[];
+
 /**
  * What each option takes and means, for `aula <command> --help`.
  *
