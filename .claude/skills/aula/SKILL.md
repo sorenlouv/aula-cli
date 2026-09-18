@@ -383,6 +383,7 @@ Every read of Aula needs one. These still answer without one:
 | `aula status` | what is stored, and what Aula last said about it — no request is made |
 | `aula preferences` | what the overview is written to (`remember` / `forget` work too) |
 | `aula --contract` | what this tool emits |
+| `aula --upstream` | how to read Aula directly, for what this tool does not wrap |
 
 `status` answers from disk alone. `session` is Aula's last verdict on the
 stored login — `{ state: "accepted" | "rejected", checkedAt, steppedUp }`, or

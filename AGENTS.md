@@ -556,15 +556,13 @@ reported as a flag no command takes.
 
 ## Finding an unwrapped endpoint
 
-The recipe below is in `UPSTREAM.md` too, for the reader without this checkout.
-Read the method names out of Aula's bundle rather than guessing:
+**The recipe lives in `UPSTREAM.md` §7**, not here. It was in both, and two
+copies of a shell pipeline is how one of them quietly stops working — the one
+that ships is the copy an agent runs, so that is the copy to keep. Read it with
+`aula --upstream`, or open the file.
 
-```bash
-curl -s https://www.aula.dk/portal/ -o portal.html
-grep -oE 'src="/static/js/[^"]*"' portal.html | sed 's/src="//;s/"//' | while read -r p; do curl -s "https://www.aula.dk$p" -O; done
-grep -ohoE '\?method=[a-zA-Z]+\.[a-zA-Z]+' ./*.js | sed 's/?method=//' | sort -u   # 304 methods
-```
-
-The store action shows the request; the component builds the params (grep the
-`mapActions` alias, e.g. `ACTION_GET_COMMON_FILES_LIST,append`). `raw <method>
-k=v` confirms a guess; a wrong parameter set returns status `40` with no detail.
+The half that is genuinely for someone with the checkout: the bundle grep gives
+you method *names*, not parameters. In the browser's devtools the store action
+shows the request and the component builds the params — grep the `mapActions`
+alias, e.g. `ACTION_GET_COMMON_FILES_LIST,append`. `raw <method> k=v` confirms a
+guess; a wrong parameter set returns status `40` with no detail about which one.

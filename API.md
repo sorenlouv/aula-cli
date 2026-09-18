@@ -3,7 +3,17 @@
 Reverse-engineered; observed behaviour, not contract. Re-checked against the
 live API on 2026-08-22. Project rules are in [AGENTS.md](AGENTS.md).
 
-Base URL `https://www.aula.dk/api/v{N}/`, currently **v24**. Every response is
+**This file is the deep reference, for whoever has the checkout.**
+[UPSTREAM.md](UPSTREAM.md) is the subset that ships inside the binary and is
+what an agent reads (`aula --upstream`); `src/upstream.test.ts` holds it to the
+code, and nothing holds this file. So when the wire moves, change this file and
+run the suite — the drift test is what will tell you whether the shipped copy
+needs it too. Where the two overlap, this one goes further; where they disagree,
+the drift test decides.
+
+Base URL `https://www.aula.dk/api/v{N}/`. The version the client starts from is
+`FALLBACK_API_VERSION` in `src/client.ts` — read it there rather than from a
+number written here, which is how this line went stale before. Every response is
 wrapped `{ "status": { "code", "message", "subCode", "errorInformation" },
 "data", "trace" }`; only `code` is reliable, `message` is usually empty.
 
@@ -17,7 +27,9 @@ wrapped `{ "status": { "code", "message", "subCode", "errorInformation" },
   albums from institutions the family has *left*.
 - Sensitive threads without step-up: masked or missing, code `0`.
 - A vendor weekly plan that failed: `items: []` with a `warnings` entry — the
-  shape of a quiet week.
+  shape of a quiet week. Handled since `graded` in `integrations/index.ts`
+  stamps every plan `ok`/`partial`/`failed`/`skipped`; do not reintroduce a
+  reader that infers the difference from whether `warnings` is empty.
 - Thread lists: bodies truncated mid-word, no marker.
 
 ## Session bootstrap
@@ -111,7 +123,12 @@ sessions on it; `login` records it on the stored token record.
 | `aulaToken.getAulaToken` | GET | `widgetId`; a fresh JWT each call, accepted by the vendor API |
 
 Array parameters are PHP-style repeated keys: `childIds[]=1&childIds[]=2`; a
-comma-joined value is code `40`.
+comma-joined value is code `40`. That is the shape on the wire, not the shape
+you type: `raw` builds the brackets, so it takes a repeated **bare** key —
+`raw presence.getDailyOverview childIds=11 childIds=22`. Typing the brackets
+yourself sends `childIds[][]`, and a wrong id set comes back as an empty list at
+code `0` rather than as an error. `UPSTREAM.md` §6 has this where an agent
+without the checkout will find it.
 
 **Calendar.** The only POST, and it reads; needs `Csrfp-Token` from the jar (a
 GET is `400`/`40`). Window capped at exactly 50 days (51 → `403`/`403`); the
