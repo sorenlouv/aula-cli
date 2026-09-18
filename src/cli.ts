@@ -4,8 +4,11 @@ import { join } from 'node:path';
 import { downloadAttachment, listAttachments, type ResolvedAttachment } from './attachments.ts';
 import {
   type CliCommand,
+  COMMAND_SUMMARY,
   isCliCommand,
-  optionsFor,
+  OPTION_DEFAULTS,
+  OPTION_HELP,
+  optionNamesFor,
   parseCommandLine,
   usageFor,
 } from './cli-options.ts';
@@ -857,17 +860,74 @@ async function main(): Promise<number> {
 // ------------------------------------------------------------------ commands
 
 /**
- * What one command accepts, straight from the same table that enforces it —
- * so the help can never drift from what the parser will actually allow.
+ * `aula <command> --help`: what it does, what each option takes and defaults
+ * to, what the JSON holds, and how it exits.
+ *
+ * The options come from the same table that enforces them and the output keys
+ * from the contract slice the tests hold the code to, so neither can drift from
+ * what the command actually does. It used to print option names alone —
+ * `--role` with no word on what it took, and nothing on what came back.
  */
 function commandHelp(command: CliCommand): string {
-  const options = optionsFor(command);
+  const names = optionNamesFor(command);
+  const defaults = OPTION_DEFAULTS[command] ?? {};
+  const spelled = names.map((name) => {
+    const meta = OPTION_HELP[name];
+    return { flag: `--${name}${meta.value ? ` ${meta.value}` : ''}`, name, meta };
+  });
+  const width = Math.max(0, ...spelled.map((o) => o.flag.length));
+  const options = spelled.map(({ flag, name, meta }) => {
+    const fallback =
+      defaults[name] ??
+      (name === 'cache-ttl'
+        ? `${DEFAULT_TTL_MS / 1000}`
+        : name === 'week'
+          ? 'this week'
+          : undefined);
+    return `  ${flag.padEnd(width)}   ${meta.help}${fallback ? ` (default ${fallback})` : ''}`;
+  });
+
+  const shape = contractSlice().commands as Record<string, CommandShape> | undefined;
+  const declared = shape?.[command];
+  const output = declared ? describeOutput(declared) : ['  Text, for a person.'];
+
   return [
-    `Usage: ${cmd(usageFor(command))}`,
-    options.length > 0 ? `Options: ${options.join(' ')}` : 'Takes no options.',
+    `Usage: ${cmd(usageFor(command))}${names.length ? ' [options]' : ''}`,
     '',
-    `Run \`${cmd('--help')}\` for every command.`,
+    COMMAND_SUMMARY[command],
+    '',
+    ...(options.length ? ['Options:', ...options] : ['Takes no options.']),
+    '',
+    'Output:',
+    ...output,
+    '',
+    'Exit: 0 with the body · 4 nothing to report, body still printed · 1 Aula or a vendor',
+    'down, or a bug · 2 usage · 5 no usable session. On 1, 2 and 5 the last line of stderr',
+    `is {"error":{"code","message","hint"}}. \`${cmd('--contract')}\` has every shape and note.`,
   ].join('\n');
+}
+
+type CommandShape = {
+  shape: 'object' | 'array';
+  keys?: string[];
+  optional?: string[];
+  item_keys?: string[];
+  item_optional?: string[];
+  nested?: Record<string, { keys: string[]; optional?: string[] }>;
+};
+
+/** The JSON a command prints, as the slice declares it: top-level keys, then what is inside. */
+function describeOutput(declared: CommandShape): string[] {
+  const list = (keys: string[] = [], optional: string[] = []) =>
+    [...keys, ...optional.map((key) => `${key}?`)].join(', ');
+  const head =
+    declared.shape === 'array'
+      ? `  JSON array; each item: ${list(declared.item_keys, declared.item_optional)}`
+      : `  JSON object: ${list(declared.keys, declared.optional)}`;
+  const nested = Object.entries(declared.nested ?? {}).map(
+    ([path, inside]) => `  ${path}: ${list(inside.keys, inside.optional)}`,
+  );
+  return [head, ...nested, '  (a trailing ? marks a key that may be absent)'];
 }
 
 function runCache(positionals: string[], asText: boolean, ttlMs: number): number {

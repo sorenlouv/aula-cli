@@ -106,6 +106,110 @@ const COMMAND_OPTIONS = {
 
 export type CliCommand = keyof typeof COMMAND_OPTIONS;
 
+/**
+ * What each option takes and means, for `aula <command> --help`.
+ *
+ * Keyed on the same names as {@link OPTION_DEFINITIONS} and typed `Record`, so
+ * an option added without help text fails to compile. The help used to list
+ * names alone — `--role` with no word on what it took — which told an agent
+ * that the flag existed and nothing it could act on.
+ */
+export const OPTION_HELP: Readonly<Record<OptionName, { value?: string; help: string }>> = {
+  text: { help: 'Human-readable text instead of JSON' },
+  json: { help: 'Accepted and ignored: JSON is already the default' },
+  full: { help: 'Every message body, not only the preview Aula cuts short' },
+  unread: { help: 'Unread threads only' },
+  important: { help: 'Posts Aula flags as important only' },
+  next: { help: 'Next ISO week instead of this one' },
+  limit: { value: '<n>', help: 'At most n rows; the payload says when this cut the list' },
+  since: { value: '<7d|3w|2026-08-01>', help: 'Rows on or after this; lifts the default cap' },
+  child: { value: '<name|shortName|id>', help: 'One child only' },
+  days: { value: '<n>', help: 'How many days' },
+  page: { value: '<n>', help: 'One page of the thread, 0-based, instead of all of it' },
+  week: { value: '<2026-W33>', help: 'The ISO week to read' },
+  widget: { value: '<id>', help: 'Read this vendor widget directly, bypassing detection' },
+  group: { value: '<id>', help: 'A group id from `groups`, instead of each child’s class' },
+  role: { value: '<child|guardian>', help: 'Which side of the contact list' },
+  from: { value: '<YYYY-MM-DD>', help: 'Start of the window' },
+  to: { value: '<YYYY-MM-DD>', help: 'End of the window' },
+  out: { value: '<path>', help: 'Where to write' },
+  'no-llm': { help: 'Danish rules only — skip the model calls' },
+  'no-deploy': { help: 'Do not update the hosted copy this run' },
+  'no-open': { help: 'Do not open a browser' },
+  'catch-up': { help: 'Do nothing if this slot’s overview is already complete' },
+  web: { help: 'The hosted copy instead of the local page' },
+  off: { help: 'Stop updating the hosted copy and forget its URL' },
+  remove: { help: 'Remove the schedule' },
+  at: { value: '<HH:MM,HH:MM>', help: 'The slot times' },
+  explain: { help: 'Print model priority, date placement and sources' },
+  pdf: { help: 'Also write a PDF' },
+  png: { help: 'Also write a PNG' },
+  'no-cache': { help: 'Read from Aula even when a cached response is younger than the TTL' },
+  'cache-ttl': { value: '<seconds>', help: 'How old a cached response may be' },
+  debug: { help: 'Write a sanitised wire transcript' },
+};
+
+/** One line per command: what it is for. Typed `Record` so no command lacks one. */
+export const COMMAND_SUMMARY: Readonly<Record<CliCommand, string>> = {
+  cache: 'What is cached (`status`, the default) or drop it all (`clear`)',
+  open: 'Open the newest overview without regenerating it',
+  publish: 'Keep a hosted copy of the overview; `--off` stops',
+  calendars: 'Which of the family’s own calendars the overview reads; `set` states the whole list',
+  remember: 'Record a standing wish about what the overview should highlight',
+  preferences: 'List those wishes; `reset` returns to the shipped list',
+  forget: 'Drop wish number n',
+  schedule: 'Generate the overview automatically at the slot times',
+  'scheduled-run':
+    'What the schedule starts: waits through sleep, then generates if this slot needs one',
+  'install-skill': 'Write the agent skill into ~/.claude (or ~/.agents for codex)',
+  version: 'Which build this is, and for which platform',
+  login: 'Log in with MitID on a page in the user’s browser; costs them an approval on their phone',
+  logout: 'Forget the stored login',
+  status: 'What is stored and what Aula last said about it — from disk, no request',
+  'refresh-stepup': 'Restore step-up without MitID, while the broker session lives',
+  doctor: 'Call every endpoint for real and report status and timing',
+  whoami: 'Guardian, children, institutions, widgets, and the id sets the API wants',
+  messages: 'Message threads, newest first; `--full` reads every message body',
+  thread: 'One thread with every message and its attachments',
+  posts: 'Posts (opslag) from the schools and daycare',
+  galleries: 'Photo albums — titles and dates, never the photos',
+  calendar: 'Upcoming Aula events, from today',
+  presence: 'Today’s check-in and check-out per child',
+  notifications: 'The unread badges Aula is showing right now',
+  'pickup-times': 'The recurring komme/gå plan: drop-off and pickup times',
+  groups: 'Which groups and classes each child belongs to',
+  contacts: 'The class contact list; `--role guardian` for the parents, with their address',
+  birthdays: 'Classmates’ birthdays, soonest first',
+  attachments: 'Every attachment in a thread, with the index `attachment` takes',
+  attachment: 'Download attachment n of a thread to a file',
+  'post-attachment': 'Download attachment n of a post to a file',
+  commonfiles: 'Fælles Filer: timetables, holiday plans, policies',
+  commonfile: 'Download one shared file, by id or by text from its title',
+  widgets: 'Which vendor widgets the schools expose, and which have an integration',
+  'weekly-plan': 'The weekly plan (ugeplan), from whichever vendor the school uses',
+  'weekly-letter': 'The weekly letter (ugebrev), MinUddannelse',
+  tasks: 'Homework: tasks (MinUddannelse)',
+  assignments: 'Homework: assignments (SkolePortal)',
+  reminders: 'Homework: reminders (Systematic)',
+  homework: 'All three homework sources in one call',
+  raw: 'Any un-wrapped Aula read method, with key=value parameters',
+  digest: 'Threads with bodies, posts, calendar, presence and weekly plans in one payload',
+  new: 'Generate today’s AI overview and open it',
+};
+
+/** Where a command’s default for an option is worth stating. */
+export const OPTION_DEFAULTS: Partial<Record<CliCommand, Partial<Record<OptionName, string>>>> = {
+  messages: { limit: '20, or none when --since is given' },
+  posts: { limit: '20, or none when --since is given' },
+  galleries: { limit: '20, or none when --since is given' },
+  digest: { days: '14' },
+  calendar: { days: '14, at most 50' },
+  'pickup-times': { days: '14' },
+  doctor: { days: '14' },
+  new: { days: '60' },
+  contacts: { role: 'child' },
+};
+
 const POSITIONALS: Partial<Record<CliCommand, { min: number; max?: number; usage: string }>> = {
   cache: { min: 0, max: 1, usage: 'cache [status|clear]' },
   open: { min: 0, max: 0, usage: 'open [--web]' },
@@ -129,6 +233,13 @@ const POSITIONALS: Partial<Record<CliCommand, { min: number; max?: number; usage
 export function optionsFor(command: CliCommand): string[] {
   return COMMAND_OPTIONS[command].map((name) => `--${name}`);
 }
+
+/** The option names `command` acts on, for help that needs more than the spelling. */
+export function optionNamesFor(command: CliCommand): readonly OptionName[] {
+  return COMMAND_OPTIONS[command];
+}
+
+export type { OptionName };
 
 /** The positional signature for `command`, for help and usage errors alike. */
 export function usageFor(command: CliCommand): string {

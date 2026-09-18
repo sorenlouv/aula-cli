@@ -189,9 +189,44 @@ test('a command prints only the options it accepts', () => {
   const help = runWithoutLogin('doctor', '--help');
   assert.equal(help.code, 0);
   assert.ok(help.stdout.includes(`Usage: ${cmd('doctor')}`), help.stdout);
-  assert.match(help.stdout, /--text --days/);
+  assert.match(help.stdout, /--text\s+Human-readable/);
+  assert.match(help.stdout, /--days <n>/);
   assert.doesNotMatch(help.stdout, /--no-cache/);
   assert.deepEqual(help.requests, []);
+});
+
+// Help used to list option names alone — `--role` with no word on what it
+// took, and nothing on what came back — which told an agent that a flag
+// existed and nothing it could act on.
+test('per-command help carries values, defaults, output keys and exits, on stdout', () => {
+  const help = runWithoutLogin('contacts', '--help');
+  assert.equal(help.code, 0);
+  assert.equal(help.stderr, '', 'help is an answer, not an error');
+  assert.match(help.stdout, /--role <child\|guardian>.*\(default child\)/);
+  assert.match(help.stdout, /--cache-ttl <seconds>.*\(default 600\)/);
+  assert.match(help.stdout, /JSON array; each item: profileId, .*address, relations/);
+  assert.match(help.stdout, /\[\]\.address: street, postalCode, city/);
+  assert.match(help.stdout, /Exit: 0 .* 4 .* 1 .* 2 .* 5/s);
+  assert.match(help.stdout, /"error":\{"code","message","hint"\}/);
+
+  const messages = runWithoutLogin('messages', '--help');
+  assert.match(messages.stdout, /--limit <n>.*default 20, or none when --since is given/);
+  assert.match(
+    messages.stdout,
+    /\.threads\[\]\.messages\[\]\.attachments\[\]: index, id, name, kind, link/,
+  );
+  assert.match(messages.stdout, /totalMessageCount\?/, 'a key that may be absent is marked');
+
+  // A command that prints text says so rather than inventing keys.
+  const login = runWithoutLogin('login', '--help');
+  assert.match(login.stdout, /Text, for a person/);
+  assert.match(login.stdout, /costs them an approval on their phone/);
+
+  // The top-level help is on stdout too, so `aula --help | grep` works.
+  const top = runWithoutLogin('--help');
+  assert.equal(top.code, 0);
+  assert.equal(top.stderr, '');
+  assert.match(top.stdout, /Usage: /);
 });
 
 // ------------------------------------------------------------------- --child
