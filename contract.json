@@ -32,36 +32,17 @@
       "like 'there were no candidates' and ends a search that should have narrowed.",
       "One shape now, on stdout, for every tool whose exit_codes include 3."
     ],
-    "keys": [
-      "error",
-      "query",
-      "hint",
-      "candidates"
-    ],
+    "keys": ["error", "query", "hint", "candidates"],
     "error": {
       "not_found": "nothing matched. `candidates` holds fuzzy did-you-mean guesses and may be empty",
       "ambiguous": "several matched. `candidates` is the narrowing list"
     },
-    "nullable": [
-      "hint"
-    ],
+    "nullable": ["hint"],
     "candidate_keys": {
       "_note": "Every candidate is an object: `label`, plus the identifier the SAME tool accepts as input, so picking one needs no second resolution.",
-      "bolig": [
-        "label",
-        "id",
-        "accessAddressId"
-      ],
-      "tinglysning": [
-        "label",
-        "id",
-        "accessAddressId"
-      ],
-      "cvr": [
-        "label",
-        "cvr",
-        "unit"
-      ]
+      "bolig": ["label", "id", "accessAddressId"],
+      "tinglysning": ["label", "id", "accessAddressId"],
+      "cvr": ["label", "cvr", "unit"]
     }
   },
   "error_body": {
@@ -90,7 +71,7 @@
   },
   "stdout": {
     "json": "compact (one line) when stdout is not a TTY, indented at a TTY. Pipe through `jq .` to read it.",
-    "help": "`--help` prints to stdout and exits 0; a usage error prints usage to stderr and exits 2."
+    "help": "`--help` prints to stdout and exits 0, and `<tool> <command> --help` prints that command's own. A usage error exits 2 and ends stderr with the error line, whose `hint` names the --help to read; usage text before it is optional, because a usage dump on every typo is tokens an agent pays for."
   },
   "join_keys": {
     "_note": "DAWA UUIDs at two granularities. Match on these, never on the printed address, which is lossy. Paths are keyed by command, matching tools.<tool>.commands.",
@@ -133,39 +114,29 @@
     "cvr": {
       "repo": "cvr",
       "language": "go",
-      "exit_codes": [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5
-      ],
-      "body_on": [
-        0,
-        4
-      ],
+      "exit_codes": [0, 1, 2, 3, 4, 5],
+      "body_on": [0, 3, 4],
+      "error_codes": ["USAGE", "SETUP", "NETWORK", "UPSTREAM", "BLOCKED", "BUG"],
       "progress_on_stderr": false,
+      "accepts_number": "wherever a command takes <query>, a CVR number may be bare (24256790), grouped with spaces or dashes (24 25 67 90), or carry its VAT prefix (DK24256790). The exit-3 body still reports the query exactly as typed.",
+      "exit_3_candidates": "Every candidate carries both ids and the one that does not apply is null. A company candidate sets `cvr`, which every <query> command takes; a person candidate (only from `person`) sets `unit`, which `cvr person --unit` takes. Companies are listed largest first, people with the most companies first. A rejected name is `not_found` with the register's fuzzy guesses as candidates; only a genuine tie between matching names is `ambiguous`.",
+      "table_output": "--format table (the default at a terminal) is for a person and is outside this contract: exits 3 and 4 then say what they have to say as prose on stderr, and stdout may be empty.",
       "commands": {
         "company": {
           "shape": "object",
-          "keys": [
-            "cvr",
-            "name",
+          "keys": ["cvr", "name", "source"],
+          "optional": [
             "status",
             "company_type",
             "address",
+            "co_name",
             "postal_code",
             "city",
-            "industry_code",
-            "industry",
-            "source"
-          ],
-          "optional": [
-            "co_name",
             "phone",
             "email",
             "website",
+            "industry_code",
+            "industry",
             "employees",
             "start_date",
             "end_date",
@@ -175,63 +146,321 @@
             "access_address_id",
             "address_match_category",
             "warnings"
-          ]
+          ],
+          "nested": {
+            ".people[]": {
+              "keys": ["name"],
+              "optional": ["unit_id", "role", "function", "organ", "from", "to", "ownership"]
+            }
+          },
+          "notes": {
+            "optional": "every key but cvr, name and source is omitted when the register holds nothing for it, so read them as `.status // empty`. `bankrupt` and `advertising_protected` are present only when true.",
+            "access_address_id": "DAWA's uuid for the street door — the fleet's join key, which bolig and tinglysning take in place of an address. Absent, with `warnings` saying why, when DAWA could not settle on exactly one door. Door granularity only: the register records a floor but never a door.",
+            "people": "present only when credentials are configured AND the lookup was by number; a lookup by name never carries it. `ownership` is the floor of a band, not a share: 0.25 means at least 25%.",
+            "source": "which register answered: cvrapi.dk or apicvr.dk without credentials, cvr-permanent with."
+          }
         },
         "search": {
           "shape": "array",
-          "item_keys": [
-            "cvr",
-            "name",
+          "item_keys": ["cvr", "name", "source"],
+          "item_optional": [
             "status",
-            "source"
-          ]
+            "company_type",
+            "address",
+            "co_name",
+            "postal_code",
+            "city",
+            "phone",
+            "email",
+            "website",
+            "industry_code",
+            "industry",
+            "employees",
+            "start_date",
+            "end_date",
+            "bankrupt",
+            "advertising_protected"
+          ],
+          "on_exit_4": {
+            "_note": "The body is the empty array itself: `.` is the whole body, in the jq grammar the other paths use.",
+            "null": [],
+            "nullable": [],
+            "empty": ["."]
+          },
+          "notes": {
+            "rows": "company records as `company` prints them, without `people`, `warnings` and the address join key: run `cvr company <cvr>` on a row for those. Names only are matched — never addresses, people or industries.",
+            "limit": "--limit caps the rows (default 20, at most 3000); the source reports no total, so a full page may be a truncated one."
+          }
         },
         "filings": {
           "shape": "array",
-          "item_keys": [
-            "period_end",
-            "documents"
-          ]
+          "item_keys": ["cvr", "type", "period_start", "period_end", "published_at", "documents"],
+          "item_optional": ["case_number"],
+          "nested": {
+            ".[].documents[]": {
+              "keys": ["type", "mime_type", "url"]
+            }
+          },
+          "on_exit_4": {
+            "_note": "The body is the empty array itself: `.` is the whole body, in the jq grammar the other paths use.",
+            "null": [],
+            "nullable": [],
+            "empty": ["."]
+          },
+          "notes": {
+            "order": "newest period first. --limit caps the rows (default 200, at most 3000).",
+            "documents": "`url` needs no credentials. mime_type application/xml, application/xhtml+xml and text/html are machine-readable XBRL, which `facts` and `financials` parse; application/pdf is the rendering a person reads; image/tiff is a scan with nothing to extract."
+          }
         },
         "financials": {
           "shape": "object",
           "keys": [
+            "mixed_currency",
             "periods",
-            "currently_profitable",
             "profitable_throughout",
+            "currently_profitable",
             "years_profitable",
-            "years_loss",
-            "mixed_currency"
+            "years_loss"
           ],
           "optional": [
-            "name",
             "cvr",
+            "name",
             "currency",
             "first_profitable_year",
             "turned_profitable",
             "note",
             "warnings",
             "fetch_errors"
-          ]
+          ],
+          "nullable": ["currently_profitable"],
+          "nested": {
+            ".periods[]": {
+              "keys": ["period_start", "period_end", "period_months"],
+              "optional": [
+                "cvr",
+                "name",
+                "basis",
+                "framework",
+                "currency",
+                "revenue",
+                "gross_profit",
+                "staff_costs",
+                "operating_profit",
+                "profit_before_tax",
+                "tax",
+                "net_profit",
+                "assets",
+                "equity",
+                "cash",
+                "liabilities",
+                "employees",
+                "wages_and_salaries",
+                "finance_income",
+                "finance_expenses",
+                "net_financials",
+                "income_from_group_enterprises",
+                "income_from_participating_interests",
+                "noncurrent_assets",
+                "current_assets",
+                "intangible_assets",
+                "goodwill",
+                "property_plant_and_equipment",
+                "longterm_investments",
+                "group_enterprises",
+                "participating_interests",
+                "shortterm_investments",
+                "shortterm_receivables",
+                "contributed_capital",
+                "retained_earnings",
+                "longterm_liabilities",
+                "shortterm_liabilities",
+                "dividend_proposed",
+                "dividend_paid",
+                "cash_flow_operating",
+                "cash_flow_investing",
+                "cash_flow_financing",
+                "scale_disputed",
+                "source_url",
+                "monthly_revenue",
+                "monthly_net_profit",
+                "monthly_gross_profit",
+                "profit_margin_pct",
+                "revenue_growth_pct"
+              ]
+            }
+          },
+          "on_exit_4": {
+            "_note": "The company resolved and has published no machine-readable statements. `note` says so.",
+            "null": ["currently_profitable"],
+            "nullable": [],
+            "empty": ["periods"]
+          },
+          "notes": {
+            "warnings": "caveats on figures that ARE present: a change of currency, basis, framework or period length, or a filing tagged at the wrong scale. Read as `(.warnings // [])`.",
+            "fetch_errors": "figures that are MISSING: a filing that could not be downloaded or read. A year absent from `periods` beside an entry here was not skipped by the company.",
+            "note": "explains an empty `periods`.",
+            "periods": "oldest first. Amounts are in `currency`, or per period in `.periods[].currency` when `mixed_currency` is true. `revenue_growth_pct` and `profit_margin_pct` are withheld across a break rather than computed through it; `scale_disputed` marks a period two filings state a power of ten apart."
+          }
+        },
+        "financials --raw": {
+          "shape": "array",
+          "item_keys": ["period_start", "period_end", "period_months"],
+          "item_optional": [
+            "cvr",
+            "name",
+            "basis",
+            "framework",
+            "currency",
+            "revenue",
+            "gross_profit",
+            "staff_costs",
+            "operating_profit",
+            "profit_before_tax",
+            "tax",
+            "net_profit",
+            "assets",
+            "equity",
+            "cash",
+            "liabilities",
+            "employees",
+            "wages_and_salaries",
+            "finance_income",
+            "finance_expenses",
+            "net_financials",
+            "income_from_group_enterprises",
+            "income_from_participating_interests",
+            "noncurrent_assets",
+            "current_assets",
+            "intangible_assets",
+            "goodwill",
+            "property_plant_and_equipment",
+            "longterm_investments",
+            "group_enterprises",
+            "participating_interests",
+            "shortterm_investments",
+            "shortterm_receivables",
+            "contributed_capital",
+            "retained_earnings",
+            "longterm_liabilities",
+            "shortterm_liabilities",
+            "dividend_proposed",
+            "dividend_paid",
+            "cash_flow_operating",
+            "cash_flow_investing",
+            "cash_flow_financing",
+            "scale_disputed",
+            "source_url"
+          ],
+          "on_exit_4": {
+            "_note": "The body is the empty array itself: `.` is the whole body, in the jq grammar the other paths use.",
+            "null": [],
+            "nullable": [],
+            "empty": ["."]
+          },
+          "notes": {
+            "rows": "the `.periods[]` of `financials` without the derived keys — and without `warnings` and `fetch_errors`, which a bare array has nowhere to carry: a filing that failed to download is reported on stderr only. Prefer `financials | jq .periods`."
+          }
+        },
+        "facts": {
+          "shape": "object",
+          "keys": ["facts"],
+          "optional": [
+            "cvr",
+            "name",
+            "filing_period_start",
+            "filing_period_end",
+            "framework",
+            "mixed_framework",
+            "source_url",
+            "notes",
+            "note",
+            "warnings"
+          ],
+          "nested": {
+            ".facts[]": {
+              "keys": ["concept", "headline", "value"],
+              "optional": [
+                "framework",
+                "period_start",
+                "period_end",
+                "instant",
+                "dimensions",
+                "unit"
+              ]
+            },
+            ".notes[]": {
+              "keys": ["concept", "text"],
+              "optional": ["period_start", "period_end", "instant"]
+            }
+          },
+          "on_exit_4": {
+            "_note": "Either nothing was readable — no filing, no XBRL, or a cover page without accounts, and `note` says which — or --concept matched nothing in the filing that was read.",
+            "null": [],
+            "nullable": [],
+            "empty": ["facts"]
+          },
+          "notes": {
+            "headline": "true when the fact is a total rather than a component of one. A concept is reported once as the total and again for every breakdown and comparative year, so select on `.headline` before reading a figure as THE figure.",
+            "dimensions": "an object mapping each breakdown axis to the member selected on it; absent on a total. Its keys are the filing's own and are not declared here.",
+            "period": "a fact carries either period_start and period_end (a duration) or instant (a balance-sheet date), never both.",
+            "notes": "tagged prose, markup stripped. Without --concept the whole filing comes out, which is large: narrow it."
+          }
+        },
+        "people": {
+          "shape": "array",
+          "item_keys": ["name"],
+          "item_optional": ["unit_id", "role", "function", "organ", "from", "to", "ownership"],
+          "on_exit_4": {
+            "_note": "The body is the empty array itself: `.` is the whole body, in the jq grammar the other paths use.",
+            "null": [],
+            "nullable": [],
+            "empty": ["."]
+          },
+          "notes": {
+            "rows": "one row per person per role, so a director who also owns appears twice. Needs credentials (exit 5 without).",
+            "ownership": "the floor of a band, not a share: the register records ownership in intervals, so 0.25 means at least 25%. Summing or multiplying it understates."
+          }
+        },
+        "person": {
+          "shape": "array",
+          "item_keys": ["name"],
+          "item_optional": [
+            "unit_id",
+            "role",
+            "function",
+            "organ",
+            "from",
+            "to",
+            "ownership",
+            "company_cvr",
+            "company_name"
+          ],
+          "on_exit_4": {
+            "_note": "The body is the empty array itself: `.` is the whole body, in the jq grammar the other paths use.",
+            "null": [],
+            "nullable": [],
+            "empty": ["."]
+          },
+          "notes": {
+            "rows": "one row per company per role for ONE participant; `company_cvr` feeds any <query> command. A name several participants share exits 3 with a `unit` per candidate, never a merged list. Needs credentials (exit 5 without).",
+            "limit": "--limit caps the participants matched, not the rows returned."
+          }
+        },
+        "raw": {
+          "shape": "object",
+          "notes": {
+            "passthrough": "the Elasticsearch 6.8 reply, unmodified and undeclared here: documents under .hits.hits[]._source, and .hits.total a plain integer rather than the {value, relation} object of later versions. Always JSON; --format table is a usage error. Needs credentials (exit 5 without)."
+          }
         }
       }
     },
     "bolig": {
       "repo": "bolig",
       "language": "typescript",
-      "exit_codes": [
-        0,
-        1,
-        2,
-        3,
-        4
-      ],
-      "body_on": [
-        0,
-        3,
-        4
-      ],
-      "accepts_uuid": "a bare DAWA uuid in the positional argument skips resolution entirely",
+      "exit_codes": [0, 1, 2, 3, 4],
+      "body_on": [0, 3, 4],
+      "error_codes": ["USAGE", "NETWORK", "UPSTREAM", "BLOCKED", "BUG"],
+      "accepts_uuid": "a bare DAWA uuid as the positional argument skips resolution entirely: a home's own id (this tool's .address.id, .addressUnitId from tinglysning and dgs), or a street door's (.accessAddressId), which resolves when exactly one home sits behind it and otherwise exits 3 with each home's id as a candidate",
       "progress_on_stderr": true,
       "commands": {
         "default": {
@@ -246,12 +475,94 @@
             "warnings",
             "sources"
           ],
-          "nullable": [
-            "property"
-          ],
+          "nullable": ["property"],
+          "on_exit_4": {
+            "_note": "No valuation exists for the address (a plot, a new build, a commercial unit). The body has the SAME keys as exit 0, so one reader handles both: `null` lists the keys that are always null here, `nullable` the ones that may be, `empty` the arrays that are always []. `history` and `property` are still looked up and filled in when Boliga has them, and both join keys are present, so the address can go straight to tinglysning.",
+            "null": ["valuation"],
+            "nullable": ["property"],
+            "empty": ["nearbySales"]
+          },
+          "nested": {
+            "_note": "What is inside the top-level keys, keyed by jq path in the grammar join_keys uses: a trailing [] means every element of that array. `keys` are always present, `optional` may be absent, `nullable` may be null. `.warnings` and `.sources` are arrays of strings and have no entry.",
+            ".address": {
+              "keys": [
+                "id",
+                "accessAddressId",
+                "label",
+                "street",
+                "houseNumber",
+                "floor",
+                "door",
+                "postalCode",
+                "city",
+                "lat",
+                "lon"
+              ]
+            },
+            ".property": {
+              "keys": ["boligaId", "type", "sizeM2", "rooms", "builtYear"]
+            },
+            ".valuation": {
+              "keys": [
+                "value",
+                "spread",
+                "pricePerM2",
+                "standardDeviation",
+                "included",
+                "excluded",
+                "consideredCount",
+                "annualTrendPct",
+                "trendYears",
+                "model",
+                "asOf"
+              ],
+              "nullable": [
+                "spread",
+                "pricePerM2",
+                "standardDeviation",
+                "consideredCount",
+                "annualTrendPct",
+                "trendYears",
+                "model",
+                "asOf"
+              ]
+            },
+            ".valuation.spread": {
+              "keys": ["min", "max"]
+            },
+            ".valuation.included[]": {
+              "keys": ["name", "value"]
+            },
+            ".valuation.excluded[]": {
+              "keys": ["name", "value"]
+            },
+            ".nearbySales[]": {
+              "keys": [
+                "address",
+                "postalCode",
+                "city",
+                "askingPrice",
+                "pricePerM2",
+                "sizeM2",
+                "rooms",
+                "type",
+                "builtYear",
+                "daysOnMarket",
+                "energyLabel"
+              ]
+            },
+            ".history[]": {
+              "keys": ["date", "kind", "price"],
+              "optional": ["saleType"]
+            }
+          },
           "notes": {
             "warnings": "empty array is a real claim: every hop answered. Non-empty means part of the result is missing rather than absent.",
-            "history": "an empty history beside a history warning is 'not looked up', not 'never traded'"
+            "history": "an empty history beside a history warning is 'not looked up', not 'never traded'. `kind` is \"sold\" or \"listed\"; `price` is the sale price or the asking price accordingly, and `saleType` exists only on a sale.",
+            "valuation": "`value` is the headline: the mean of `included`. `spread` is the low and high of `included` only, and `excluded` is what the model discarded, usually the stale public assessment. `annualTrendPct` is a yearly rate fitted over `trendYears` years.",
+            "nearbySales": "comparable homes for sale now: asking prices, not sold ones.",
+            "address": "`floor` and `door` are \"\" for a house, never null.",
+            "property": "BBR facts as Boliga holds them. `boligaId` is Boliga's own GUID, not a DAWA id and not a join key. null means no BBR row was read, and `warnings` says which reason."
           }
         }
       }
@@ -259,19 +570,10 @@
     "tinglysning": {
       "repo": "tinglysning",
       "language": "typescript",
-      "exit_codes": [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5
-      ],
-      "body_on": [
-        0,
-        3,
-        4
-      ],
+      "exit_codes": [0, 1, 2, 3, 4, 5],
+      "body_on": [0, 3, 4],
+      "error_codes": ["USAGE", "SETUP", "NETWORK", "UPSTREAM", "BLOCKED", "BUG"],
+      "accepts_uuid": "a bare DAWA uuid as the positional argument, wherever an address is accepted. A home's own id (this tool's .addressUnitId, dgs's .addressUnitId, bolig's .address.id) reads that one home's deed: the row is chosen by label EQUALITY, never by position, so --index beside it is exit 2 and a home no row carries is exit 3 with the door's roster as candidates. A street door's id (.accessAddressId) behaves exactly like the door's address typed out, --index included. Only DAWA answering 404 for the id is exit 3; DAWA being down is exit 1",
       "progress_on_stderr": true,
       "commands": {
         "default": {
@@ -294,44 +596,92 @@
           ],
           "nullable": [
             "addressUnitId",
+            "propertyType",
             "charges",
             "chargesTotal",
             "publicAssessment"
           ],
-          "_charges": [
-            "What is registered AGAINST the property (Hæftelser), beside who owns it.",
-            "`principal` is what the deed was REGISTERED for, never the balance still",
-            "outstanding — a deed is not written down in the register as it is repaid.",
-            "`chargesTotal` is therefore an upper bound on debt, not a debt figure. Do",
-            "not subtract it from a bolig valuation and report the result as equity.",
-            "null (not []) means the charges were never read: only the API payload",
-            "carries them, so the DOM fallback yields null. [] means none registered.",
-            "`chargesTotal` is null if any principal failed to parse; that charge keeps",
-            "its raw string in `principalText`, and `warnings` names how many."
-          ],
-          "_publicAssessment": [
-            "The offentlig ejendomsvurdering the tingbog carries, with the date it was",
-            "set. The same figure bolig reports under .valuation.excluded as 'Den",
-            "offentlige ejendomsvurdering' — often years stale, which `assessedAt`",
-            "makes visible without a second lookup."
-          ]
+          "on_exit_4": {
+            "_note": "Two different final answers exit 4, and `propertyCount` tells them apart. 0: NO PROPERTY is registered at the door — `units` is [] and everything describing a deed is null (`property`, `propertyType`, `propertyIndex`, `addressUnitId`, `charges`, `chargesTotal`, `publicAssessment`), while `address` and `accessAddressId` are what did resolve, so the door can still go to bolig. 1 or more: the deed WAS read and lists no owners — the body is an ordinary exit-0 result whose `owners` is []. Both have the SAME keys as exit 0, so one reader handles all three. `null` is empty because no key is null in both cases.",
+            "null": [],
+            "nullable": [
+              "addressUnitId",
+              "property",
+              "propertyType",
+              "propertyIndex",
+              "charges",
+              "chargesTotal",
+              "publicAssessment"
+            ],
+            "empty": ["owners"]
+          },
+          "nested": {
+            "_note": "What is inside the top-level keys, keyed by jq path in the grammar join_keys uses: a trailing [] means every element of that array. `keys` are always present, `optional` may be absent, `nullable` may be null. `.units`, `.warnings` and `.charges[].creditors` are arrays of strings and have no entry.",
+            ".owners[]": {
+              "keys": ["name", "share"],
+              "nullable": ["share"]
+            },
+            ".charges[]": {
+              "keys": [
+                "id",
+                "type",
+                "principal",
+                "currency",
+                "creditors",
+                "priority",
+                "interestRate",
+                "rateType",
+                "registeredAt"
+              ],
+              "optional": ["principalText"],
+              "nullable": [
+                "id",
+                "type",
+                "principal",
+                "currency",
+                "priority",
+                "interestRate",
+                "rateType",
+                "registeredAt"
+              ]
+            },
+            ".publicAssessment": {
+              "keys": [
+                "propertyValue",
+                "landValue",
+                "assessedAt",
+                "municipality",
+                "propertyNumber"
+              ],
+              "nullable": [
+                "propertyValue",
+                "landValue",
+                "assessedAt",
+                "municipality",
+                "propertyNumber"
+              ]
+            }
+          },
+          "notes": {
+            "warnings": "everything that makes the result less trustworthy than it looks: the condominium parent record, shares that do not sum to 1, a zero share, an unresolved unit id, charges that were not read, a unit id answered with the whole building's deed. Read it on every result; an empty array is a real claim.",
+            "owners": "the registered owners (Adkomster), de-duplicated — the register repeats each owner once per deed. `share` is a fraction as text (\"1/2\"), null when the register shows none. On a block of flats, --index 0 is usually the parent record, whose one `name` is a note like \"Opdelt i ejerlejlighed 1-84\" and not a person; `warnings` says when.",
+            "charges": "what is registered AGAINST the property (Hæftelser), beside who owns it. `principal` is what the deed was REGISTERED for, never the balance still outstanding — a deed is not written down in the register as it is repaid. null (not []) means the charges were never read: only the API payload carries them, so `source: \"dom\"` always has null here. [] means none are registered. `id` is the deed's alias (date-number); `rateType` is \"fixed\" or \"variable\"; `principalText` exists only on a charge whose principal could not be parsed, and holds the raw string.",
+            "chargesTotal": "the principals summed: an UPPER BOUND on debt, not a debt figure. Do not subtract it from a bolig valuation and report the result as equity. null when `charges` is null, or when any principal failed to parse — `warnings` names how many.",
+            "publicAssessment": "the offentlig ejendomsvurdering the tingbog carries, with the date it was set. The same figure bolig reports under .valuation.excluded as 'Den offentlige ejendomsvurdering' — often years stale, which `assessedAt` makes visible without a second lookup.",
+            "units": "the label of every property behind the door, in --index order and complete (the stderr listing stops at ten). `units[propertyIndex]` is the row that was read and `propertyCount` is its length. One deed is read per call.",
+            "property": "the label of the deed that was read. Hand THIS to bolig for a specific flat, never `address`, which is the door — or better, hand it `addressUnitId`.",
+            "addressUnitId": "null is deliberate, never a guess: the parent record is not a home, and a label that matches no single DAWA unit is withheld. `warnings` says which.",
+            "source": "\"api\" is the JSON the page itself received. \"dom\" is the fallback that scrapes the rendered page: it reads owners only, so `propertyType`, `charges`, `chargesTotal` and `publicAssessment` are null beside it."
+          }
         }
       }
     },
     "dgs": {
       "repo": "dgs",
       "language": "typescript",
-      "exit_codes": [
-        0,
-        1,
-        2,
-        4,
-        5
-      ],
-      "body_on": [
-        0,
-        4
-      ],
+      "exit_codes": [0, 1, 2, 4, 5],
+      "body_on": [0, 4],
+      "error_codes": ["USAGE", "SETUP", "NETWORK", "BLOCKED", "UPSTREAM", "BUG"],
       "progress_on_stderr": true,
       "never_emits": {
         "3": "an ambiguous name is answered with a ranked list at exit 0; there is no candidate list to refine from"
@@ -339,60 +689,122 @@
       "commands": {
         "search": {
           "shape": "object",
-          "keys": [
-            "query",
-            "page",
-            "count",
-            "hasMore",
-            "people",
-            "warnings"
-          ]
+          "keys": ["query", "page", "limit", "count", "hasMore", "people", "warnings"],
+          "nullable": ["limit"],
+          "on_exit_4": {
+            "_note": "The directory has nothing to report. Two cases, both positive evidence from the site: it rendered its result list and the list was empty (nobody matches the query), or `page` is past the last page and it answered 404 — then `warnings` says so, because `count` 0 on page 3 is not 'nobody has this name'. Same keys as exit 0, with `count` 0 and `hasMore` false. An unreadable, blocked or unreachable page is never this — it is exit 1, and so is a 404 on page 1.",
+            "null": [],
+            "nullable": ["limit"],
+            "empty": ["people"]
+          },
+          "nested": {
+            "_note": "Keyed by jq path in the grammar join_keys uses: a trailing [] means every element of that array. `keys` are always present, `nullable` may be null. `.warnings` is an array of strings and has no entry.",
+            ".people[]": {
+              "keys": [
+                "id",
+                "name",
+                "address",
+                "street",
+                "postalCode",
+                "city",
+                "phone",
+                "url",
+                "accessAddressId",
+                "addressUnitId"
+              ],
+              "nullable": [
+                "id",
+                "address",
+                "street",
+                "postalCode",
+                "city",
+                "phone",
+                "url",
+                "accessAddressId",
+                "addressUnitId"
+              ]
+            }
+          },
+          "notes": {
+            "query": "the input exactly as typed. A city or postal code narrows a search only when it is part of the query (\"fornavn efternavn by\"): the site has no separate where-field. A phone number may be spaced or carry +45.",
+            "limit": "the --limit that was asked for, or null. `people` holds at most that many rows, from the top of the ranking, and only those were resolved through DAWA.",
+            "count": "the people on this page of the site, NOT the length of `people`: --limit does not change it, so `count > (.people | length)` means the list was cut.",
+            "hasMore": "about the site's page of 25 rows, counted before deduplication: true means `--page <page + 1>` has more.",
+            "people": "the site's own ranking. An ambiguous name is answered with this list rather than refused. The profile-only fields (givenName, familyName, coordinates) are not on a row; `dgs person <id>` has them.",
+            "warnings": "names each withheld join key and why, and says when `page` was past the last one. An empty array is a real claim: every address resolved."
+          }
         },
         "person": {
           "shape": "object",
           "keys": [
             "id",
+            "found",
             "name",
-            "warnings"
-          ],
-          "note": "a miss emits the same envelope with found:false; a hit omits `found`",
-          "optional": [
+            "givenName",
+            "familyName",
             "address",
             "street",
             "postalCode",
             "city",
             "phone",
+            "coordinates",
             "url",
             "accessAddressId",
             "addressUnitId",
+            "warnings"
+          ],
+          "nullable": [
+            "name",
             "givenName",
             "familyName",
-            "coordinates"
-          ]
+            "address",
+            "street",
+            "postalCode",
+            "city",
+            "phone",
+            "coordinates",
+            "url",
+            "accessAddressId",
+            "addressUnitId"
+          ],
+          "on_exit_4": {
+            "_note": "No such profile: the site answered 404 for this id. Same keys as exit 0, with `found` false and everything but `id` and `found` null. A page that loaded without a person on it is never this — it is exit 1.",
+            "null": [
+              "name",
+              "givenName",
+              "familyName",
+              "address",
+              "street",
+              "postalCode",
+              "city",
+              "phone",
+              "coordinates",
+              "url",
+              "accessAddressId",
+              "addressUnitId"
+            ],
+            "nullable": [],
+            "empty": ["warnings"]
+          },
+          "nested": {
+            ".coordinates": {
+              "keys": ["lat", "lon"]
+            }
+          },
+          "notes": {
+            "found": "tags the envelope: true at exit 0, false at exit 4. `jq 'select(.found)'` keeps the hits.",
+            "id": "the id that was asked for, never null.",
+            "coordinates": "the map pin the site drops on the address, as numbers. null when the profile carries no map link."
+          }
         }
       }
     },
     "aula": {
       "repo": "aula-cli",
       "language": "typescript",
-      "exit_codes": [
-        0,
-        1,
-        2,
-        4,
-        5
-      ],
-      "body_on": [
-        0,
-        4
-      ],
-      "error_codes": [
-        "USAGE",
-        "SETUP",
-        "NETWORK",
-        "UPSTREAM",
-        "BUG"
-      ],
+      "exit_codes": [0, 1, 2, 4, 5],
+      "body_on": [0, 4],
+      "error_codes": ["USAGE", "SETUP", "NETWORK", "UPSTREAM", "BUG"],
       "progress_on_stderr": true,
       "_note": "The account tool: it reads the user's own children's school and daycare, logged in as the user, and sits outside the join graph on purpose — no join key leads into it, and --contract prints no join_keys. Exit 5 is a missing or rejected session, and its error line never says to log in: a login costs the user a MitID approval on their phone, and the hint names what still answers without one and says to ask the user first. Exit 4 is a read that worked and came back empty, body still printed. `doctor` is the one exit 1 that also has a body (its report). --json is accepted and ignored; JSON is the default, one line on a pipe.",
       "bridge": {
@@ -422,35 +834,17 @@
           ],
           "nested": {
             ".window": {
-              "keys": [
-                "from",
-                "to",
-                "days"
-              ]
+              "keys": ["from", "to", "days"]
             },
             ".scope": {
-              "keys": [
-                "child",
-                "children"
-              ],
-              "nullable": [
-                "child"
-              ]
+              "keys": ["child", "children"],
+              "nullable": ["child"]
             },
             ".family": {
-              "keys": [
-                "guardian",
-                "children",
-                "sessionIsSteppedUp",
-                "widgets"
-              ]
+              "keys": ["guardian", "children", "sessionIsSteppedUp", "widgets"]
             },
             ".family.children[]": {
-              "keys": [
-                "name",
-                "shortName",
-                "institution"
-              ]
+              "keys": ["name", "shortName", "institution"]
             },
             ".attention": {
               "keys": [
@@ -462,43 +856,20 @@
               ]
             },
             ".attention.unreadThreads[]": {
-              "keys": [
-                "id",
-                "subject"
-              ]
+              "keys": ["id", "subject"]
             },
             ".attention.sensitiveThreads[]": {
-              "keys": [
-                "id",
-                "subject"
-              ]
+              "keys": ["id", "subject"]
             },
             ".attention.importantPosts[]": {
-              "keys": [
-                "id",
-                "title"
-              ]
+              "keys": ["id", "title"]
             },
             ".attention.eventsAwaitingResponse[]": {
-              "keys": [
-                "id",
-                "title",
-                "start",
-                "responseStatus",
-                "responseDeadline"
-              ],
-              "nullable": [
-                "responseStatus",
-                "responseDeadline"
-              ]
+              "keys": ["id", "title", "start", "responseStatus", "responseDeadline"],
+              "nullable": ["responseStatus", "responseDeadline"]
             },
             ".attention.eventsWithinSevenDays[]": {
-              "keys": [
-                "id",
-                "title",
-                "start",
-                "child"
-              ]
+              "keys": ["id", "title", "start", "child"]
             },
             ".threads[]": {
               "keys": [
@@ -530,33 +901,12 @@
               ]
             },
             ".threads[].messages[]": {
-              "keys": [
-                "id",
-                "at",
-                "from",
-                "fromRole",
-                "type",
-                "text",
-                "attachments"
-              ],
-              "nullable": [
-                "from",
-                "fromRole"
-              ]
+              "keys": ["id", "at", "from", "fromRole", "type", "text", "attachments"],
+              "nullable": ["from", "fromRole"]
             },
             ".threads[].messages[].attachments[]": {
-              "keys": [
-                "index",
-                "id",
-                "name",
-                "kind",
-                "link"
-              ],
-              "nullable": [
-                "index",
-                "id",
-                "link"
-              ]
+              "keys": ["index", "id", "name", "kind", "link"],
+              "nullable": ["index", "id", "link"]
             },
             ".posts[]": {
               "keys": [
@@ -572,26 +922,11 @@
                 "text",
                 "attachments"
               ],
-              "nullable": [
-                "publishedAt",
-                "expiresAt",
-                "author",
-                "institution"
-              ]
+              "nullable": ["publishedAt", "expiresAt", "author", "institution"]
             },
             ".posts[].attachments[]": {
-              "keys": [
-                "index",
-                "id",
-                "name",
-                "kind",
-                "link"
-              ],
-              "nullable": [
-                "index",
-                "id",
-                "link"
-              ]
+              "keys": ["index", "id", "name", "kind", "link"],
+              "nullable": ["index", "id", "link"]
             },
             ".calendar[]": {
               "keys": [
@@ -620,29 +955,12 @@
               ]
             },
             ".weeklyPlans[]": {
-              "keys": [
-                "provider",
-                "capability",
-                "widgetId",
-                "isoWeek",
-                "items",
-                "status"
-              ],
-              "optional": [
-                "warnings"
-              ]
+              "keys": ["provider", "capability", "widgetId", "isoWeek", "items", "status"],
+              "optional": ["warnings"]
             },
             ".weeklyPlans[].items[]": {
               "keys": [],
-              "optional": [
-                "childName",
-                "date",
-                "subject",
-                "title",
-                "content",
-                "kind",
-                "url"
-              ]
+              "optional": ["childName", "date", "subject", "title", "content", "kind", "url"]
             },
             ".presence[]": {
               "keys": [
@@ -673,14 +991,8 @@
               ]
             },
             ".collectionLimits": {
-              "keys": [
-                "posts",
-                "threads"
-              ],
-              "nullable": [
-                "posts",
-                "threads"
-              ]
+              "keys": ["posts", "threads"],
+              "nullable": ["posts", "threads"]
             }
           },
           "notes": {
@@ -695,23 +1007,12 @@
         },
         "messages": {
           "shape": "object",
-          "keys": [
-            "threads",
-            "truncated",
-            "limit",
-            "fetchedAt"
-          ],
-          "nullable": [
-            "limit"
-          ],
+          "keys": ["threads", "truncated", "limit", "fetchedAt"],
+          "nullable": ["limit"],
           "on_exit_4": {
             "null": [],
-            "nullable": [
-              "limit"
-            ],
-            "empty": [
-              "threads"
-            ]
+            "nullable": ["limit"],
+            "empty": ["threads"]
           },
           "nested": {
             ".threads[]": {
@@ -746,33 +1047,12 @@
               ]
             },
             ".threads[].messages[]": {
-              "keys": [
-                "id",
-                "at",
-                "from",
-                "fromRole",
-                "type",
-                "text",
-                "attachments"
-              ],
-              "nullable": [
-                "from",
-                "fromRole"
-              ]
+              "keys": ["id", "at", "from", "fromRole", "type", "text", "attachments"],
+              "nullable": ["from", "fromRole"]
             },
             ".threads[].messages[].attachments[]": {
-              "keys": [
-                "index",
-                "id",
-                "name",
-                "kind",
-                "link"
-              ],
-              "nullable": [
-                "index",
-                "id",
-                "link"
-              ]
+              "keys": ["index", "id", "name", "kind", "link"],
+              "nullable": ["index", "id", "link"]
             }
           },
           "notes": {
@@ -795,41 +1075,15 @@
             "participants",
             "messages"
           ],
-          "nullable": [
-            "startedAt",
-            "totalMessageCount",
-            "messagesIncomplete",
-            "messageReadWarning"
-          ],
+          "nullable": ["startedAt", "totalMessageCount", "messagesIncomplete", "messageReadWarning"],
           "nested": {
             ".messages[]": {
-              "keys": [
-                "id",
-                "at",
-                "from",
-                "fromRole",
-                "type",
-                "text",
-                "attachments"
-              ],
-              "nullable": [
-                "from",
-                "fromRole"
-              ]
+              "keys": ["id", "at", "from", "fromRole", "type", "text", "attachments"],
+              "nullable": ["from", "fromRole"]
             },
             ".messages[].attachments[]": {
-              "keys": [
-                "index",
-                "id",
-                "name",
-                "kind",
-                "link"
-              ],
-              "nullable": [
-                "index",
-                "id",
-                "link"
-              ]
+              "keys": ["index", "id", "name", "kind", "link"],
+              "nullable": ["index", "id", "link"]
             }
           },
           "notes": {
@@ -839,23 +1093,12 @@
         },
         "posts": {
           "shape": "object",
-          "keys": [
-            "posts",
-            "truncated",
-            "limit",
-            "fetchedAt"
-          ],
-          "nullable": [
-            "limit"
-          ],
+          "keys": ["posts", "truncated", "limit", "fetchedAt"],
+          "nullable": ["limit"],
           "on_exit_4": {
             "null": [],
-            "nullable": [
-              "limit"
-            ],
-            "empty": [
-              "posts"
-            ]
+            "nullable": ["limit"],
+            "empty": ["posts"]
           },
           "nested": {
             ".posts[]": {
@@ -872,26 +1115,11 @@
                 "text",
                 "attachments"
               ],
-              "nullable": [
-                "publishedAt",
-                "expiresAt",
-                "author",
-                "institution"
-              ]
+              "nullable": ["publishedAt", "expiresAt", "author", "institution"]
             },
             ".posts[].attachments[]": {
-              "keys": [
-                "index",
-                "id",
-                "name",
-                "kind",
-                "link"
-              ],
-              "nullable": [
-                "index",
-                "id",
-                "link"
-              ]
+              "keys": ["index", "id", "name", "kind", "link"],
+              "nullable": ["index", "id", "link"]
             }
           },
           "notes": {
@@ -902,23 +1130,12 @@
         },
         "galleries": {
           "shape": "object",
-          "keys": [
-            "albums",
-            "truncated",
-            "limit",
-            "fetchedAt"
-          ],
-          "nullable": [
-            "limit"
-          ],
+          "keys": ["albums", "truncated", "limit", "fetchedAt"],
+          "nullable": ["limit"],
           "on_exit_4": {
             "null": [],
-            "nullable": [
-              "limit"
-            ],
-            "empty": [
-              "albums"
-            ]
+            "nullable": ["limit"],
+            "empty": ["albums"]
           },
           "nested": {
             ".albums[]": {
@@ -931,13 +1148,7 @@
                 "institution",
                 "groups"
               ],
-              "nullable": [
-                "id",
-                "createdAt",
-                "description",
-                "author",
-                "institution"
-              ]
+              "nullable": ["id", "createdAt", "description", "author", "institution"]
             }
           },
           "notes": {
@@ -1021,23 +1232,15 @@
         },
         "pickup-times": {
           "shape": "object",
-          "keys": [
-            "window",
-            "days"
-          ],
+          "keys": ["window", "days"],
           "on_exit_4": {
             "null": [],
             "nullable": [],
-            "empty": [
-              "days"
-            ]
+            "empty": ["days"]
           },
           "nested": {
             ".window": {
-              "keys": [
-                "from",
-                "to"
-              ]
+              "keys": ["from", "to"]
             },
             ".days[]": {
               "keys": [
@@ -1066,31 +1269,17 @@
         },
         "groups": {
           "shape": "array",
-          "item_keys": [
-            "child",
-            "childId",
-            "className",
-            "classGroupId",
-            "groups"
-          ],
-          "item_nullable": [
-            "className",
-            "classGroupId"
-          ],
+          "item_keys": ["child", "childId", "className", "classGroupId", "groups"],
+          "item_nullable": ["className", "classGroupId"],
           "on_exit_4": {
             "_note": "one row per child, each with `groups: []`",
             "null": [],
             "nullable": [],
-            "empty": [
-              "[].groups"
-            ]
+            "empty": ["[].groups"]
           },
           "nested": {
             "[].groups[]": {
-              "keys": [
-                "id",
-                "name"
-              ]
+              "keys": ["id", "name"]
             }
           },
           "notes": {
@@ -1133,27 +1322,12 @@
           },
           "nested": {
             "[].address": {
-              "keys": [
-                "street",
-                "postalCode",
-                "city"
-              ],
-              "nullable": [
-                "street",
-                "postalCode",
-                "city"
-              ]
+              "keys": ["street", "postalCode", "city"],
+              "nullable": ["street", "postalCode", "city"]
             },
             "[].relations[]": {
-              "keys": [
-                "profileId",
-                "name",
-                "role"
-              ],
-              "nullable": [
-                "profileId",
-                "role"
-              ]
+              "keys": ["profileId", "name", "role"],
+              "nullable": ["profileId", "role"]
             }
           },
           "notes": {
@@ -1162,36 +1336,17 @@
         },
         "birthdays": {
           "shape": "object",
-          "keys": [
-            "birthdays",
-            "truncated",
-            "limit",
-            "fetchedAt"
-          ],
-          "nullable": [
-            "limit"
-          ],
+          "keys": ["birthdays", "truncated", "limit", "fetchedAt"],
+          "nullable": ["limit"],
           "on_exit_4": {
             "null": [],
-            "nullable": [
-              "limit"
-            ],
-            "empty": [
-              "birthdays"
-            ]
+            "nullable": ["limit"],
+            "empty": ["birthdays"]
           },
           "nested": {
             ".birthdays[]": {
-              "keys": [
-                "name",
-                "group",
-                "date",
-                "inDays",
-                "turns"
-              ],
-              "nullable": [
-                "turns"
-              ]
+              "keys": ["name", "group", "date", "inDays", "turns"],
+              "nullable": ["turns"]
             }
           },
           "notes": {
@@ -1201,21 +1356,8 @@
         },
         "notifications": {
           "shape": "array",
-          "item_keys": [
-            "type",
-            "area",
-            "child",
-            "institution",
-            "threadId",
-            "postId",
-            "triggered"
-          ],
-          "item_nullable": [
-            "child",
-            "threadId",
-            "postId",
-            "triggered"
-          ],
+          "item_keys": ["type", "area", "child", "institution", "threadId", "postId", "triggered"],
+          "item_nullable": ["child", "threadId", "postId", "triggered"],
           "on_exit_4": {
             "_note": "the body is []",
             "null": [],
@@ -1228,41 +1370,17 @@
         },
         "attachments": {
           "shape": "object",
-          "keys": [
-            "attachments",
-            "messagesIncomplete",
-            "messageReadWarning"
-          ],
-          "nullable": [
-            "messageReadWarning"
-          ],
+          "keys": ["attachments", "messagesIncomplete", "messageReadWarning"],
+          "nullable": ["messageReadWarning"],
           "on_exit_4": {
-            "null": [
-              "messageReadWarning"
-            ],
+            "null": ["messageReadWarning"],
             "nullable": [],
-            "empty": [
-              "attachments"
-            ]
+            "empty": ["attachments"]
           },
           "nested": {
             ".attachments[]": {
-              "keys": [
-                "index",
-                "id",
-                "name",
-                "kind",
-                "link",
-                "from",
-                "at"
-              ],
-              "nullable": [
-                "index",
-                "id",
-                "link",
-                "from",
-                "at"
-              ]
+              "keys": ["index", "id", "name", "kind", "link", "from", "at"],
+              "nullable": ["index", "id", "link", "from", "at"]
             }
           },
           "notes": {
@@ -1271,53 +1389,28 @@
         },
         "attachment": {
           "shape": "object",
-          "keys": [
-            "path",
-            "bytes",
-            "filename",
-            "mediaType"
-          ],
-          "nullable": [
-            "mediaType"
-          ],
+          "keys": ["path", "bytes", "filename", "mediaType"],
+          "nullable": ["mediaType"],
           "notes": {
             "path": "the file, downloaded in-process from the presigned URL and saved under ~/.aula/attachments unless --out names a path. Read a PDF with `pdftotext -layout`. A link (kind link) has no bytes and is refused as a usage error."
           }
         },
         "post-attachment": {
           "shape": "object",
-          "keys": [
-            "path",
-            "bytes",
-            "filename",
-            "mediaType"
-          ],
-          "nullable": [
-            "mediaType"
-          ],
+          "keys": ["path", "bytes", "filename", "mediaType"],
+          "nullable": ["mediaType"],
           "notes": {
             "path": "as `attachment`, for a post's attachment: `post-attachment <postId> [index]`, the index `posts` shows. An unknown post id, or an index the post does not have, is a usage error naming what it does have."
           }
         },
         "commonfiles": {
           "shape": "object",
-          "keys": [
-            "files",
-            "truncated",
-            "limit",
-            "fetchedAt"
-          ],
-          "nullable": [
-            "limit"
-          ],
+          "keys": ["files", "truncated", "limit", "fetchedAt"],
+          "nullable": ["limit"],
           "on_exit_4": {
             "null": [],
-            "nullable": [
-              "limit"
-            ],
-            "empty": [
-              "files"
-            ]
+            "nullable": ["limit"],
+            "empty": ["files"]
           },
           "nested": {
             ".files[]": {
@@ -1331,13 +1424,7 @@
                 "status",
                 "groups"
               ],
-              "nullable": [
-                "filename",
-                "created",
-                "institution",
-                "uploadedBy",
-                "status"
-              ]
+              "nullable": ["filename", "created", "institution", "uploadedBy", "status"]
             }
           },
           "notes": {
@@ -1347,32 +1434,16 @@
         },
         "commonfile": {
           "shape": "object",
-          "keys": [
-            "path",
-            "bytes",
-            "filename",
-            "mediaType"
-          ],
-          "nullable": [
-            "mediaType"
-          ],
+          "keys": ["path", "bytes", "filename", "mediaType"],
+          "nullable": ["mediaType"],
           "notes": {
             "path": "as `attachment`, for a shared file. An ambiguous title is refused with the candidates rather than guessed at — the shelf holds near-identical names across years."
           }
         },
         "widgets": {
           "shape": "array",
-          "item_keys": [
-            "widgetId",
-            "name",
-            "provider",
-            "capability",
-            "supported"
-          ],
-          "item_nullable": [
-            "provider",
-            "capability"
-          ],
+          "item_keys": ["widgetId", "name", "provider", "capability", "supported"],
+          "item_nullable": ["provider", "capability"],
           "on_exit_4": {
             "_note": "the body is []",
             "null": [],
@@ -1385,37 +1456,18 @@
         },
         "weekly-plan": {
           "shape": "array",
-          "item_keys": [
-            "provider",
-            "capability",
-            "widgetId",
-            "isoWeek",
-            "items",
-            "status"
-          ],
-          "item_optional": [
-            "warnings"
-          ],
+          "item_keys": ["provider", "capability", "widgetId", "isoWeek", "items", "status"],
+          "item_optional": ["warnings"],
           "on_exit_4": {
             "_note": "one plan per vendor, each with `items: []` and status ok or skipped; [] when no vendor serves the capability",
             "null": [],
             "nullable": [],
-            "empty": [
-              "[].items"
-            ]
+            "empty": ["[].items"]
           },
           "nested": {
             "[].items[]": {
               "keys": [],
-              "optional": [
-                "childName",
-                "date",
-                "subject",
-                "title",
-                "content",
-                "kind",
-                "url"
-              ]
+              "optional": ["childName", "date", "subject", "title", "content", "kind", "url"]
             }
           },
           "notes": {
@@ -1435,17 +1487,10 @@
             "isSteppedUp",
             "mitidUsername"
           ],
-          "nullable": [
-            "mitidUsername"
-          ],
+          "nullable": ["mitidUsername"],
           "nested": {
             ".guardian": {
-              "keys": [
-                "profileId",
-                "userId",
-                "name",
-                "institutionProfileIds"
-              ]
+              "keys": ["profileId", "userId", "name", "institutionProfileIds"]
             },
             ".children[]": {
               "keys": [
@@ -1456,40 +1501,18 @@
                 "institutionCode",
                 "institutionName"
               ],
-              "optional": [
-                "userId",
-                "institutionType",
-                "mainGroupName",
-                "institutionProfile"
-              ]
+              "optional": ["userId", "institutionType", "mainGroupName", "institutionProfile"]
             },
             ".institutions[]": {
-              "keys": [
-                "institutionCode",
-                "institutionName",
-                "institutionProfileId",
-                "groups"
-              ],
-              "optional": [
-                "institutionType"
-              ]
+              "keys": ["institutionCode", "institutionName", "institutionProfileId", "groups"],
+              "optional": ["institutionType"]
             },
             ".institutions[].groups[]": {
-              "keys": [
-                "id",
-                "name"
-              ]
+              "keys": ["id", "name"]
             },
             ".widgets[]": {
-              "keys": [
-                "widgetId",
-                "name"
-              ],
-              "optional": [
-                "provider",
-                "capability",
-                "needsMitidUsername"
-              ]
+              "keys": ["widgetId", "name"],
+              "optional": ["provider", "capability", "needsMitidUsername"]
             }
           },
           "notes": {
@@ -1508,30 +1531,14 @@
             "tokenKeyFromEnv",
             "cookieJar"
           ],
-          "nullable": [
-            "username",
-            "identityName",
-            "session",
-            "tokens",
-            "cookieJar"
-          ],
+          "nullable": ["username", "identityName", "session", "tokens", "cookieJar"],
           "nested": {
             ".session": {
-              "keys": [
-                "state",
-                "checkedAt",
-                "steppedUp"
-              ],
-              "nullable": [
-                "steppedUp"
-              ]
+              "keys": ["state", "checkedAt", "steppedUp"],
+              "nullable": ["steppedUp"]
             },
             ".tokens": {
-              "keys": [
-                "issuedAt",
-                "accessTokenExpiresAt",
-                "accessTokenExpired"
-              ]
+              "keys": ["issuedAt", "accessTokenExpiresAt", "accessTokenExpired"]
             }
           },
           "notes": {
@@ -1540,33 +1547,14 @@
         },
         "doctor": {
           "shape": "object",
-          "keys": [
-            "ok",
-            "generatedAt",
-            "apiVersion",
-            "summary",
-            "checks"
-          ],
+          "keys": ["ok", "generatedAt", "apiVersion", "summary", "checks"],
           "nested": {
             ".summary": {
-              "keys": [
-                "passed",
-                "warned",
-                "skipped",
-                "failed",
-                "totalMs"
-              ]
+              "keys": ["passed", "warned", "skipped", "failed", "totalMs"]
             },
             ".checks[]": {
-              "keys": [
-                "name",
-                "status",
-                "ms",
-                "detail"
-              ],
-              "optional": [
-                "note"
-              ]
+              "keys": ["name", "status", "ms", "detail"],
+              "optional": ["note"]
             }
           },
           "notes": {
