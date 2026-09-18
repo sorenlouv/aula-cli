@@ -111,6 +111,24 @@ export type CliCommand = keyof typeof COMMAND_OPTIONS;
 export const CLI_COMMANDS = Object.keys(COMMAND_OPTIONS) as CliCommand[];
 
 /**
+ * Questions about the tool rather than about Aula: no command, no session, no
+ * request, handled in `cli.ts` before the command parser runs.
+ *
+ * Here rather than duplicated in each test that needs it. Two documents name
+ * these — the skill template and `UPSTREAM.md` — and each had its own copy of
+ * the list, so adding `--upstream` broke a test that was asserting a flag
+ * exists by checking whether some command accepts it. None of these is any
+ * command's option; that is what makes them tool-level.
+ */
+export const TOOL_FLAGS: ReadonlySet<string> = new Set([
+  '--help',
+  '--contract',
+  '--upstream',
+  '--version',
+  '--json',
+]);
+
+/**
  * What each option takes and means, for `aula <command> --help`.
  *
  * Keyed on the same names as {@link OPTION_DEFINITIONS} and typed `Record`, so

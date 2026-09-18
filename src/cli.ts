@@ -53,6 +53,7 @@ import {
 import { AulaAuthError, AulaClient, AulaMethodError, CALENDAR_MAX_SPAN_DAYS } from './client.ts';
 import { briefSlots, readConfig, updateConfig } from './config.ts';
 import { contractFrame } from './contract.ts';
+import { upstreamDoc } from './upstream.ts';
 import {
   buildDigest,
   collectAlbums,
@@ -167,6 +168,8 @@ Everyday:
                                in the frame every sibling prints: what each exit
                                code means, which carry a body, and every command's
                                keys
+  --upstream                   How to read Aula directly for what this tool does
+                               not wrap: the URL grammar, raw, and the traps
 
 Options for new:
   --days <n>                   How much history to read (default 60)
@@ -253,6 +256,15 @@ async function main(): Promise<number> {
   // sibling answers it; here it was `Unknown command "--contract"`, exit 2.
   if (command === '--contract') {
     console.log(toJson(contractFrame()));
+    return 0;
+  }
+
+  // The bypass layer, and the same reasoning again: an agent holding the
+  // compiled binary has no checkout, so `API.md` — accurate, detailed, and the
+  // only place this was written down — resolved to nothing on its machine.
+  // Printing it is what makes it reachable.
+  if (command === '--upstream') {
+    console.log(upstreamDoc());
     return 0;
   }
 

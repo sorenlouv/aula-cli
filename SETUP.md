@@ -436,8 +436,8 @@ say to them; the right is what you type:
   missing (step 0). Install it, then re-run `schedule` so the new path is
   baked in.
 - **Exit code 5 from a read command** — there is no usable session, and no
-  retry changes that. `aula open`, `aula status`, `aula preferences` and
-  `aula --contract` still answer without one. A new session is `aula login`
+  retry changes that. `aula open`, `aula status`, `aula preferences`,
+  `aula --contract` and `aula --upstream` still answer without one. A new session is `aula login`
   (step 3): ask the user before starting it, and never start one unprompted —
   it costs them an approval in the MitID app on their phone.
 - **Exit code 5 from `login` itself** — that attempt failed. Read the message

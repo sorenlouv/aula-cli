@@ -3,7 +3,9 @@
 Read-only CLI over Aula (aula.dk), run by an agent on behalf of a non-technical
 parent. [GOALS.md](GOALS.md) says why and for whom; read it before a design
 decision. [API.md](API.md) is the wire reference, including Aula's failure
-modes, nearly all of which return a successful-looking response.
+modes, nearly all of which return a successful-looking response;
+[UPSTREAM.md](UPSTREAM.md) is the short version of it that ships inside the
+binary, for an agent with no checkout — `aula --upstream` prints it.
 [BRIEF.md](BRIEF.md) is the daily brief's design; [SETUP.md](SETUP.md) the
 install runbook.
 
@@ -511,8 +513,50 @@ runtime — have to be imported (`with { type: 'text' }`, or `type: 'json'` as
 `import.meta.dir` is a virtual path in a compiled binary, so `readFileSync`
 against it compiles happily and fails only for the user.
 
+## The bypass layer
+
+**`UPSTREAM.md` is `API.md` made reachable.** This file and `API.md` are the
+developer-facing wire reference, and both were invisible to the reader who
+needed them: end users install a compiled binary and never clone this repo, and
+the skill an agent loads is a template embedded in that binary — so every "see
+API.md" resolved to nothing on the machine doing the reading. `UPSTREAM.md` is
+the same material distilled for someone holding only the binary, imported as
+text by `src/upstream.ts` and printed by `aula --upstream`. `API.md` stays as
+it is; it goes deeper and is for whoever has the checkout. Verified from a
+compiled binary run outside any checkout, which is the only test of reachability
+that means anything.
+
+**`src/upstream.test.ts` holds it to the code**, and not by a list of things
+somebody has to remember to mention. It reads `READ_ONLY_METHODS` and
+`WIDGET_ENDPOINTS` — the transport's own guards, which a call is refused for
+being absent from — so a new upstream *cannot* be reached without being added to
+one of them, and adding it fails the test until the document says so. It also
+parses every fenced `aula …` command in the document through the real argv
+parser, and checks the "already wrapped, do not hand-roll" list against
+`contract.json`'s declared commands. `AULA_API_BASE` and `FALLBACK_API_VERSION`
+are exported from `client.ts` for this; a bumped version that left the document
+saying v24 would send an agent to a path where every method answers `10`.
+
+**`raw` may POST to a getter-named method.** It was GET-only on top of the name
+check, which sounds stricter than it was: Aula models some *reads* as POST
+because the filter will not fit in a query string, so a window the calendar
+wrapper does not offer was unreachable by the wrapper AND by the escape hatch
+that exists precisely so an un-wrapped read needs no code change. The verb was
+never the guard — the method name is, and `messaging.sendMessage` is refused
+over POST exactly as over GET. A typed wrapper still may POST only to
+`POST_ALLOWED`; the widening is scoped to the caller who typed the name.
+`raw --body '<json>'` is the route, and the body must be a JSON object.
+
+**`TOOL_FLAGS` in `cli-options.ts` is the one list of tool-level flags**
+(`--help`, `--contract`, `--upstream`, `--version`, `--json`): no command, no
+session, no request. Both drift tests read it. It used to be a copy inside
+`skill.test.ts` beside three overlapping lists of commands-whose-options-count,
+and the hand-written one went stale the moment `raw` grew `--body` — a real flag
+reported as a flag no command takes.
+
 ## Finding an unwrapped endpoint
 
+The recipe below is in `UPSTREAM.md` too, for the reader without this checkout.
 Read the method names out of Aula's bundle rather than guessing:
 
 ```bash

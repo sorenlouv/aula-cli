@@ -179,7 +179,22 @@ so trying again in a few minutes is right. `digest` never exits for one part:
 read `weeklyPlans[].status` there, and a plan whose `provider` is
 `"unavailable"` is a capability that threw before any vendor answered.
 
-`raw <method> [k=v ...]` reaches any Aula *read* method that has no wrapper.
+### When the CLI does not cover it
+
+Reach for this only when no command above answers the question — a wrapped
+command resolves the id sets, pages to the end and reports a cut list, and a
+hand-rolled call does none of that.
+
+`aula --upstream` prints the whole bypass guide: Aula's URL grammar, every
+method and vendor endpoint this tool knows, the response envelope, and the
+traps that return a wrong answer rather than an error. Read it before the
+first `raw` call; it needs no login and makes no request.
+
+The short version: `raw <method> [k=v ...]` reaches any Aula *read* method
+that has no wrapper, and `raw <method> --body '<json>'` reaches the reads Aula
+models as a POST (the calendar is the one that comes up). Repeat a bare key for
+an array — `childIds=11 childIds=22`, never `childIds[]=11`, which is sent
+wrong and comes back as an empty list rather than an error.
 
 Options — `aula <command> --help` says which a command takes, what each
 defaults to, and what the JSON holds:

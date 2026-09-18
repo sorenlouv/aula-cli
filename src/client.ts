@@ -30,7 +30,13 @@ import { recordSessionSeen } from './session-seen.ts';
 import { errorMessage, isRecord, parseInteger } from './validation.ts';
 import { cmd } from './runtime.ts';
 
-const FALLBACK_API_VERSION = 24;
+/**
+ * Where the version probe starts. Exported because `UPSTREAM.md` prints the URL
+ * an agent would build by hand, version and all, and `upstream.test.ts` holds
+ * the document to this constant — a bumped version that left the document
+ * saying v24 would send that agent to a path where every method answers `10`.
+ */
+export const FALLBACK_API_VERSION = 24;
 /**
  * How far above the version in use the retirement probe searches. Measured from
  * `#version` rather than from the constant: the probe's own warning tells the
@@ -40,7 +46,8 @@ const FALLBACK_API_VERSION = 24;
  */
 const API_VERSION_PROBE_SPAN = 12;
 const MAX_API_VERSION = 99;
-const BASE = 'https://www.aula.dk/api';
+/** Exported for `UPSTREAM.md`'s drift test — see {@link FALLBACK_API_VERSION}. */
+export const AULA_API_BASE = 'https://www.aula.dk/api';
 const USER_AGENT = 'aula-cli/0.1 (+personal read-only client)';
 /** The health probe runs on a path that has already failed — it may not hang. */
 const HEALTH_PROBE_TIMEOUT_MS = 5_000;
@@ -535,7 +542,7 @@ export class AulaClient {
     version: number,
     mayRecover = true,
   ): Promise<unknown> {
-    const url = new URL(`${BASE}/v${version}/`);
+    const url = new URL(`${AULA_API_BASE}/v${version}/`);
     url.searchParams.set('method', method);
     for (const [key, value] of Object.entries(opts.query ?? {})) {
       if (value === undefined) continue;
@@ -1459,7 +1466,7 @@ function describeValue(value: unknown): string {
  * one 5xxes regardless. Anything below 500 therefore means the service is up.
  */
 async function probeServiceReachable(version: number): Promise<boolean | undefined> {
-  const url = new URL(`${BASE}/v${version}/`);
+  const url = new URL(`${AULA_API_BASE}/v${version}/`);
   url.searchParams.set('method', 'profiles.getProfilesByLogin');
   try {
     const res = await fetch(url, {

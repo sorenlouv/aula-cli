@@ -660,6 +660,24 @@ test('--contract answers with the fleet frame, no login and no request', () => {
   assert.equal(result.requests.length, 0);
 });
 
+// The bypass layer's reachability half. `API.md` has been accurate the whole
+// time and unreadable by the agent that needed it: end users install a compiled
+// binary and never clone this repo, and the skill it loads is embedded in that
+// binary, so every "see API.md" pointed at a path that does not exist on the
+// machine doing the reading. Printing it is the fix.
+test('--upstream prints the bypass document, with no login and no request', () => {
+  const result = runWithoutLogin('--upstream');
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /# Going around aula-cli/);
+  // The three things an agent cannot proceed without: the URL grammar, the
+  // supported route, and the array trap that returns a wrong answer rather
+  // than an error.
+  assert.match(result.stdout, /\?method=/);
+  assert.match(result.stdout, /aula raw/);
+  assert.match(result.stdout, /childIds\[\]\[\]/);
+  assert.equal(result.requests.length, 0);
+});
+
 // ------------------------------------------------------------------ freshness
 
 // `digest` stamped itself `generatedAt: now` whether it had just made sixty
