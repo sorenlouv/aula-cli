@@ -1224,6 +1224,39 @@ test('raw with a method Aula does not have blames the spelling, not the client',
   assert.doesNotMatch(result.stderr, /bug in aula-cli/);
 });
 
+// The bypass layer's whole point, end to end: the calendar is a READ that Aula
+// models as a POST, and `raw` being GET-only made it unreachable by the escape
+// hatch as well as by the wrapper — so a window the wrapper does not offer (a
+// past one) had no route at all. `--body` is that route.
+test('raw --body reaches a read Aula models as a POST', () => {
+  const result = sandbox().run(
+    'raw',
+    'calendar.getEventsByProfileIdsAndResourceIds',
+    '--body',
+    '{"instProfileIds":[11],"start":"2020-01-01 00:00:00.0000+0100","end":"2020-01-20 00:00:00.0000+0100"}',
+    '--no-cache',
+  );
+  assert.equal(result.code, 0, result.stderr);
+  const events = JSON.parse(result.stdout);
+  assert.ok(Array.isArray(events) && events.length > 0, 'the past window answered');
+});
+
+test('raw --body still cannot write, and a malformed body is a usage error', () => {
+  const box = sandbox();
+  const write = box.run('raw', 'messaging.sendMessage', '--body', '{"text":"hej"}');
+  assert.equal(write.code, 2);
+  assert.match(write.stderr, /read-only/);
+  assert.equal(write.requests.length, 0, 'the guard runs before any socket opens');
+
+  const malformed = box.run('raw', 'posts.getAllPosts', '--body', '{not json');
+  assert.equal(malformed.code, 2);
+  assert.match(malformed.stderr, /--body must be valid JSON/);
+
+  const scalar = box.run('raw', 'posts.getAllPosts', '--body', '"just a string"');
+  assert.equal(scalar.code, 2);
+  assert.match(scalar.stderr, /--body must be a JSON object/);
+});
+
 // 5, not the literal 2 the old scheme left behind: no retry brings a dead
 // broker session back, and nothing about the command line is wrong.
 test('refresh-stepup with a lapsed broker session is exit 5', () => {
