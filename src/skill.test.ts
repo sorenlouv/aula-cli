@@ -22,6 +22,7 @@ import {
   parseCommandLine,
   TOOL_FLAGS,
 } from './cli-options.ts';
+import { SESSION_FREE_COMMANDS } from './auth.ts';
 import { contractFrame } from './contract.ts';
 
 /**
@@ -130,6 +131,21 @@ describe('the skill template and the code agree', () => {
     const wanted = new Set(agentFacing.flatMap((command) => optionNamesFor(command)));
     const missing = [...wanted].filter((name) => !template.includes(`--${name}`));
     expect(missing, 'options of read commands the template never mentions').toEqual([]);
+  });
+
+  test('the "still answers without a session" table is the list the code prints', () => {
+    // The template had its own copy of this table, and the copy went stale the
+    // moment `--upstream` joined SESSION_FREE_COMMANDS — so the skill told an
+    // agent holding an exit 5 that four things still work while the tool's own
+    // error said five. Both directions: a command the code lists and the
+    // template omits, and one the template offers that no longer answers.
+    const listed = SESSION_FREE_COMMANDS.map((entry) => entry.command);
+    const missing = listed.filter((command) => !template.includes(`\`aula ${command}\``));
+    expect(missing, 'session-free commands the template does not offer').toEqual([]);
+
+    const offered = [...template.matchAll(/^\| `aula ([^`]+)` \|/gm)].map((m) => m[1] ?? '');
+    const stale = offered.filter((command) => !listed.includes(command));
+    expect(stale, 'commands the template offers that need a session after all').toEqual([]);
   });
 
   test('the schedule the template describes is the one the code installs', () => {

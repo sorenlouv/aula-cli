@@ -46,7 +46,8 @@ be a permissions problem must look different from a quiet day.
 Any question Aula's APIs can answer should be answerable in natural language.
 Aula's frontend calls some 300 methods and this client wraps a dozen, so
 wrapping another read endpoint is on-mission by default; `raw` is the escape
-hatch until then.
+hatch until then, and `aula --upstream` is what tells an agent it exists and how
+to use it without this checkout.
 
 ## Not goals
 
