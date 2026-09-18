@@ -52,7 +52,7 @@ import {
 } from './calendar/selection.ts';
 import { AulaAuthError, AulaClient, AulaMethodError, CALENDAR_MAX_SPAN_DAYS } from './client.ts';
 import { briefSlots, readConfig, updateConfig } from './config.ts';
-import { contractSlice } from './contract.ts';
+import { contractFrame } from './contract.ts';
 import {
   buildDigest,
   collectAlbums,
@@ -163,8 +163,10 @@ Everyday:
   install-skill [claude|codex] Teach your agent to use this tool, then open a
                                new session (--out <dir> to write elsewhere)
   version                      Which build this is, and for which platform
-  --contract                   This tool's slice of the fleet's shared contract:
-                               its exit codes and which of them carry a body
+  --contract                   This tool's slice of the fleet's shared contract,
+                               in the frame every sibling prints: what each exit
+                               code means, which carry a body, and every command's
+                               keys
 
 Options for new:
   --days <n>                   How much history to read (default 60)
@@ -249,7 +251,7 @@ async function main(): Promise<number> {
   // so it has to answer with no login, no network and no command. Every
   // sibling answers it; here it was `Unknown command "--contract"`, exit 2.
   if (command === '--contract') {
-    console.log(toJson(contractSlice()));
+    console.log(toJson(contractFrame()));
     return 0;
   }
 
@@ -887,7 +889,7 @@ function commandHelp(command: CliCommand): string {
     return `  ${flag.padEnd(width)}   ${meta.help}${fallback ? ` (default ${fallback})` : ''}`;
   });
 
-  const shape = contractSlice().commands as Record<string, CommandShape> | undefined;
+  const shape = contractFrame().commands as Record<string, CommandShape> | undefined;
   const declared = shape?.[command];
   const output = declared ? describeOutput(declared) : ['  Text, for a person.'];
 

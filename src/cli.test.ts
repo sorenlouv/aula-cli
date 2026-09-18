@@ -639,16 +639,24 @@ test('every command that takes --limit reports the cut it made', () => {
 });
 
 // Every sibling answers `--contract`, and the fleet's instructions say this one
-// does too. It was `Unknown command "--contract"`, exit 2.
-test('--contract answers with no login and no request', () => {
+// does too. It was `Unknown command "--contract"`, exit 2. Since contract 7 the
+// whole fleet prints one frame, so an agent can learn it from any tool: `tool`
+// names which one answered, and `exit_codes` is the shared table cut to this
+// tool's codes rather than the slice's bare array. `contract.test.ts` holds the
+// frame to the file; this holds the process to the frame.
+test('--contract answers with the fleet frame, no login and no request', () => {
   const result = runWithoutLogin('--contract');
   assert.equal(result.code, 0, result.stderr);
-  const slice = JSON.parse(result.stdout);
+  const frame = JSON.parse(result.stdout);
   const vendored = JSON.parse(readFileSync(join(ROOT, 'contract.json'), 'utf8'));
-  assert.equal(slice.contract, vendored.contract);
-  assert.deepEqual(slice.exit_codes, vendored.tools.aula.exit_codes);
-  assert.deepEqual(slice.body_on, vendored.tools.aula.body_on);
-  assert.match(slice.bridge.boundary, /never here/);
+  assert.equal(frame.contract, vendored.contract);
+  assert.equal(frame.tool, 'aula');
+  assert.deepEqual(Object.keys(frame.exit_codes), ['0', '1', '2', '4', '5']);
+  assert.equal(frame.exit_codes['4'], vendored.exit_codes['4']);
+  assert.deepEqual(frame.body_on, vendored.tools.aula.body_on);
+  assert.deepEqual(frame.error_body, vendored.error_body);
+  assert.deepEqual(frame.stdout, vendored.stdout);
+  assert.match(frame.bridge.boundary, /never here/);
   assert.equal(result.requests.length, 0);
 });
 

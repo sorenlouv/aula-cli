@@ -21,7 +21,7 @@ import {
   optionsFor,
   parseCommandLine,
 } from './cli-options.ts';
-import { contractSlice } from './contract.ts';
+import { contractFrame } from './contract.ts';
 
 /**
  * Commands an agent never runs by hand, so the template need not teach them:
@@ -105,7 +105,7 @@ describe('the skill template and the code agree', () => {
     );
     const known = new Set([
       ...TOOL_FLAGS,
-      ...(Object.keys(contractSlice().commands as object) as CliCommand[]).flatMap(optionsFor),
+      ...(Object.keys(contractFrame().commands as object) as CliCommand[]).flatMap(optionsFor),
       ...INTERNAL_OR_SETUP.flatMap(optionsFor),
       ...(['new', 'open', 'publish', 'schedule', 'login', 'calendars'] as CliCommand[]).flatMap(
         optionsFor,
@@ -129,7 +129,7 @@ describe('the skill template and the code agree', () => {
   });
 
   test('every option an agent-facing command takes is mentioned somewhere', () => {
-    const agentFacing = Object.keys(contractSlice().commands as object) as CliCommand[];
+    const agentFacing = Object.keys(contractFrame().commands as object) as CliCommand[];
     const wanted = new Set(agentFacing.flatMap((command) => optionNamesFor(command)));
     const missing = [...wanted].filter((name) => !template.includes(`--${name}`));
     expect(missing, 'options of read commands the template never mentions').toEqual([]);

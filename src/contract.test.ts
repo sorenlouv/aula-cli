@@ -29,7 +29,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { contractSlice } from './contract.ts';
+import { contractFrame } from './contract.ts';
 import { ERROR_CODES, EXIT } from './errors.ts';
 import { isRecord } from './validation.ts';
 
@@ -125,20 +125,64 @@ test('the error codes this tool emits are exactly the ones it declares, and the 
   for (const code of declared) expect(known).toContain(code);
 });
 
-test('--contract prints this slice with the sections its output is an instance of', () => {
+// ------------------------------------------------------------- the frame
+// Contract 7 gave the fleet ONE shape for `--contract`, because two tools
+// printed two and an agent could not learn the answer from one and reuse it on
+// the next. These hold this tool to that frame: the key set, and the cut of the
+// shared exit table down to the codes this tool emits. Key ORDER is not
+// asserted — nothing reading JSON depends on it.
+
+test('--contract prints the fleet frame: exactly these keys, and no others', () => {
+  const frame = contractFrame();
+  // The whole slice — `exit_codes`, `body_on`, `error_codes`, `commands` and
+  // the rest — plus the four the frame adds. Written this way rather than as a
+  // literal list so a key added to the slice is carried rather than rejected;
+  // the cut and the verbatim sections are what the other two tests pin.
+  expect(new Set(Object.keys(frame))).toEqual(
+    new Set([
+      'contract',
+      'tool',
+      'error_body',
+      'stdout',
+      ...Object.keys(loadContract() as unknown as Record<string, unknown>),
+    ]),
+  );
+  // Outside the join graph on purpose: no join key leads into this tool, and
+  // printing the table would suggest one does. And it never exits 3.
+  expect(frame).not.toHaveProperty('join_keys');
+  expect(frame).not.toHaveProperty('exit_3_body');
+});
+
+test('the frame carries the slice and the shared sections verbatim', () => {
   const all = loadAll();
-  // `contractSlice` imports the JSON so the compiled binary carries it; this
+  const frame = contractFrame();
+  const { exit_codes: _expanded, tool, ...rest } = frame;
+  // `contractFrame` imports the JSON so the compiled binary carries it; this
   // reads the same file from disk, so the two routes are held to one answer.
-  expect(contractSlice()).toEqual({
+  expect(tool).toBe('aula');
+  expect(all.tools[tool as string]).toBeDefined();
+  const { exit_codes: _declared, ...slice } = loadContract();
+  expect(rest).toEqual({
     contract: all.contract,
-    ...loadContract(),
+    ...slice,
     error_body: all.error_body,
     stdout: all.stdout,
   });
-  // Outside the join graph on purpose: no join key leads into this tool, and
-  // printing the table would suggest one does. And it never exits 3.
-  expect(contractSlice()).not.toHaveProperty('join_keys');
-  expect(contractSlice()).not.toHaveProperty('exit_3_body');
+});
+
+test('the frame expands exit_codes into the shared table, cut to this tool', () => {
+  // The slice's own `exit_codes` is a bare array — it says WHICH codes this
+  // tool emits and nothing about what they mean, and the agent asking is
+  // holding a binary with no checkout beside it. The frame expands it.
+  const all = loadAll();
+  const expanded = contractFrame().exit_codes as Record<string, string>;
+  const declared = [...loadContract().exit_codes].sort((a, b) => a - b);
+  expect(Object.keys(expanded)).toEqual(declared.map(String));
+  for (const code of declared) expect(expanded[String(code)]).toBe(all.exit_codes[String(code)]);
+  // Cut, not the whole table: 3 is a code this tool never emits, and the
+  // table's own `_note` is not a code at all.
+  expect(expanded).not.toHaveProperty('3');
+  expect(expanded).not.toHaveProperty('_note');
 });
 
 // ------------------------------------------------------ the slice, both ways

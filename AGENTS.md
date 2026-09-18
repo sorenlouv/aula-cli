@@ -81,13 +81,27 @@ does — it was `Unknown command "--contract"`, exit 2, while the fleet's own
 instructions said each tool answers it. `src/contract.ts` *imports* the vendored
 `contract.json` rather than reading it, because the compiled binary has no
 checkout beside it (see Releasing). No `join_keys` in the output: this tool sits
-outside the join graph on purpose. Since contract 7 the slice declares every
-agent-facing command — keys, `nested` by jq path, `nullable`, `on_exit_4`,
-`notes`, and the `error_codes` the error line can carry — and
-`src/contract.test.ts` holds each declaration to the output the code produces
-against the fake Aula, in both directions: a declared key that is missing
-fails, and an emitted object nothing declares fails. Change a shape and the
-slice, or the test says which side is wrong.
+outside the join graph on purpose.
+
+**The output is the fleet's one frame**, so an agent can learn it from any tool
+and reuse it on the next — two tools printed two shapes before contract 7.
+`contract`, `tool` (the frame is otherwise anonymous: two outputs side by side
+could not be told apart without reading `repo`), `exit_codes`, `body_on`,
+`error_codes`, the shared `error_body` and `stdout` sections verbatim, then
+`commands` and the rest of the slice. `exit_codes` is an OBJECT here, not the
+slice's bare array: the array in `contract.json` says *which* codes this tool
+emits, and the frame expands each to its meaning from the shared table, cut to
+that list — five integers leave the reader looking for a table they do not have.
+The table's own `_note` is dropped in the cut; it is not a code, and what it
+says is answered by the `body_on` beside it. `contract.test.ts` asserts the key
+set and the cut, `cli.test.ts` asserts the process prints them.
+
+Since contract 7 the slice declares every agent-facing command — keys, `nested`
+by jq path, `nullable`, `on_exit_4`, `notes`, and the `error_codes` the error
+line can carry — and `src/contract.test.ts` holds each declaration to the output
+the code produces against the fake Aula, in both directions: a declared key that
+is missing fails, and an emitted object nothing declares fails. Change a shape
+and the slice, or the test says which side is wrong.
 
 **Exit 4 is returned, not just declared.** It sat in `EXIT`, the skill and the
 contract while nothing emitted it — `Object.values(EXIT)` was all that kept the
