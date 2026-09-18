@@ -35,7 +35,8 @@ import { cmd } from './runtime.ts';
 import { buildFamily, integrationContext, type Family } from './family.ts';
 import { readWidget, SUPPORTED_WIDGET_IDS } from './integrations/index.ts';
 import { addLocalDays, isoDate, isoWeekString } from './integrations/types.ts';
-import { fmt } from './io.ts';
+import { EXIT, failWith } from './errors.ts';
+import { fmt, toJson } from './io.ts';
 import { errorMessage } from './validation.ts';
 import { WIDGETS, WidgetTokens } from './widgets.ts';
 
@@ -494,8 +495,17 @@ function finish(checks: Check[], client: AulaClient, opts: { asText: boolean }):
     },
     checks,
   };
-  console.log(opts.asText ? renderDoctor(report) : JSON.stringify(report, null, 2));
-  return report.ok ? 0 : 1;
+  console.log(opts.asText ? renderDoctor(report) : toJson(report));
+  if (report.ok) return EXIT.OK;
+  // The one exit 1 in this tool that has a body: the report is the point of
+  // the command, and it is most worth reading when something failed. The error
+  // line still closes stderr, so a caller that branches on the code and reads
+  // that line is told where the detail is.
+  return failWith({
+    code: 'UPSTREAM',
+    message: `${report.summary.failed} of ${checks.length} checks failed.`,
+    hint: 'The full report is on stdout; each failed check carries a note saying what Aula answered.',
+  });
 }
 
 const TAGS: Record<CheckStatus, string> = {

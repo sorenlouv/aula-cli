@@ -61,7 +61,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { BRIEF_DIR } from './brief/state.ts';
 import { updateConfig } from './config.ts';
-import { formatRemedy, UsageError } from './errors.ts';
+import { CliError, failWith, formatRemedy, UsageError } from './errors.ts';
 import { claudeMissingRemedy } from './llm/claude.ts';
 import { cliInvocation, cmd } from './runtime.ts';
 import { clock, formatSlots, parseSlots, type Slot, SlotFormatError } from './slots.ts';
@@ -302,7 +302,7 @@ export function runSchedule(opts: { remove: boolean; at?: string }): number {
         );
       } else {
         const claude = resolveClaude();
-        if (!claude) return 1;
+        if (!claude) return claudeMissing();
         rememberSlots(slots);
         console.error(
           'No scheduler integration for this platform. The cron equivalent (a quarter-hourly',
@@ -352,14 +352,26 @@ function resolveClaude(): string | null {
   return null;
 }
 
+/**
+ * The exit for a machine with no `claude` on it, after {@link resolveClaude}
+ * has printed the remedy. 5, as `calendars` already answers the same state: a
+ * missing program is still missing on the next attempt. This was 1.
+ */
+function claudeMissing(): number {
+  return failWith({
+    code: 'SETUP',
+    message: 'Claude Code is not installed, and the overview is written by running it.',
+    hint: 'Install Claude Code, then run the command again.',
+  });
+}
+
 function installDarwin(slots: Slot[]): number {
   const uid = process.getuid?.();
   if (uid === undefined) {
-    console.error('Could not determine the user id.');
-    return 1;
+    throw new CliError('BUG', 'Could not determine the user id.');
   }
   const claude = resolveClaude();
-  if (!claude) return 1;
+  if (!claude) return claudeMissing();
   const { coordinator } = programs();
   const plist = plistPath();
   const logPath = join(BRIEF_DIR, 'launchd.log');
@@ -389,8 +401,9 @@ function installDarwin(slots: Slot[]): number {
   sh(['launchctl', 'bootout', `gui/${uid}/${LABEL}`]);
   const loaded = sh(['launchctl', 'bootstrap', `gui/${uid}`, plist]);
   if (!loaded.ok) {
-    console.error(`launchctl bootstrap failed: ${loaded.err}`);
-    return 1;
+    // `SETUP`: launchd refused the agent on this machine, which no retry of the
+    // same command changes.
+    throw new CliError('SETUP', `launchctl bootstrap failed: ${loaded.err}`);
   }
   console.log(`Installed — every day at ${formatSlots(slots)}, ${retryNote()}.`);
   console.log('  Missed a slot because the Mac was off or asleep? It catches up on the next wake.');
@@ -430,15 +443,14 @@ function removeDarwin(): number {
 function installWindows(slots: Slot[]): number {
   // Windows tasks inherit PATH from the registry, so `claude` does not need
   // baking — but a `claude` that is not installed at all still fails at 06:00.
-  if (!resolveClaude()) return 1;
+  if (!resolveClaude()) return claudeMissing();
   // No coordinator on Windows: Task Scheduler has its own wake handling, so
   // the task runs the brief directly.
   const { direct } = programs();
   rememberSlots(slots);
   const created = sh(['schtasks', ...schtasksCreateArgs({ slots, program: direct })]);
   if (!created.ok) {
-    console.error(`schtasks failed: ${created.err}`);
-    return 1;
+    throw new CliError('SETUP', `schtasks failed: ${created.err}`);
   }
   console.log(`Installed — every day at ${formatSlots(slots)}, as Scheduled Task "${TASK_NAME}".`);
   console.log(

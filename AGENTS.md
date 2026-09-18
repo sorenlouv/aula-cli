@@ -46,11 +46,35 @@ lines saying so.
 | 1 | Aula is down or blocking, or a bug in this client |
 | 2 | usage error |
 | 4 | resolved, but nothing to report |
-| 5 | credentials or setup — run `aula login` |
+| 5 | no usable session, or setup — never fixed by retrying |
 
 They are the public contract, shared with `cvr`, `bolig`, `tinglysning` and
 `dgs` and recorded in `../contract.json`; change them only in lockstep with
 that file and `../AGENTS.md`.
+
+**Every exit without a body ends stderr with the error line** —
+`{"error":{"code","message","hint"}}`, one line of compact JSON, after whatever
+prose came before it. The code is on the error class (`CliError.errorCode`), not
+worked out from the message when it is printed, and the exit follows from the
+code (`EXIT_FOR`), never the other way round. It used to be worked out from
+nothing: the catch chain picked an exit by `instanceof`, everything else an
+agent could branch on was prose, and a laptop with no network got a raw stack
+through the "bug in this client" branch — `fetch` rejecting is now `NETWORK`.
+Codes are `USAGE`, `SETUP`, `NETWORK`, `UPSTREAM` and `BUG`; no `BLOCKED`,
+because Aula has no bot wall this client has met. A site that prints its own
+prose and returns a code calls `failWith`; `ensureErrorLine` is the net under a
+forgotten one. `doctor` is the one exit 1 that also has a body. On stdout, JSON
+is one line unless a terminal is reading it (`toJson`).
+
+**Exit 5 never tells the reader to log in.** It said "Run a MitID login: `aula
+login`", and the reader is usually an agent, which took that as the next command
+— a login costs the user an approval on their phone, and an abandoned one trips
+MitID's parallel-session detector for the attempt after it. `sessionGuidance`
+and `sessionHint` in `auth.ts` are the one wording: what still answers without
+a session (`SESSION_FREE_COMMANDS`, each run without a login by `cli.test.ts`),
+and that the user is asked before `aula login`. `AulaAuthError` appends it to
+every credential failure, so a throw site cannot forget it. The skill and
+`SETUP.md` say the same thing in the same words.
 
 **`aula --contract` prints this tool's slice of that file**, as every sibling
 does — it was `Unknown command "--contract"`, exit 2, while the fleet's own
@@ -59,15 +83,45 @@ instructions said each tool answers it. `src/contract.ts` *imports* the vendored
 checkout beside it (see Releasing). No `join_keys` in the output: this tool sits
 outside the join graph on purpose.
 
+**The output is the fleet's one frame**, so an agent can learn it from any tool
+and reuse it on the next — two tools printed two shapes before contract 7.
+`contract`, `tool` (the frame is otherwise anonymous: two outputs side by side
+could not be told apart without reading `repo`), `exit_codes`, `body_on`,
+`error_codes`, the shared `error_body` and `stdout` sections verbatim, then
+`commands` and the rest of the slice. `exit_codes` is an OBJECT here, not the
+slice's bare array: the array in `contract.json` says *which* codes this tool
+emits, and the frame expands each to its meaning from the shared table, cut to
+that list — five integers leave the reader looking for a table they do not have.
+The table's own `_note` is dropped in the cut; it is not a code, and what it
+says is answered by the `body_on` beside it. `contract.test.ts` asserts the key
+set and the cut, `cli.test.ts` asserts the process prints them.
+
+Since contract 7 the slice declares every agent-facing command — keys, `nested`
+by jq path, `nullable`, `on_exit_4`, `notes`, and the `error_codes` the error
+line can carry — and `src/contract.test.ts` holds each declaration to the output
+the code produces against the fake Aula, in both directions: a declared key that
+is missing fails, and an emitted object nothing declares fails. Change a shape
+and the slice, or the test says which side is wrong.
+
 **Exit 4 is returned, not just declared.** It sat in `EXIT`, the skill and the
 contract while nothing emitted it — `Object.values(EXIT)` was all that kept the
 contract test green — so an empty inbox left at exit 0. `emit` takes a
 `nothing` flag and `emitList` derives it; the body is still printed, because
 `body_on` is `[0, 4]`. Pass it only on positive evidence of emptiness: not for
-one page of a thread, not for a vendor plan carrying `warnings` (a failed fetch
-has the same `items: []` as a quiet week), and never for `digest`. A capability
-no school offers (`NoProviderError`) is 4 with `[]`; it used to be a stack trace
-at exit 1.
+one page of a thread, not for a vendor plan whose `status` is `failed`, and
+never for `digest`. A capability no school offers (`NoProviderError`) is 4 with
+`[]`; it used to be a stack trace at exit 1.
+
+**A vendor plan states its `status`, and a read that failed outright is exit
+1.** A failed fetch and a quiet week are the same `items: []` on the wire; the
+difference lived in whether `warnings` happened to be non-empty, which the
+skill told the agent to check in prose, and which the one warning that is not a
+failure ("the vendor was not asked") got wrong. `graded` in
+`integrations/index.ts` stamps `ok` / `partial` / `failed` / `skipped`; the plan
+commands (`emitPlans`) print a body at exit 0 or 4 when anything is readable or
+nothing failed, and exit 1 with no body when nothing readable came back and a
+vendor failed — the vendor's reason goes to stderr. `digest` never exits for
+one part; its `weeklyPlans[].status` is what cannot be misread.
 
 **Who typed the method name decides the code.** `AulaMethodError` — the
 read-only guard refusing a name, or Aula answering 404 for one — is exit 1 from
@@ -283,6 +337,25 @@ fallback sources.
   saying "hver torsdag"; one week alone is a one-off. `recurrenceWeekdayOf` in
   `dates.ts` is the one reader of that evidence, shared by the validator and
   the ranker — it was two slightly different copies.
+- **An answer is as old as its oldest part, and says so.** Every cached
+  response is stored with the moment it was fetched (`Stamped` in `cache.ts`),
+  `ResponseCache.oldestHitAt` is the oldest one a process answered from, and
+  `AulaClient.dataFetchedAt()` turns that into the `fetchedAt` on `digest` and
+  on every list envelope. `digest` used to stamp itself `generatedAt: now`
+  whether it had made sixty requests or none — and "did the teacher reply yet?"
+  is a question where ten cached minutes are the whole answer. An entry written
+  before entries carried a time reads as a miss.
+- **`status` answers from disk, and never refreshes anything.** It reported
+  the access token's remaining minutes — which renew themselves and say nothing
+  about whether the login works — and read them through the refreshing path,
+  so asking could retire the token of a run beside it. Whether Aula accepts the
+  login is only knowable by asking Aula, so `session-seen.ts` writes the answer
+  down whenever a command does: `profiles.getProfileContext` succeeding (the
+  bootstrap every uncached read performs, and the only response that states
+  step-up), an `AulaAuthError` at the top level, and a login, logout or
+  `refresh-stepup`. `status` reads that note back. Aula publishes no lifetime
+  for the refresh token or for step-up, so there is no expiry to report; the
+  last observation, with its time, is the substitute.
 - **Two caches, and `cache status` reports both.** Remote *responses* — Aula,
   the vendor weekly plans and the Google Calendar reads — share one TTL'd
   `ResponseCache` in `~/.aula/cache/responses`; the model's *layout* is cached
@@ -331,6 +404,11 @@ fallback sources.
   index is null for one `--page` or an incomplete read — `attachments` used to
   take `--page` and number that page from zero, positions `attachment` then
   resolved against the whole thread.
+- **`contacts` rows are ours, not Aula's.** It printed the wire object with a
+  `group` stapled on — the one command whose keys Aula could rename, and the
+  one carrying the fleet's bridge (`--role guardian` → `address`), under
+  `postalDistrict`. `normaliseContact` in `cli-helpers.ts` is the shape now,
+  and `contract.json` declares it.
 - `family.ts` resolves the id sets endpoints want once
   (`postInstitutionProfileIds`, `childInstitutionProfileIds`,
   `institutionCodes`); re-deriving at a call site is how wrong-id failures start.

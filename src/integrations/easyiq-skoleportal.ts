@@ -33,7 +33,7 @@ import {
   type IntegrationContext,
   isoDate,
   isoWeekToMonday,
-  type WeekPlan,
+  type FetchedPlan,
   type WeekPlanItem,
 } from './types.ts';
 
@@ -199,7 +199,7 @@ export async function getWeekPlan(
   ctx: IntegrationContext,
   tokens: WidgetTokens,
   widgetId: string,
-): Promise<WeekPlan> {
+): Promise<FetchedPlan> {
   const date = weekParam(ctx.isoWeek);
   const institutions = ctx.institutionCodes.join(',');
   const items: WeekPlanItem[] = [];
@@ -283,7 +283,7 @@ export async function getAssignments(
   ctx: IntegrationContext,
   tokens: WidgetTokens,
   widgetId: string,
-): Promise<WeekPlan> {
+): Promise<FetchedPlan> {
   const date = weekParam(ctx.isoWeek);
   const institutions = ctx.institutionCodes.join(',');
   const childFilter = ctx.children

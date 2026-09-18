@@ -26,6 +26,24 @@ export const fmt = {
   yellow: (s: string) => paint('33', s),
 };
 
+/**
+ * The JSON this CLI prints on stdout: indented for a person, one line for a
+ * program.
+ *
+ * It was always indented, and a pipe is the case where nobody reads the
+ * indentation — it is paid for in tokens by the agent on the other end, on
+ * every call, and a `digest` is mostly indentation by line count. `jq .`
+ * restores it for anyone who wants to look.
+ *
+ * `=== true` on purpose: `isTTY` is genuinely `undefined` on a pipe, which is
+ * the case this exists to detect.
+ */
+export function toJson(value: unknown): string {
+  // The types declare `isTTY` a boolean; at runtime it is absent on a pipe.
+  // oxlint-disable-next-line typescript/no-unnecessary-boolean-literal-compare
+  return JSON.stringify(value, null, process.stdout.isTTY === true ? 2 : undefined);
+}
+
 export function info(message: string): void {
   stderr.write(`${message}\n`);
 }

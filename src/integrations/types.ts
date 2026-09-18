@@ -81,7 +81,8 @@ export type WeekPlanItem = {
   url?: string;
 };
 
-export type WeekPlan = {
+/** What an adapter returns: the vendor's answer, before it is graded. */
+export type FetchedPlan = {
   /**
    * `'unavailable'` is not a vendor: it is the placeholder a capability gets
    * when the read threw before any vendor could answer, so the failure travels
@@ -97,6 +98,26 @@ export type WeekPlan = {
   /** Per-child soft failures: the call worked, this child did not. */
   warnings?: string[];
 };
+
+/**
+ * What a plan's answer amounts to, stated rather than left to be inferred
+ * from `items` and `warnings` together.
+ *
+ * A failed vendor read and a quiet week are the same `items: []` on the wire,
+ * and the difference lived in whether `warnings` happened to be non-empty —
+ * which the skill told the agent to check, in prose, and which one warning
+ * that is not a failure ("the vendor was not asked") got wrong.
+ *
+ *   ok       the vendor answered for every child asked; `items` is the plan
+ *   partial  some of it: items are real, `warnings` names who is missing
+ *   failed   nothing readable came back and `warnings` says why — never a
+ *            quiet week
+ *   skipped  the vendor was not asked, because no selected child attends a
+ *            school; an answer, not a failure
+ */
+export type WeekPlanStatus = 'ok' | 'partial' | 'failed' | 'skipped';
+
+export type WeekPlan = FetchedPlan & { status: WeekPlanStatus };
 
 // -------------------------------------------------------------- week helpers
 

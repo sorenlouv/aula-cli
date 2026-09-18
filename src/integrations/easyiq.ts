@@ -19,7 +19,7 @@ import {
   isStringOrNumber,
 } from '../validation.ts';
 import { type WidgetTokens, widgetFetch } from '../widgets.ts';
-import type { IntegrationContext, WeekPlan, WeekPlanItem } from './types.ts';
+import type { FetchedPlan, IntegrationContext, WeekPlanItem } from './types.ts';
 
 const EASYIQ_URL = 'https://api.easyiqcloud.dk/api/aula/weekplaninfo';
 
@@ -58,7 +58,7 @@ export async function getWeekPlan(
   ctx: IntegrationContext,
   tokens: WidgetTokens,
   widgetId: string,
-): Promise<WeekPlan> {
+): Promise<FetchedPlan> {
   const items: WeekPlanItem[] = [];
   const warnings: string[] = [];
 

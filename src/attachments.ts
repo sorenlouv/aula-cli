@@ -25,8 +25,10 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { CliError } from './errors.ts';
 import { ATTACHMENT_TIMEOUT_MS, remoteReadSignal } from './transport.ts';
 import type { Attachment } from './types.ts';
+import { errorMessage } from './validation.ts';
 
 const ATTACHMENTS_DIR = process.env.AULA_ATTACHMENTS_DIR ?? join(homedir(), '.aula', 'attachments');
 
@@ -128,7 +130,7 @@ export type DownloadResult = {
   path: string;
   bytes: number;
   filename: string;
-  mediaType?: string;
+  mediaType: string | null;
 };
 
 export async function downloadAttachment(opts: {
@@ -141,9 +143,17 @@ export async function downloadAttachment(opts: {
   // Deliberately plain `fetch`: no cookie, no Authorization, no custom headers.
   const res = await fetch(opts.attachment.url, {
     signal: remoteReadSignal(ATTACHMENT_TIMEOUT_MS),
+  }).catch((err: unknown) => {
+    // No answer at all — not the expired-URL case below, which is an answer.
+    throw new CliError(
+      'NETWORK',
+      `Could not reach the file store to download "${opts.attachment.name}" (${errorMessage(err)}).`,
+      'Check the network connection and try again.',
+    );
   });
   if (!res.ok) {
-    throw new Error(
+    throw new CliError(
+      'UPSTREAM',
       `Could not download "${opts.attachment.name}" (HTTP ${res.status}). ` +
         `Presigned Aula attachment URLs expire after about an hour — re-read the ` +
         `thread and try again.`,
@@ -152,7 +162,8 @@ export async function downloadAttachment(opts: {
 
   const declared = Number(res.headers.get('content-length') ?? '0');
   if (declared > MAX_BYTES) {
-    throw new Error(
+    throw new CliError(
+      'UPSTREAM',
       `"${opts.attachment.name}" is ${declared} bytes, over the ${MAX_BYTES}-byte limit.`,
     );
   }
@@ -165,12 +176,11 @@ export async function downloadAttachment(opts: {
   // Same reasoning as the session file: this is personal data about children.
   writeFileSync(path, bytes, { mode: 0o600 });
 
-  const mediaType = res.headers.get('content-type') ?? opts.attachment.mediaType;
   return {
     path,
     bytes: bytes.byteLength,
     filename,
-    ...(mediaType ? { mediaType } : {}),
+    mediaType: res.headers.get('content-type') ?? opts.attachment.mediaType ?? null,
   };
 }
 
@@ -192,7 +202,10 @@ export async function readBoundedBody(
       total += value.byteLength;
       if (total > maxBytes) {
         await reader.cancel();
-        throw new Error(`"${name}" exceeded the ${maxBytes}-byte limit while downloading.`);
+        throw new CliError(
+          'UPSTREAM',
+          `"${name}" exceeded the ${maxBytes}-byte limit while downloading.`,
+        );
       }
       chunks.push(value);
     }

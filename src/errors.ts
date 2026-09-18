@@ -28,32 +28,149 @@ export const EXIT = {
    * a read that failed, was cut, or came back partial is not "nothing".
    */
   NOTHING: 4,
-  /** Credentials or setup — run `aula login`. Never fixed by retrying. */
+  /**
+   * Credentials or setup. Never fixed by retrying — and a login is the user's
+   * to start, never something an error message tells an agent to run.
+   */
   SETUP: 5,
 } as const;
+
+/**
+ * The codes this tool can put on its error line — a subset of the contract's
+ * `error_body.codes`, declared as `tools.aula.error_codes` and asserted against
+ * it in both directions by `contract.test.ts`.
+ *
+ * No `BLOCKED`: Aula has no bot wall, waiting room or rate limit this client
+ * has ever met. MitID's parallel-session detector is the nearest thing, and
+ * that is a login that cannot proceed — `SETUP`.
+ */
+export const ERROR_CODES = ['USAGE', 'SETUP', 'NETWORK', 'UPSTREAM', 'BUG'] as const;
+export type ErrorCode = (typeof ERROR_CODES)[number];
+
+/** The exit each code leaves with. One direction only: an exit does not name a code. */
+export const EXIT_FOR: Readonly<Record<ErrorCode, number>> = {
+  USAGE: EXIT.USAGE,
+  SETUP: EXIT.SETUP,
+  NETWORK: EXIT.ERROR,
+  UPSTREAM: EXIT.ERROR,
+  BUG: EXIT.ERROR,
+};
+
+/** What the last line of stderr says on every exit that has no stdout body. */
+export type ErrorLine = { code: ErrorCode; message: string; hint: string | null };
+
+/**
+ * An error that knows what its error line says.
+ *
+ * The code lives on the class rather than being worked out from the message
+ * when it is printed. It used to be worked out from nothing at all: the catch
+ * chain in `cli.ts` picked an exit by `instanceof`, and everything an agent
+ * could branch on beyond that number was prose on stderr — including, for a
+ * network failure, a raw stack that said "this is a bug" about a laptop with
+ * no wifi.
+ */
+export class CliError extends Error {
+  readonly errorCode: ErrorCode;
+  /** The next action, in one line, or null when there is none to suggest. */
+  readonly hint: string | null;
+
+  constructor(errorCode: ErrorCode, message: string, hint: string | null = null) {
+    super(message);
+    this.name = 'CliError';
+    this.errorCode = errorCode;
+    this.hint = hint;
+  }
+
+  /** One sentence: the first line of the message, which every throw site writes to stand alone. */
+  get headline(): string {
+    return firstLineOf(this.message);
+  }
+}
 
 /**
  * Raised when the *user* got the invocation wrong — an unknown child, an
  * unparseable date. These print as a plain message; a stack trace would only
  * bury the part they need to read.
  */
-export class UsageError extends Error {
-  constructor(message: string) {
-    super(message);
+export class UsageError extends CliError {
+  constructor(message: string, hint: string | null = null) {
+    super('USAGE', message, hint);
     this.name = 'UsageError';
   }
 }
 
 /**
  * Raised when there are no usable credentials — no stored MitID login, or one
- * that cannot be decrypted. Prints as a plain message with the fix (run
- * `login`); exit code 5, so the skill can tell "log in again" from a bug.
+ * that cannot be decrypted. Exit code 5, so the skill can tell a missing
+ * session from a bug.
  */
-export class AulaSessionError extends Error {
-  constructor(message: string) {
-    super(message);
+export class AulaSessionError extends CliError {
+  constructor(message: string, hint: string | null = null) {
+    super('SETUP', message, hint);
     this.name = 'AulaSessionError';
   }
+}
+
+/** The first line of a message: what an error line's one-sentence `message` holds. */
+export function firstLineOf(text: string): string {
+  return text.split('\n', 1)[0]?.trim() ?? '';
+}
+
+/**
+ * The error line for anything that was thrown.
+ *
+ * A {@link CliError} answers for itself. Everything else is either the
+ * vendored login flow's own hierarchy — which this repo does not edit, and
+ * whose every failure is a credentials problem — or something nobody planned
+ * for, which is what `BUG` means.
+ */
+export function errorLineFor(err: unknown, opts: { isAuthFlow?: boolean } = {}): ErrorLine {
+  if (err instanceof CliError) {
+    return { code: err.errorCode, message: err.headline, hint: err.hint };
+  }
+  const message = firstLineOf(err instanceof Error ? err.message : String(err));
+  if (opts.isAuthFlow) return { code: 'SETUP', message, hint: null };
+  return {
+    code: 'BUG',
+    message: message || 'aula-cli failed without saying why.',
+    hint: 'This is a bug in aula-cli, not something you did; the stack above says where.',
+  };
+}
+
+let errorLineWritten = false;
+
+/**
+ * Writes the error line: one line of compact JSON, the last thing on stderr.
+ *
+ * Every exit without a stdout body ends this way, TTY or not, so a caller can
+ * take the last line of stderr and parse it instead of reading prose. It is on
+ * stderr on purpose — an envelope on stdout would answer `jq '.threads|length'`
+ * with 0, which is a failure reading as an answer.
+ */
+export function writeErrorLine(line: ErrorLine): void {
+  errorLineWritten = true;
+  console.error(JSON.stringify({ error: line }));
+}
+
+/** Prints the error line and returns the exit code that goes with it. */
+export function failWith(line: ErrorLine): number {
+  writeErrorLine(line);
+  return EXIT_FOR[line.code];
+}
+
+/**
+ * The last line of defence for the invariant above: a command that returned a
+ * failing code without writing its line still ends with one.
+ *
+ * Every known site writes its own, with a message worth reading. This exists
+ * because "always the last line" is what an agent is told to rely on, and a
+ * forgotten `return 1` three commands from now must not be the exception.
+ */
+export function ensureErrorLine(exitCode: number): void {
+  if (errorLineWritten || exitCode === EXIT.OK || exitCode === EXIT.NOTHING) return;
+  const code: ErrorCode =
+    exitCode === EXIT.USAGE ? 'USAGE' : exitCode === EXIT.SETUP ? 'SETUP' : 'UPSTREAM';
+  writeErrorLine({ code, message: 'The command failed; the lines above say why.', hint: null });
 }
 
 /**
@@ -84,6 +201,18 @@ export type Remedy = {
   /** What to do when the commands do not help. */
   fallback?: string;
 };
+
+/**
+ * A {@link Remedy}'s next action as the one line an error line's `hint` holds:
+ * the action and the commands it introduces, or the fallback when there is
+ * nothing to run.
+ */
+export function remedyHint(remedy: Remedy): string | null {
+  if (remedy.commands?.length) {
+    return `${remedy.action ?? 'Run:'} ${remedy.commands.join(' ; ')}`;
+  }
+  return remedy.action ?? remedy.fallback ?? null;
+}
 
 /**
  * Renders a {@link Remedy} as the plain multi-line text that becomes an

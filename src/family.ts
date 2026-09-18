@@ -1,5 +1,5 @@
 import type { AulaClient } from './client.ts';
-import { UsageError } from './errors.ts';
+import { CliError, UsageError } from './errors.ts';
 import type { IntegrationContext } from './integrations/types.ts';
 import { isoWeekString } from './integrations/types.ts';
 import type { Child, Profile, ProfileContext } from './types.ts';
@@ -59,7 +59,7 @@ export function buildFamily(
   mitidUsername?: string,
 ): Family {
   const profile = profiles[0];
-  if (!profile) throw new Error('Aula returned no profiles for this session.');
+  if (!profile) throw new CliError('UPSTREAM', 'Aula returned no profiles for this session.');
 
   const nameByCode = new Map<string, string>();
   for (const ip of profile.institutionProfiles ?? []) {

@@ -15,14 +15,14 @@ import * as skoleportal from './easyiq-skoleportal.ts';
 import * as meebook from './meebook.ts';
 import * as minUddannelse from './min-uddannelse.ts';
 import * as systematic from './systematic.ts';
-import type { IntegrationContext, WeekPlan } from './types.ts';
+import type { FetchedPlan, IntegrationContext, WeekPlan, WeekPlanStatus } from './types.ts';
 import { cmd } from '../runtime.ts';
 
 type Fetcher = (
   ctx: IntegrationContext,
   tokens: WidgetTokens,
   widgetId: string,
-) => Promise<WeekPlan>;
+) => Promise<FetchedPlan>;
 
 /**
  * Widget id → the function that reads it. Keyed by widget rather than by
@@ -104,16 +104,21 @@ export async function readCapability(
   );
   if (widgets.length === 0) throw new NoProviderError(capability, detected);
 
-  const children = schoolChildren(ctx);
-  if (children.length === 0) throw new NoProviderError(capability, detected);
-  const scoped = { ...ctx, children };
-
   // MinUddannelse ships two ids for one opgaveliste (0030 superseded 0023);
   // an institution that advertises both would otherwise be read twice.
   const byProvider = new Map<string, DetectedWidget>();
   for (const widget of widgets) {
     if (!byProvider.has(String(widget.provider))) byProvider.set(String(widget.provider), widget);
   }
+
+  const children = schoolChildren(ctx);
+  if (children.length === 0) {
+    // The school has the widget; the selected children are not at the school.
+    // This threw NoProviderError, whose message says no such widget is enabled
+    // — wrong, and the same words as a school that genuinely lacks one.
+    return [...byProvider.values()].map((widget) => skipped(widget.widgetId, ctx.isoWeek));
+  }
+  const scoped = { ...ctx, children };
 
   return Promise.all(
     [...byProvider.values()].map(async (widget) => {
@@ -142,22 +147,31 @@ export async function readWidget(
     );
   }
   const children = schoolChildren(ctx);
-  if (children.length === 0) {
-    const info = WIDGETS[widgetId];
-    return {
-      provider: info?.provider ?? 'unavailable',
-      capability: info?.capability ?? 'weekly-plan',
-      widgetId,
-      isoWeek: ctx.isoWeek,
-      items: [],
-      warnings: [
-        'None of the selected children attend a school-type institution, and this ' +
-          'is a school product — the vendor was not asked.',
-      ],
-    };
-  }
+  if (children.length === 0) return skipped(widgetId, ctx.isoWeek);
   const scoped = { ...ctx, children };
   return cached(widgetId, scoped, cache, () => fetcher(scoped, tokens, widgetId));
+}
+
+/**
+ * The plan for a vendor that was not asked: every selected child is at a
+ * daycare, and this is a school product. An answer — there is nothing to read
+ * — and `status` says so, which is what keeps it apart from a vendor that
+ * failed, whose plan is also empty and also carries a warning.
+ */
+function skipped(widgetId: string, isoWeek: string): WeekPlan {
+  const info = WIDGETS[widgetId];
+  return {
+    provider: info?.provider ?? 'unavailable',
+    capability: info?.capability ?? 'weekly-plan',
+    widgetId,
+    isoWeek,
+    items: [],
+    status: 'skipped',
+    warnings: [
+      'None of the selected children attend a school-type institution, and this ' +
+        'is a school product — the vendor was not asked.',
+    ],
+  };
 }
 
 /**
@@ -172,7 +186,7 @@ async function cached(
   widgetId: string,
   ctx: IntegrationContext,
   cache: ResponseCache,
-  read: () => Promise<WeekPlan>,
+  read: () => Promise<FetchedPlan>,
 ): Promise<WeekPlan> {
   // Every field the vendors actually filter on. `sessionId` is in here because
   // setting the MitID username changes what the vendors keyed on it return.
@@ -187,8 +201,8 @@ async function cached(
   };
   // The cache hands back `unknown`: it stores JSON and cannot know what it
   // holds. This is the one place that does, so this is where the assertion is.
-  const hit = cache.get(`widget-${widgetId}`, key) as WeekPlan | undefined;
-  if (hit !== undefined) return withSessionWarning(widgetId, ctx, hit);
+  const hit = cache.get(`widget-${widgetId}`, key) as FetchedPlan | undefined;
+  if (hit !== undefined) return graded(withSessionWarning(widgetId, ctx, hit));
   const fetched = await read();
   // Judged on the *warned* plan, so a missing MitID username still counts as a
   // failure signal — it is one of the reasons these vendors answer empty, and
@@ -202,11 +216,18 @@ async function cached(
   // published" without contacting it. A partial read is kept, because the
   // warnings there are usually structural (a child whose institution has no
   // such widget at all) and the items are real.
-  const failedOutright = plan.items.length === 0 && (plan.warnings ?? []).length > 0;
+  const result = graded(plan);
   // The *unwarned* plan is what gets stored: the warning is re-applied on every
   // read, so baking it in would double it on a hit.
-  if (!failedOutright) cache.set(`widget-${widgetId}`, key, fetched);
-  return plan;
+  if (result.status !== 'failed') cache.set(`widget-${widgetId}`, key, fetched);
+  return result;
+}
+
+/** The status a fetched plan earns — see {@link WeekPlanStatus}. */
+function graded(plan: FetchedPlan): WeekPlan {
+  const warned = (plan.warnings ?? []).length > 0;
+  const status: WeekPlanStatus = !warned ? 'ok' : plan.items.length > 0 ? 'partial' : 'failed';
+  return { ...plan, status };
 }
 
 /**
@@ -216,7 +237,11 @@ async function cached(
  * off the registry's `needsMitidUsername` — so no adapter can quietly skip it:
  * a rejection must read as a missing setting, not an outage.
  */
-function withSessionWarning(widgetId: string, ctx: IntegrationContext, plan: WeekPlan): WeekPlan {
+function withSessionWarning(
+  widgetId: string,
+  ctx: IntegrationContext,
+  plan: FetchedPlan,
+): FetchedPlan {
   const info = WIDGETS[widgetId];
   if (!info?.needsMitidUsername || !ctx.sessionIdIsFallback) return plan;
   const warning =
@@ -225,4 +250,4 @@ function withSessionWarning(widgetId: string, ctx: IntegrationContext, plan: Wee
   return { ...plan, warnings: [...(plan.warnings ?? []), warning] };
 }
 
-export type { WeekPlan } from './types.ts';
+export type { WeekPlan, WeekPlanStatus } from './types.ts';

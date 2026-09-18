@@ -1,7 +1,13 @@
 import { createHash } from 'node:crypto';
-import { type Auth, loginInstructions, refreshSupersededToken, resolveAuth } from './auth.ts';
+import {
+  type Auth,
+  refreshSupersededToken,
+  resolveAuth,
+  sessionGuidance,
+  sessionHint,
+} from './auth.ts';
 import { type CacheSettings, ResponseCache, openCache } from './cache.ts';
-import { type Remedy, formatRemedy } from './errors.ts';
+import { CliError, type ErrorCode, type Remedy, formatRemedy, remedyHint } from './errors.ts';
 import type {
   Album,
   CalendarEvent,
@@ -20,7 +26,8 @@ import type {
 } from './types.ts';
 import { localDayDifference } from './integrations/types.ts';
 import { remoteReadSignal } from './transport.ts';
-import { isRecord, parseInteger } from './validation.ts';
+import { recordSessionSeen } from './session-seen.ts';
+import { errorMessage, isRecord, parseInteger } from './validation.ts';
 import { cmd } from './runtime.ts';
 
 const FALLBACK_API_VERSION = 24;
@@ -164,11 +171,26 @@ const NEVER_CACHED = new Set<string>(['aulaToken.getAulaToken']);
  * method is a programming mistake, not something to go and fix — and every
  * failure that *does* have a fix is expected to spell it out.
  */
-export class AulaApiError extends Error {
+export class AulaApiError extends CliError {
+  /** Aula's own status code from the envelope — not the error line's code, which is `errorCode`. */
   readonly code: number;
   readonly method: string;
-  constructor(method: string, code: number, problem: string | Remedy) {
-    super(typeof problem === 'string' ? problem : formatRemedy(problem));
+  constructor(
+    method: string,
+    code: number,
+    problem: string | Remedy,
+    /**
+     * `UPSTREAM` unless the throw site knows better: Aula answered, with an
+     * error or a shape this client cannot read. `NETWORK` is the one site where
+     * no answer arrived at all.
+     */
+    errorCode: ErrorCode = 'UPSTREAM',
+  ) {
+    super(
+      errorCode,
+      typeof problem === 'string' ? problem : formatRemedy(problem),
+      typeof problem === 'string' ? null : remedyHint(problem),
+    );
     this.name = 'AulaApiError';
     this.code = code;
     this.method = method;
@@ -187,34 +209,24 @@ export class AulaApiError extends Error {
  */
 export class AulaMethodError extends AulaApiError {
   constructor(method: string, code: number, problem: string | Remedy) {
-    super(method, code, problem);
+    // `BUG`, because this only reaches the error line from a typed wrapper —
+    // `raw` turns it into a usage error before it gets there.
+    super(method, code, problem, 'BUG');
     this.name = 'AulaMethodError';
   }
 }
 
-export class AulaAuthError extends Error {
-  /** Always ends with the fix, because MitID is the only credential there is. */
-  constructor(problem: string | Remedy, guidance: string = loginInstructions()) {
-    super(
-      typeof problem === 'string' ? `${problem}\n\n${guidance}` : formatRemedy(withLogin(problem)),
-    );
+export class AulaAuthError extends CliError {
+  /**
+   * Every credential failure ends the same way, so it is filled in here rather
+   * than repeated at each throw site: what still works, and that a new login is
+   * the user's to agree to. It used to end "Log in again with MitID: aula
+   * login", which an agent reads as the next command to run.
+   */
+  constructor(problem: Pick<Remedy, 'headline' | 'detail'>) {
+    super('SETUP', `${formatRemedy(problem)}\n\n${sessionGuidance()}`, sessionHint());
     this.name = 'AulaAuthError';
   }
-}
-
-/**
- * Every credential failure has the same fix, so it is filled in rather than
- * repeated at each throw site — but only when the caller has not named a more
- * specific one, since a Remedy that already carries commands has thought about
- * it harder than this default can.
- */
-function withLogin(problem: Remedy): Remedy {
-  if (problem.commands?.length) return problem;
-  return {
-    ...problem,
-    action: problem.action ?? 'Log in again with MitID:',
-    commands: [cmd('login')],
-  };
 }
 
 export type QueryValue = string | number | boolean | Array<string | number>;
@@ -247,6 +259,9 @@ export class AulaClient {
   /** In flight only while a superseded token is being swapped out. */
   #tokenRecovery: Promise<boolean> | undefined;
   #renewToken: (spent: string) => Promise<string | undefined>;
+  #onSessionAccepted: ((steppedUp: boolean | null) => void) | undefined;
+  /** When this client began: the fetch time of anything it read off the wire. */
+  readonly #startedAt = Date.now();
   /** Memoised answer to "is Aula up?" — see `#serviceReachable`. */
   #healthProbe: Promise<boolean | undefined> | undefined;
   #cache: ResponseCache;
@@ -273,6 +288,13 @@ export class AulaClient {
        * default.
        */
       renewToken?: (spent: string) => Promise<string | undefined>;
+      /**
+       * Told every time `profiles.getProfileContext` answers: the one response
+       * that proves Aula accepts this login and says whether it is stepped up.
+       * `create()` wires it to the note `status` reads; a bare client tells
+       * nobody, and touches no disk.
+       */
+      onSessionAccepted?: (steppedUp: boolean | null) => void;
     } = {},
   ) {
     const auth: Auth | undefined =
@@ -293,6 +315,7 @@ export class AulaClient {
     this.#version = version;
     this.#cache = opts.cache ?? ResponseCache.disabled();
     this.#renewToken = opts.renewToken ?? refreshSupersededToken;
+    this.#onSessionAccepted = opts.onSessionAccepted;
   }
 
   /** Builds a client from the stored MitID login — the only credential there is. */
@@ -304,6 +327,7 @@ export class AulaClient {
       ...opts,
       auth,
       cache: openCache({ ...opts.cache, scope: cacheScope(auth) }),
+      onSessionAccepted: (steppedUp) => recordSessionSeen({ state: 'accepted', steppedUp }),
     });
   }
 
@@ -317,6 +341,16 @@ export class AulaClient {
    */
   get cache(): ResponseCache {
     return this.#cache;
+  }
+
+  /**
+   * When the data in this process's answers was actually fetched: the age of
+   * the oldest cached response any of them was built from, or when this client
+   * started reading if every response came off the wire. An answer is as old
+   * as its oldest part.
+   */
+  dataFetchedAt(): string {
+    return new Date(Math.min(this.#cache.oldestHitAt ?? Infinity, this.#startedAt)).toISOString();
   }
 
   /**
@@ -522,6 +556,22 @@ export class AulaClient {
       body: httpMethod === 'POST' ? JSON.stringify(opts.body) : undefined,
       redirect: 'manual',
       signal: remoteReadSignal(),
+    }).catch((err: unknown) => {
+      // No answer arrived: no route, a DNS failure, or the read deadline. This
+      // used to escape as whatever `fetch` threw, straight into the "bug in
+      // this client" branch — a raw stack at exit 1 for a laptop with no wifi.
+      throw new AulaApiError(
+        method,
+        0,
+        {
+          headline: 'Could not reach Aula.',
+          detail:
+            `${method} got no answer at all (${errorMessage(err)}), so this says nothing ` +
+            `about your login or about whether Aula is up.`,
+          action: 'Check the network connection and try again.',
+        },
+        'NETWORK',
+      );
     });
     this.#storeCookies(res);
 
@@ -570,7 +620,15 @@ export class AulaClient {
     // problem; trusting the envelope code alone cannot split code 10's three
     // meanings. Both are needed, which is why `res.status` is read below.
     const code = envelope.status?.code ?? -1;
-    if (code === 0) return envelope.data;
+    if (code === 0) {
+      // Whichever way it was called — the session bootstrap, or the `whoami`
+      // wrapper — this answer is Aula accepting the login, and the only place
+      // step-up is stated.
+      if (method === 'profiles.getProfileContext') {
+        this.#onSessionAccepted?.(steppedUpOf(envelope.data));
+      }
+      return envelope.data;
+    }
 
     if (code === STATUS_NOT_AUTHENTICATED || code === 401) {
       throw new AulaAuthError({
@@ -600,7 +658,9 @@ export class AulaClient {
           `aula command running at the same time — which retires the token in hand ` +
           `immediately, whatever its expiry says.`,
         action: 'Run the command again; the next run picks up the current token.',
-        fallback: `If it keeps happening on every run, the stored login is genuinely stale: \`${cmd('login')}\`.`,
+        fallback:
+          `If it keeps happening on every run, the stored login is genuinely stale and only ` +
+          `\`${cmd('login')}\` replaces it — which costs the user a MitID approval, so ask them first.`,
       });
     }
 
@@ -728,8 +788,11 @@ export class AulaClient {
             'Aula could not be reached a second time to tell whether the service is ' +
             'down or your login has been rejected, so this may be either — or simply ' +
             'no network. Aula reports both as a server error.',
-          action: 'Try, in order:',
-          commands: [cmd('doctor --text'), cmd('login')],
+          action: 'See which it is:',
+          commands: [cmd('doctor --text')],
+          fallback:
+            `If it is the login, only \`${cmd('login')}\` replaces it — and that costs the user ` +
+            `a MitID approval on their phone, so ask them before starting one.`,
         });
     }
   }
@@ -1379,6 +1442,11 @@ async function probeServiceReachable(version: number): Promise<boolean | undefin
   } catch {
     return undefined;
   }
+}
+
+/** `isSteppedUp` off a profile context, or null when the payload does not say. */
+function steppedUpOf(data: unknown): boolean | null {
+  return isRecord(data) && typeof data.isSteppedUp === 'boolean' ? data.isSteppedUp : null;
 }
 
 function defaultApiVersion(): number {

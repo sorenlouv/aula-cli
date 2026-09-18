@@ -86,7 +86,8 @@ test('status reads the stored login back, with no mention of a keychain', () => 
   assert.equal(status.loggedIn, true);
   assert.equal(status.username, 'valdemarex');
   assert.equal(status.tokenStore, box.tokenPath);
-  assert.ok(status.accessTokenExpiresInSeconds > 0);
+  assert.ok(Date.parse(status.tokens.accessTokenExpiresAt) > Date.now());
+  assert.equal(status.tokens.accessTokenExpired, false);
   assert.ok(!('keychainAvailable' in status), 'the macOS-only gate is gone');
 
   const text = box.run('status', '--text');

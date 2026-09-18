@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { SESSION_FREE_COMMANDS } from './auth.ts';
 import { cmd } from './runtime.ts';
 import { currentSlotStart } from './slots.ts';
 import { installFakeClaude } from './testing/fake-claude.ts';
@@ -106,6 +107,24 @@ function runWithoutLogin(...args: string[]): RunResult {
   };
 }
 
+type ErrorLine = { code: string; message: string; hint: string | null };
+
+/**
+ * The last line of stderr, parsed — what an agent is told to read instead of
+ * the prose above it. Throws when that line is not the error line, which is the
+ * assertion: "always the last line" has to hold for every failing exit.
+ */
+function errorLineOf(stderr: string): ErrorLine {
+  const last = stderr.trimEnd().split('\n').at(-1) ?? '';
+  const parsed = JSON.parse(last) as { error: ErrorLine };
+  assert.deepEqual(Object.keys(parsed), ['error'], last);
+  assert.deepEqual(Object.keys(parsed.error), ['code', 'message', 'hint'], last);
+  assert.equal(typeof parsed.error.message, 'string');
+  assert.ok(parsed.error.message.length > 0, 'a message worth reading');
+  assert.ok(!parsed.error.message.includes('\n'), 'one sentence, one line');
+  return parsed.error;
+}
+
 function json(result: RunResult): any {
   assert.equal(result.code, 0, `expected success, got ${result.code}:\n${result.stderr}`);
   return JSON.parse(result.stdout);
@@ -170,9 +189,44 @@ test('a command prints only the options it accepts', () => {
   const help = runWithoutLogin('doctor', '--help');
   assert.equal(help.code, 0);
   assert.ok(help.stdout.includes(`Usage: ${cmd('doctor')}`), help.stdout);
-  assert.match(help.stdout, /--text --days/);
+  assert.match(help.stdout, /--text\s+Human-readable/);
+  assert.match(help.stdout, /--days <n>/);
   assert.doesNotMatch(help.stdout, /--no-cache/);
   assert.deepEqual(help.requests, []);
+});
+
+// Help used to list option names alone — `--role` with no word on what it
+// took, and nothing on what came back — which told an agent that a flag
+// existed and nothing it could act on.
+test('per-command help carries values, defaults, output keys and exits, on stdout', () => {
+  const help = runWithoutLogin('contacts', '--help');
+  assert.equal(help.code, 0);
+  assert.equal(help.stderr, '', 'help is an answer, not an error');
+  assert.match(help.stdout, /--role <child\|guardian>.*\(default child\)/);
+  assert.match(help.stdout, /--cache-ttl <seconds>.*\(default 600\)/);
+  assert.match(help.stdout, /JSON array; each item: profileId, .*address, relations/);
+  assert.match(help.stdout, /\[\]\.address: street, postalCode, city/);
+  assert.match(help.stdout, /Exit: 0 .* 4 .* 1 .* 2 .* 5/s);
+  assert.match(help.stdout, /"error":\{"code","message","hint"\}/);
+
+  const messages = runWithoutLogin('messages', '--help');
+  assert.match(messages.stdout, /--limit <n>.*default 20, or none when --since is given/);
+  assert.match(
+    messages.stdout,
+    /\.threads\[\]\.messages\[\]\.attachments\[\]: index, id, name, kind, link/,
+  );
+  assert.match(messages.stdout, /totalMessageCount\?/, 'a key that may be absent is marked');
+
+  // A command that prints text says so rather than inventing keys.
+  const login = runWithoutLogin('login', '--help');
+  assert.match(login.stdout, /Text, for a person/);
+  assert.match(login.stdout, /costs them an approval on their phone/);
+
+  // The top-level help is on stdout too, so `aula --help | grep` works.
+  const top = runWithoutLogin('--help');
+  assert.equal(top.code, 0);
+  assert.equal(top.stderr, '');
+  assert.match(top.stdout, /Usage: /);
 });
 
 // ------------------------------------------------------------------- --child
@@ -585,17 +639,351 @@ test('every command that takes --limit reports the cut it made', () => {
 });
 
 // Every sibling answers `--contract`, and the fleet's instructions say this one
-// does too. It was `Unknown command "--contract"`, exit 2.
-test('--contract answers with no login and no request', () => {
+// does too. It was `Unknown command "--contract"`, exit 2. Since contract 7 the
+// whole fleet prints one frame, so an agent can learn it from any tool: `tool`
+// names which one answered, and `exit_codes` is the shared table cut to this
+// tool's codes rather than the slice's bare array. `contract.test.ts` holds the
+// frame to the file; this holds the process to the frame.
+test('--contract answers with the fleet frame, no login and no request', () => {
   const result = runWithoutLogin('--contract');
   assert.equal(result.code, 0, result.stderr);
-  const slice = JSON.parse(result.stdout);
+  const frame = JSON.parse(result.stdout);
   const vendored = JSON.parse(readFileSync(join(ROOT, 'contract.json'), 'utf8'));
-  assert.equal(slice.contract, vendored.contract);
-  assert.deepEqual(slice.exit_codes, vendored.tools.aula.exit_codes);
-  assert.deepEqual(slice.body_on, vendored.tools.aula.body_on);
-  assert.match(slice.bridge.boundary, /never here/);
+  assert.equal(frame.contract, vendored.contract);
+  assert.equal(frame.tool, 'aula');
+  assert.deepEqual(Object.keys(frame.exit_codes), ['0', '1', '2', '4', '5']);
+  assert.equal(frame.exit_codes['4'], vendored.exit_codes['4']);
+  assert.deepEqual(frame.body_on, vendored.tools.aula.body_on);
+  assert.deepEqual(frame.error_body, vendored.error_body);
+  assert.deepEqual(frame.stdout, vendored.stdout);
+  assert.match(frame.bridge.boundary, /never here/);
   assert.equal(result.requests.length, 0);
+});
+
+// ------------------------------------------------------------------ freshness
+
+// `digest` stamped itself `generatedAt: now` whether it had just made sixty
+// requests or made none and served ten-minute-old responses. "Did the teacher
+// reply yet?" is a question where those ten minutes are the whole answer.
+test('fetchedAt is when Aula was read, not when the answer was assembled', () => {
+  const box = sandbox();
+  const before = Date.now();
+  const first = json(box.run('digest'));
+  const after = Date.now();
+  assert.ok(Date.parse(first.fetchedAt) >= before && Date.parse(first.fetchedAt) <= after);
+
+  Bun.sleepSync(1_100);
+  box.reset();
+  const second = json(box.run('digest'));
+  assert.equal(box.requests().length, 0, 'served from cache');
+  // The first run stamps when it began reading; the second, when the oldest
+  // response it reused was stored — milliseconds later, a second earlier than now.
+  const drift = Date.parse(second.fetchedAt) - Date.parse(first.fetchedAt);
+  assert.ok(drift >= 0 && drift < 1_000, `the data is as old as when it was fetched (${drift}ms)`);
+  assert.ok(Date.parse(second.generatedAt) > Date.parse(second.fetchedAt));
+  assert.ok(
+    Date.parse(second.generatedAt) - Date.parse(second.fetchedAt) >= 1_000,
+    'a second run a second later is a second older',
+  );
+
+  const list = json(box.run('messages'));
+  assert.equal(list.fetchedAt, second.fetchedAt, 'the list envelope carries the same stamp');
+
+  const fresh = json(box.run('messages', '--no-cache'));
+  assert.ok(Date.parse(fresh.fetchedAt) > Date.parse(first.fetchedAt), '--no-cache reads anew');
+});
+
+// `status` used to report the access token's remaining minutes, which refresh
+// themselves and say nothing about whether the login works — and it went
+// through the refreshing path to do it.
+test('status answers from disk: no request, and what Aula last said about the login', () => {
+  const box = sandbox();
+  const untouched = json(box.run('status'));
+  assert.equal(untouched.loggedIn, true);
+  assert.equal(untouched.session, null, 'nothing has reached Aula with this login yet');
+  assert.equal(typeof untouched.tokens.accessTokenExpiresAt, 'string');
+  assert.equal(untouched.tokens.accessTokenExpired, false);
+  assert.equal(box.requests().length, 0, 'status must not touch the network');
+
+  box.run('whoami', '--no-cache');
+  box.reset();
+  const accepted = json(box.run('status'));
+  assert.equal(accepted.session.state, 'accepted');
+  assert.equal(accepted.session.steppedUp, true);
+  assert.match(accepted.session.checkedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(box.requests().length, 0);
+
+  const text = box.run('status', '--text');
+  assert.match(text.stderr, /Aula last accepted this login/);
+  assert.match(text.stderr, /stepped up: yes/);
+});
+
+test('status remembers a rejected login, and forgets it at logout', () => {
+  const box = sandbox();
+  box.run('whoami', '--no-cache');
+  box.env.FAKE_AULA_REJECT_TOKEN = '1';
+  assert.equal(box.run('whoami', '--no-cache').code, 5);
+  delete box.env.FAKE_AULA_REJECT_TOKEN;
+
+  const status = json(box.run('status'));
+  assert.equal(status.session.state, 'rejected');
+  assert.equal(status.session.steppedUp, null);
+
+  box.run('logout');
+  assert.equal(json(box.run('status')).session, null);
+});
+
+test('status sees a session that is not stepped up', () => {
+  const box = sandbox({ FAKE_AULA_NO_STEPUP: '1' });
+  box.run('whoami', '--no-cache');
+  assert.equal(json(box.run('status')).session.steppedUp, false);
+});
+
+// ----------------------------------------------------------------- contacts
+
+// The fleet's one bridge out of this tool: a guardian's address, when the
+// family chose to share it. It has to be found without guessing at wire keys.
+test('contacts rows are normalised, and --role guardian carries the address', () => {
+  const box = sandbox();
+  const guardians = json(
+    box.run('contacts', '--role', 'guardian', '--group', '5001', '--no-cache'),
+  );
+  assert.equal(guardians.length, 1);
+  const [row] = guardians;
+  assert.deepEqual(Object.keys(row), [
+    'profileId',
+    'institutionProfileId',
+    'name',
+    'role',
+    'group',
+    'groupId',
+    'institution',
+    'birthday',
+    'email',
+    'mobilePhone',
+    'homePhone',
+    'address',
+    'relations',
+  ]);
+  assert.deepEqual(row.address, {
+    street: 'Eksempelvej 1',
+    postalCode: '2000',
+    city: 'Frederiksberg',
+  });
+  assert.equal(row.group, 'group 5001');
+  assert.deepEqual(row.relations, [{ profileId: 1, name: 'Klassekammerat', role: 'child' }]);
+
+  const children = json(box.run('contacts', '--group', '5001', '--no-cache'));
+  assert.equal(children[0].address, null, 'a child shares no address');
+  assert.equal(children[0].birthday, '2016-05-04');
+
+  const text = box.run('contacts', '--role', 'guardian', '--group', '5001', '--text', '--no-cache');
+  assert.match(text.stdout, /Eksempelvej 1, 2000 Frederiksberg/);
+});
+
+// ------------------------------------------------------------- weekly plans
+
+// A failed vendor read and a quiet week are the same `items: []` on the wire.
+// The difference lived in `warnings`, which an agent had to remember to read,
+// and the whole thing left at exit 0 — a body that read as "nothing planned".
+test('a weekly plan that could not be read is exit 1, never an empty week', () => {
+  const box = sandbox({ FAKE_AULA_MEEBOOK_REFUSES: '1' });
+  const result = box.run('weekly-plan', '--no-cache');
+  assert.equal(result.code, 1, result.stderr);
+  assert.equal(result.stdout, '', 'no body: a read that did not happen is not an answer');
+  assert.match(result.stderr, /Åbn Meebook i Aula/, 'the vendor’s own reason is on stderr');
+  const line = errorLineOf(result.stderr);
+  assert.equal(line.code, 'UPSTREAM');
+  assert.match(line.message, /weekly-plan could not be read/);
+  assert.match(line.hint ?? '', /never cached/);
+});
+
+test('a plan carries its status, so a digest cannot be misread either', () => {
+  const box = sandbox();
+  const ok = json(box.run('weekly-plan', '--no-cache'));
+  assert.equal(ok[0].status, 'ok');
+  assert.ok(ok[0].items.length > 0);
+
+  box.env.FAKE_AULA_MEEBOOK_REFUSES = '1';
+  const digest = json(box.run('digest', '--no-cache'));
+  const plan = digest.weeklyPlans.find((p: any) => p.capability === 'weekly-plan');
+  assert.equal(plan.status, 'failed');
+  assert.deepEqual(plan.items, []);
+  assert.ok(plan.warnings.length > 0);
+});
+
+// The one warning that is not a failure: the vendor was never asked, because no
+// selected child attends a school. That is an answer.
+test('a plan the vendor was not asked for is skipped, and exit 4', () => {
+  const result = sandbox().run('weekly-plan', '--child', 'Viggo', '--no-cache');
+  assert.equal(result.code, 4, result.stderr);
+  const [plan] = JSON.parse(result.stdout);
+  assert.equal(plan.status, 'skipped');
+  assert.deepEqual(plan.items, []);
+});
+
+// ------------------------------------------------------------- the error line
+
+// Every exit without a stdout body ends stderr with one line of compact JSON.
+// Until it did, everything an agent could branch on beyond the exit number was
+// prose — and for a laptop with no network, a raw stack that called it a bug.
+test('every failing exit ends stderr with the error line, and its code names the exit', () => {
+  const cases: Array<{
+    name: string;
+    run: () => RunResult;
+    exit: number;
+    code: string;
+    message: RegExp;
+  }> = [
+    {
+      name: 'an unknown command',
+      run: () => runWithoutLogin('not-a-command'),
+      exit: 2,
+      code: 'USAGE',
+      message: /Unknown command/,
+    },
+    {
+      name: 'an unknown flag',
+      run: () => runWithoutLogin('messages', '--nope'),
+      exit: 2,
+      code: 'USAGE',
+      message: /--nope/,
+    },
+    {
+      name: 'a flag the command does not take',
+      run: () => sandbox().run('thread', '5001', '--child', 'Alma'),
+      exit: 2,
+      code: 'USAGE',
+      message: /does not accept --child/,
+    },
+    {
+      name: 'no stored login',
+      run: () => runWithoutLogin('whoami'),
+      exit: 5,
+      code: 'SETUP',
+      message: /Not logged in/,
+    },
+    {
+      name: 'a login Aula will not accept',
+      run: () => sandbox({ FAKE_AULA_REJECT_TOKEN: '1' }).run('whoami'),
+      exit: 5,
+      code: 'SETUP',
+      message: /rejected your login/,
+    },
+    {
+      name: 'Aula answering badly',
+      run: () => sandbox({ FAKE_AULA_DOWN: '1' }).run('whoami'),
+      exit: 1,
+      code: 'UPSTREAM',
+      message: /having trouble/,
+    },
+    {
+      name: 'no answer at all',
+      run: () => sandbox({ FAKE_AULA_UNREACHABLE: '1' }).run('whoami'),
+      exit: 1,
+      code: 'NETWORK',
+      message: /Could not reach Aula/,
+    },
+    {
+      name: 'a method Aula refuses',
+      run: () => sandbox({ FAKE_AULA_FAIL: 'posts.getAllPosts' }).run('posts', '--no-cache'),
+      exit: 1,
+      code: 'UPSTREAM',
+      message: /would not let you read/,
+    },
+  ];
+
+  for (const { name, run, exit, code, message } of cases) {
+    const result = run();
+    assert.equal(result.code, exit, `${name}: ${result.stderr}`);
+    const line = errorLineOf(result.stderr);
+    assert.equal(line.code, code, name);
+    assert.match(line.message, message, name);
+    assert.equal(result.stdout, '', `${name}: an error never puts anything on stdout`);
+  }
+});
+
+// "Run a MitID login: aula login" reads, to an agent, as the next command to
+// run — and a login costs the user an approval on their phone, and an abandoned
+// one trips MitID's parallel-session detector for the attempt after it.
+test('exit 5 says what still works and who decides about a login, never "log in"', () => {
+  const cases: Array<{ name: string; run: () => RunResult }> = [
+    { name: 'no stored login', run: () => runWithoutLogin('digest') },
+    {
+      name: 'a rejected login',
+      run: () => sandbox({ FAKE_AULA_REJECT_TOKEN: '1' }).run('whoami'),
+    },
+    { name: 'refresh-stepup with nothing stored', run: () => runWithoutLogin('refresh-stepup') },
+  ];
+  for (const { name, run } of cases) {
+    const result = run();
+    assert.equal(result.code, 5, `${name}: ${result.stderr}`);
+    const flat = result.stderr.replace(/\s+/g, ' ');
+    assert.match(flat, /still answer without one/, name);
+    assert.match(flat, /ask them before starting it/, name);
+    assert.doesNotMatch(flat, /Log in again|Run a MitID login|Run `[^`]*login`/i, name);
+
+    const { code, hint } = errorLineOf(result.stderr);
+    assert.equal(code, 'SETUP', name);
+    assert.match(hint ?? '', /Ask the user before starting/, name);
+    assert.match(hint ?? '', /MitID approval on their phone/, name);
+  }
+});
+
+// A list of what "still works" is only worth printing while it is true.
+test('every command exit 5 names really does answer without a session', () => {
+  for (const { command } of SESSION_FREE_COMMANDS) {
+    const result = runWithoutLogin(command);
+    assert.doesNotMatch(result.stderr, /Not logged in/, command);
+    // `open` has no overview to show in an empty sandbox, and says so; that is
+    // a different exit 5, about the overview, and the point stands: no session
+    // was asked for.
+    if (command !== 'open') assert.equal(result.code, 0, `${command}: ${result.stderr}`);
+    assert.equal(result.requests.length, 0, `${command} must not touch the network`);
+  }
+});
+
+// No network is not a bug in this client. It used to leave as whatever `fetch`
+// threw, through the branch that prints a stack.
+test('an unreachable Aula is reported in plain language, without a stack', () => {
+  const result = sandbox({ FAKE_AULA_UNREACHABLE: '1' }).run('whoami');
+  assert.doesNotMatch(result.stderr, /\n\s+at /);
+  assert.match(errorLineOf(result.stderr).hint ?? '', /network/i);
+});
+
+test('exits 0 and 4 carry a body and no error line', () => {
+  const box = sandbox();
+  for (const args of [['whoami'], ['notifications']]) {
+    const result = box.run(...args, '--no-cache');
+    assert.ok(result.code === 0 || result.code === 4, args.join(' '));
+    assert.doesNotMatch(result.stderr, /\{"error":/, args.join(' '));
+  }
+});
+
+// `doctor` is the one exit 1 with a body: the report is the point of the
+// command. The line still closes stderr, and says where the detail is.
+test('a failing doctor keeps its report on stdout and still ends with the error line', () => {
+  const result = sandbox({ FAKE_AULA_FAIL: 'presence.getDailyOverview' }).run('doctor');
+  assert.equal(result.code, 1);
+  assert.equal(JSON.parse(result.stdout).ok, false);
+  const line = errorLineOf(result.stderr);
+  assert.equal(line.code, 'UPSTREAM');
+  assert.match(line.message, /1 of \d+ checks failed/);
+  assert.match(line.hint ?? '', /stdout/);
+});
+
+// A pipe is where nobody reads indentation, and where an agent pays for it in
+// tokens on every call.
+test('JSON is one line when stdout is not a terminal', () => {
+  const box = sandbox();
+  for (const args of [['whoami'], ['messages'], ['digest'], ['status']]) {
+    const result = box.run(...args);
+    assert.equal(result.code, 0, `${args.join(' ')}: ${result.stderr}`);
+    assert.equal(result.stdout.trimEnd().split('\n').length, 1, args.join(' '));
+    assert.doesNotThrow(() => JSON.parse(result.stdout), args.join(' '));
+  }
+  const contract = runWithoutLogin('--contract');
+  assert.equal(contract.stdout.trimEnd().split('\n').length, 1);
 });
 
 // ---------------------------------------------------------------- attachments
@@ -750,7 +1138,14 @@ test('an empty answer is exit 4 with its body still on stdout', () => {
   for (const { args, body } of cases) {
     const result = box.run(...args, '--no-cache');
     assert.equal(result.code, 4, `${args.join(' ')}: ${result.stderr}`);
-    assert.deepEqual(JSON.parse(result.stdout), body, args.join(' '));
+    const parsed = JSON.parse(result.stdout);
+    if (Array.isArray(body)) {
+      assert.deepEqual(parsed, body, args.join(' '));
+    } else {
+      const { fetchedAt, ...rest } = parsed;
+      assert.deepEqual(rest, body, args.join(' '));
+      assert.match(fetchedAt, /^\d{4}-\d{2}-\d{2}T/, args.join(' '));
+    }
   }
 
   const pickups = box.run('pickup-times', '--no-cache');
@@ -1117,7 +1512,10 @@ test('publish takes no arguments — there is one way to get a url, and it is pu
 test('publish with no overview yet says what to do first', () => {
   const box = sandboxWithClaude('ok', ARTIFACT);
   const result = box.run('publish');
-  assert.equal(result.code, 1);
+  // 5, "setup required — do not retry unchanged". It was 1, which says a source
+  // is down and a retry may help; no retry writes the overview `publish` needs.
+  assert.equal(result.code, 5);
+  assert.equal(errorLineOf(result.stderr).code, 'SETUP');
   assert.ok(result.stderr.includes(cmd('new')), result.stderr);
 });
 
@@ -1614,7 +2012,7 @@ test('a login Aula will not accept is reported in plain language, with the fix',
   const box = sandbox({ FAKE_AULA_REJECT_TOKEN: '1' });
   const result = box.run('whoami');
 
-  assert.equal(result.code, 5, 'setup required — `aula login`, never a retry');
+  assert.equal(result.code, 5, 'setup required — never a retry');
 
   const flat = result.stderr.replace(/\s+/g, ' ');
   assert.match(flat, /Aula rejected your login/i);

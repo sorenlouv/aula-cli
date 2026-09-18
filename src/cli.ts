@@ -4,19 +4,23 @@ import { join } from 'node:path';
 import { downloadAttachment, listAttachments, type ResolvedAttachment } from './attachments.ts';
 import {
   type CliCommand,
+  COMMAND_SUMMARY,
   isCliCommand,
-  optionsFor,
+  OPTION_DEFAULTS,
+  OPTION_HELP,
+  optionNamesFor,
   parseCommandLine,
   usageFor,
 } from './cli-options.ts';
 import {
-  type BirthdayContact,
   commonFileUrl,
   formatDate,
   formatWhen,
   indent,
   type NormalCommonFile,
+  type NormalContact,
   normaliseCommonFile,
+  normaliseContact,
   normaliseSchedule,
   parseKeyValues,
   parseSince,
@@ -46,15 +50,9 @@ import {
   resolveCalendarSelection,
   resolveConfiguredSelection,
 } from './calendar/selection.ts';
-import {
-  AulaApiError,
-  AulaAuthError,
-  AulaClient,
-  AulaMethodError,
-  CALENDAR_MAX_SPAN_DAYS,
-} from './client.ts';
+import { AulaAuthError, AulaClient, AulaMethodError, CALENDAR_MAX_SPAN_DAYS } from './client.ts';
 import { briefSlots, readConfig, updateConfig } from './config.ts';
-import { contractSlice } from './contract.ts';
+import { contractFrame } from './contract.ts';
 import {
   buildDigest,
   collectAlbums,
@@ -90,8 +88,16 @@ import { cmd } from './runtime.ts';
 import { ClaudeMissingError } from './llm/claude.ts';
 import { BRIEF_DIR, loadState, recordDeploy, saveState, slotIsComplete } from './brief/state.ts';
 import { runDoctor } from './doctor.ts';
-import { AulaSessionError, EXIT, UsageError } from './errors.ts';
-import { fmt, openInBrowser } from './io.ts';
+import {
+  CliError,
+  ensureErrorLine,
+  errorLineFor,
+  EXIT,
+  failWith,
+  firstLineOf,
+  UsageError,
+} from './errors.ts';
+import { fmt, openInBrowser, toJson } from './io.ts';
 import { AulaAuthFlowError } from './vendor/aula-auth/index.ts';
 import { resolveFamily, selectChildren, type Family } from './family.ts';
 import { runLogin, runLogout, runRefreshStepUp, runStatus } from './login.ts';
@@ -105,6 +111,7 @@ import {
 import { parseSkillTarget, runInstallSkill } from './install-skill.ts';
 import { buildVersion } from './runtime.ts';
 import { runSchedule } from './schedule.ts';
+import { recordSessionSeen } from './session-seen.ts';
 import { coordinateScheduledBrief } from './scheduled-brief.ts';
 import { currentSlotStart } from './slots.ts';
 import { NoProviderError, SUPPORTED_WIDGET_IDS, type WeekPlan } from './integrations/index.ts';
@@ -156,8 +163,10 @@ Everyday:
   install-skill [claude|codex] Teach your agent to use this tool, then open a
                                new session (--out <dir> to write elsewhere)
   version                      Which build this is, and for which platform
-  --contract                   This tool's slice of the fleet's shared contract:
-                               its exit codes and which of them carry a body
+  --contract                   This tool's slice of the fleet's shared contract,
+                               in the frame every sibling prints: what each exit
+                               code means, which carry a body, and every command's
+                               keys
 
 Options for new:
   --days <n>                   How much history to read (default 60)
@@ -242,7 +251,7 @@ async function main(): Promise<number> {
   // so it has to answer with no login, no network and no command. Every
   // sibling answers it; here it was `Unknown command "--contract"`, exit 2.
   if (command === '--contract') {
-    console.log(JSON.stringify(contractSlice(), null, 2));
+    console.log(toJson(contractFrame()));
     return 0;
   }
 
@@ -340,7 +349,16 @@ async function main(): Promise<number> {
   // The scheduler's own entry point: waits through sleep, then runs the brief.
   if (command === 'scheduled-run') {
     const outcome = await coordinateScheduledBrief();
-    return outcome.status === 'complete' ? 0 : 1;
+    if (outcome.status === 'complete') return EXIT.OK;
+    // Nobody reads this at a terminal — launchd runs it — but the log it lands
+    // in is what somebody opens when the overview did not turn up.
+    return failWith({
+      code: 'UPSTREAM',
+      message:
+        `The scheduled overview did not complete after ${outcome.attempts} attempt(s) ` +
+        `(${outcome.status}).`,
+      hint: `Run \`${cmd('new')}\` to see what is failing.`,
+    });
   }
   if (command === 'schedule') {
     return runSchedule({ remove: values.remove === true, ...(values.at ? { at: values.at } : {}) });
@@ -365,7 +383,9 @@ async function main(): Promise<number> {
 
     case 'whoami': {
       const family = await resolveFamily(client);
-      return emit(family, asText, renderWhoami);
+      // Every key present, null when unset: `undefined` drops out of JSON, and
+      // a key that is sometimes absent is one a reader has to guess about.
+      return emit({ ...family, mitidUsername: family.mitidUsername ?? null }, asText, renderWhoami);
     }
 
     case 'messages': {
@@ -383,7 +403,7 @@ async function main(): Promise<number> {
       return emitList(
         'threads',
         threads,
-        { truncated: read.truncated, limit: listLimit },
+        { truncated: read.truncated, limit: listLimit, fetchedAt: client.dataFetchedAt() },
         asText,
         renderThreads,
       );
@@ -399,8 +419,8 @@ async function main(): Promise<number> {
         id: detail.id,
         subject: detail.subject ?? '(no subject)',
         sensitive: detail.sensitive,
-        startedAt: detail.threadStartedDateTime,
-        totalMessageCount: detail.totalMessageCount,
+        startedAt: detail.threadStartedDateTime ?? null,
+        totalMessageCount: detail.totalMessageCount ?? null,
         moreMessagesExist: detail.moreMessagesExist,
         messagesIncomplete: page === undefined ? Boolean(detail.moreMessagesExist) : null,
         messageReadWarning:
@@ -429,7 +449,7 @@ async function main(): Promise<number> {
       return emitList(
         'posts',
         read.rows,
-        { truncated: read.truncated, limit: listLimit },
+        { truncated: read.truncated, limit: listLimit, fetchedAt: client.dataFetchedAt() },
         asText,
         renderPosts,
       );
@@ -445,7 +465,7 @@ async function main(): Promise<number> {
       return emitList(
         'albums',
         read.rows,
-        { truncated: read.truncated, limit: listLimit },
+        { truncated: read.truncated, limit: listLimit, fetchedAt: client.dataFetchedAt() },
         asText,
         renderAlbums,
       );
@@ -536,7 +556,11 @@ async function main(): Promise<number> {
       });
       const all = upcomingBirthdays(contacts);
       const shown = limit === undefined ? all : all.slice(0, limit);
-      const cut = { truncated: shown.length < all.length, limit };
+      const cut = {
+        truncated: shown.length < all.length,
+        limit,
+        fetchedAt: client.dataFetchedAt(),
+      };
       return emitList('birthdays', shown, cut, asText, (rows) =>
         rows.length === 0
           ? '(no birthdays shared in these classes)'
@@ -592,7 +616,8 @@ async function main(): Promise<number> {
       }
       const detail = await readFullThread(client, threadId);
       if (detail.incomplete) {
-        throw new Error(
+        throw new CliError(
+          'UPSTREAM',
           `Could not read every message in thread ${threadId}: ${detail.warning ?? 'unknown reason'}. ` +
             'Re-read the thread before choosing an attachment index.',
         );
@@ -649,7 +674,11 @@ async function main(): Promise<number> {
       const family = await resolveFamily(client);
       const all = (await collectCommonFiles(client, family)).map(normaliseCommonFile);
       const files = limit === undefined ? all : all.slice(0, limit);
-      const cut = { truncated: files.length < all.length, limit };
+      const cut = {
+        truncated: files.length < all.length,
+        limit,
+        fetchedAt: client.dataFetchedAt(),
+      };
       return emitList('files', files, cut, asText, renderCommonFiles);
     }
 
@@ -731,7 +760,7 @@ async function main(): Promise<number> {
         console.error(err.message);
         return [];
       });
-      return emit(plans, asText, renderPlans, nothingPlanned(plans));
+      return emitPlans(plans, asText);
     }
 
     case 'homework': {
@@ -742,7 +771,7 @@ async function main(): Promise<number> {
         ...(fromDate ? { fromDate } : {}),
         ...(toDate ? { toDate } : {}),
       });
-      return emit(plans, asText, renderPlans, nothingPlanned(plans));
+      return emitPlans(plans, asText);
     }
 
     case 'raw': {
@@ -771,7 +800,12 @@ async function main(): Promise<number> {
         ...(limit !== undefined ? { limit } : {}),
         ...(values.child ? { child: values.child } : {}),
       });
-      return emit(digest, asText, renderDigest);
+      // `generatedAt` is when this payload was assembled; `fetchedAt` is when
+      // the oldest response inside it was read from Aula. They were one field,
+      // stamped now, on a digest that may have made no request at all.
+      const { generatedAt, ...rest } = digest;
+      const stamped = { generatedAt, fetchedAt: client.dataFetchedAt(), ...rest };
+      return emit(stamped, asText, renderDigest);
     }
 
     case 'new': {
@@ -821,25 +855,81 @@ async function main(): Promise<number> {
       // `command` is `never` here: the switch above is exhaustive over the
       // declared commands, and this branch exists for the argv that got past
       // parsing anyway. String() is what makes that sayable.
-      console.error(`Unknown command "${String(command)}".\n\n${USAGE}`);
-      return 1;
+      throw new UsageError(`Unknown command "${String(command)}".`, `Run \`${cmd('--help')}\`.`);
   }
 }
 
 // ------------------------------------------------------------------ commands
 
 /**
- * What one command accepts, straight from the same table that enforces it —
- * so the help can never drift from what the parser will actually allow.
+ * `aula <command> --help`: what it does, what each option takes and defaults
+ * to, what the JSON holds, and how it exits.
+ *
+ * The options come from the same table that enforces them and the output keys
+ * from the contract slice the tests hold the code to, so neither can drift from
+ * what the command actually does. It used to print option names alone —
+ * `--role` with no word on what it took, and nothing on what came back.
  */
 function commandHelp(command: CliCommand): string {
-  const options = optionsFor(command);
+  const names = optionNamesFor(command);
+  const defaults = OPTION_DEFAULTS[command] ?? {};
+  const spelled = names.map((name) => {
+    const meta = OPTION_HELP[name];
+    return { flag: `--${name}${meta.value ? ` ${meta.value}` : ''}`, name, meta };
+  });
+  const width = Math.max(0, ...spelled.map((o) => o.flag.length));
+  const options = spelled.map(({ flag, name, meta }) => {
+    const fallback =
+      defaults[name] ??
+      (name === 'cache-ttl'
+        ? `${DEFAULT_TTL_MS / 1000}`
+        : name === 'week'
+          ? 'this week'
+          : undefined);
+    return `  ${flag.padEnd(width)}   ${meta.help}${fallback ? ` (default ${fallback})` : ''}`;
+  });
+
+  const shape = contractFrame().commands as Record<string, CommandShape> | undefined;
+  const declared = shape?.[command];
+  const output = declared ? describeOutput(declared) : ['  Text, for a person.'];
+
   return [
-    `Usage: ${cmd(usageFor(command))}`,
-    options.length > 0 ? `Options: ${options.join(' ')}` : 'Takes no options.',
+    `Usage: ${cmd(usageFor(command))}${names.length ? ' [options]' : ''}`,
     '',
-    `Run \`${cmd('--help')}\` for every command.`,
+    COMMAND_SUMMARY[command],
+    '',
+    ...(options.length ? ['Options:', ...options] : ['Takes no options.']),
+    '',
+    'Output:',
+    ...output,
+    '',
+    'Exit: 0 with the body · 4 nothing to report, body still printed · 1 Aula or a vendor',
+    'down, or a bug · 2 usage · 5 no usable session. On 1, 2 and 5 the last line of stderr',
+    `is {"error":{"code","message","hint"}}. \`${cmd('--contract')}\` has every shape and note.`,
   ].join('\n');
+}
+
+type CommandShape = {
+  shape: 'object' | 'array';
+  keys?: string[];
+  optional?: string[];
+  item_keys?: string[];
+  item_optional?: string[];
+  nested?: Record<string, { keys: string[]; optional?: string[] }>;
+};
+
+/** The JSON a command prints, as the slice declares it: top-level keys, then what is inside. */
+function describeOutput(declared: CommandShape): string[] {
+  const list = (keys: string[] = [], optional: string[] = []) =>
+    [...keys, ...optional.map((key) => `${key}?`)].join(', ');
+  const head =
+    declared.shape === 'array'
+      ? `  JSON array; each item: ${list(declared.item_keys, declared.item_optional)}`
+      : `  JSON object: ${list(declared.keys, declared.optional)}`;
+  const nested = Object.entries(declared.nested ?? {}).map(
+    ([path, inside]) => `  ${path}: ${list(inside.keys, inside.optional)}`,
+  );
+  return [head, ...nested, '  (a trailing ? marks a key that may be absent)'];
 }
 
 function runCache(positionals: string[], asText: boolean, ttlMs: number): number {
@@ -893,10 +983,14 @@ function runOpen(web: boolean): number {
   if (web) {
     const url = readTarget();
     if (!url) {
-      console.error(
-        `No hosted copy is configured — \`${cmd('publish')}\` sets one up. \`${cmd('open')}\` shows the local page.`,
+      // 5, not 1. Exit 1 says "a source is down, retry later", and no retry
+      // configures a hosted copy; "setup required — do not retry unchanged" is
+      // what this is.
+      throw new CliError(
+        'SETUP',
+        'No hosted copy is configured.',
+        `\`${cmd('publish')}\` sets one up; \`${cmd('open')}\` shows the local page.`,
       );
-      return 1;
     }
     // Same courtesy as the local page below: say when the link is stale rather
     // than let a day-old brief read as today's.
@@ -913,8 +1007,11 @@ function runOpen(web: boolean): number {
 
   const path = join(BRIEF_DIR, 'latest.html');
   if (!existsSync(path)) {
-    console.error(`No overview found at ${path} — run \`${cmd('new')}\` to generate one.`);
-    return 1;
+    throw new CliError(
+      'SETUP',
+      `No overview found at ${path}.`,
+      `Run \`${cmd('new')}\` to generate one.`,
+    );
   }
   const day = localIsoDate(new Date(statSync(path).mtimeMs));
   const today = localIsoDate(new Date());
@@ -949,10 +1046,11 @@ async function runPublish(off: boolean): Promise<number> {
   }
   const artifactPath = join(BRIEF_DIR, 'artifact.html');
   if (!existsSync(artifactPath)) {
-    console.error(
-      `No overview to publish yet — run \`${cmd('new')}\` first, then \`${cmd('publish')}\`.`,
+    throw new CliError(
+      'SETUP',
+      'No overview to publish yet.',
+      `Run \`${cmd('new')}\` first, then \`${cmd('publish')}\`.`,
     );
-    return 1;
   }
 
   console.error(
@@ -962,8 +1060,7 @@ async function runPublish(off: boolean): Promise<number> {
   );
   const result = await deployArtifact(artifactPath, { title: BRIEF_TITLE, create: !target });
   if (result.status !== 'ok') {
-    console.error(`Publishing failed: ${result.reason}`);
-    return 1;
+    throw new CliError('UPSTREAM', `Publishing failed: ${result.reason}`);
   }
   // Saved only after a deploy that worked — the URL is only known from the reply.
   if (!target) setTarget(result.url);
@@ -1043,13 +1140,23 @@ async function runCalendars(positionals: string[]): Promise<number> {
       // agent looping the morning brief on a missing connector retries a state
       // that no amount of waiting changes. Nothing here is fixed except by a
       // person clicking Connect.
-      return EXIT.SETUP;
+      return failWith({
+        code: 'SETUP',
+        message: firstLineOf(err.observed),
+        hint:
+          'If Google Calendar is not connected, the user connects it in Claude: ' +
+          `Settings → Connectors → Google Calendar → Connect. Then run \`${cmd('calendars')}\` again.`,
+      });
     }
     if (err instanceof CalendarSelectionError) {
       // 2: the name came off the command line and is wrong or ambiguous, which
       // is the definition of a usage error. It shared exit 1 with an outage.
       console.error(err.message);
-      return EXIT.USAGE;
+      return failWith({
+        code: 'USAGE',
+        message: firstLineOf(err.message),
+        hint: `\`${cmd('calendars')}\` lists the exact names.`,
+      });
     }
     // Already a full remedy naming the dependency and how to install it —
     // prefixing it would bury the headline `doctor` and the skill read first.
@@ -1058,10 +1165,15 @@ async function runCalendars(positionals: string[]): Promise<number> {
       // on the next attempt. `claudeMissingRemedy` says as much in prose; the
       // exit code should not contradict it.
       console.error(err.message);
-      return EXIT.SETUP;
+      return failWith({
+        code: 'SETUP',
+        message: firstLineOf(err.message),
+        hint: 'Install Claude Code, then run the command again.',
+      });
     }
-    console.error(`Could not ask Claude for your calendars: ${errorMessage(err)}`);
-    return EXIT.ERROR;
+    const message = `Could not ask Claude for your calendars: ${errorMessage(err)}`;
+    console.error(message);
+    return failWith({ code: 'UPSTREAM', message: firstLineOf(message), hint: 'Try again later.' });
   }
 }
 
@@ -1213,7 +1325,13 @@ async function setCalendars(refs: string[]): Promise<number> {
   const { days: receiptDays } = overviewWindow(localIsoDate(receiptNow));
   const load = await loadPersonalEvents(started, calendarWindow(receiptNow, receiptDays));
   for (const warning of load.warnings) console.error(warning);
-  if (load.warnings.length > 0) return 1;
+  if (load.warnings.length > 0) {
+    return failWith({
+      code: 'UPSTREAM',
+      message: 'The calendars were saved, but reading them back failed.',
+      hint: `The reasons are above; \`${cmd('doctor --text')}\` reads them again.`,
+    });
+  }
 
   // Per calendar, not just a total: one silently empty calendar is exactly
   // what a single combined number would hide.
@@ -1339,8 +1457,6 @@ function parseCacheTtl(raw: string | undefined): number {
 
 // --------------------------------------------------------- groups & contacts
 
-type ContactRow = BirthdayContact & { group: string; groupId: number };
-
 /** Pages the contact list, which is 1-based and stops on an empty page. */
 async function collectContacts(
   client: AulaClient,
@@ -1364,7 +1480,7 @@ async function collectContacts(
       collected.push(contact);
       newRows++;
     }
-    if (newRows === 0) throw new Error(`Aula repeated contact page ${page}.`);
+    if (newRows === 0) throw new CliError('UPSTREAM', `Aula repeated contact page ${page}.`);
   }
   return collected;
 }
@@ -1373,7 +1489,7 @@ async function loadContacts(
   client: AulaClient,
   family: Family,
   opts: { child?: string; groupId?: number; role: string },
-): Promise<ContactRow[]> {
+): Promise<NormalContact[]> {
   let targets: Array<{ id: number; name: string }>;
   if (opts.groupId !== undefined) {
     targets = [{ id: opts.groupId, name: `group ${opts.groupId}` }];
@@ -1391,7 +1507,7 @@ async function loadContacts(
     }
   }
 
-  const rows: ContactRow[] = [];
+  const rows: NormalContact[] = [];
   const seen = new Set<string>();
   for (const target of targets) {
     for (const contact of await collectContacts(client, target.id, opts.role)) {
@@ -1400,7 +1516,7 @@ async function loadContacts(
       const key = `${target.id}:${contact.profileId ?? contact.fullName}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      rows.push({ ...contact, group: target.name, groupId: target.id });
+      rows.push(normaliseContact(contact, target));
     }
   }
   return rows;
@@ -1485,7 +1601,9 @@ function parseContactRole(raw: string | undefined): 'child' | 'guardian' {
 
 // ---------------------------------------------------------------- rendering
 
-function renderWhoami(family: Family): string {
+function renderWhoami(
+  family: Omit<Family, 'mitidUsername'> & { mitidUsername: string | null },
+): string {
   const lines = [
     `Guardian: ${family.guardian.name} (${family.guardian.userId})`,
     `Session stepped up: ${family.isSteppedUp} ${family.isSteppedUp ? '' : '(sensitive threads will be unreadable)'}`,
@@ -1642,18 +1760,21 @@ function renderSchedule(schedule: ReturnType<typeof normaliseSchedule>): string 
     .join('\n');
 }
 
-function renderContacts(contacts: ContactRow[]): string {
+function renderContacts(contacts: NormalContact[]): string {
   if (contacts.length === 0) return '(no contacts shared for this group)';
   return contacts
     .map((c) => {
       const details = [c.mobilePhone, c.homePhone, c.email].filter(Boolean).join(' · ');
-      const relations = (c.relations ?? [])
-        .map((r) => r.name)
-        .filter(Boolean)
-        .join(', ');
+      const address = c.address
+        ? [c.address.street, [c.address.postalCode, c.address.city].filter(Boolean).join(' ')]
+            .filter(Boolean)
+            .join(', ')
+        : '';
+      const relations = c.relations.map((r) => r.name).join(', ');
       return (
-        `${c.fullName ?? 'unknown'} — ${c.group}${c.birthday ? `  (b. ${c.birthday})` : ''}\n` +
+        `${c.name} — ${c.group}${c.birthday ? `  (b. ${c.birthday})` : ''}\n` +
         `${details ? `    ${details}\n` : ''}` +
+        `${address ? `    ${address}\n` : ''}` +
         `${relations ? `    related: ${relations}\n` : ''}`
       ).trimEnd();
     })
@@ -1672,10 +1793,17 @@ function renderPlans(plans: WeekPlan[]): string {
         // the week is empty when the fetch failed is how an answer like "der er
         // ingen ugeplan for uge 33" gets given about a week that contains
         // "husk skiftetøj og badeting".
-        return warnings
-          ? `${head}\n  COULD NOT BE READ — the vendor did not answer. ` +
+        switch (plan.status) {
+          case 'failed':
+            return (
+              `${head}\n  COULD NOT BE READ — the vendor did not answer. ` +
               `This is NOT an empty week; the plan may contain items.\n${warnings}`
-          : `${head}\n  (nothing published — the vendor answered, the week is genuinely empty)`;
+            );
+          case 'skipped':
+            return `${head}\n  (not asked — no selected child attends a school)\n${warnings}`;
+          default:
+            return `${head}\n  (nothing published — the vendor answered, the week is genuinely empty)`;
+        }
       }
       // Grouped by child, then by the vendor's own date label — the shape a
       // parent reads it in, rather than the flat list the APIs return.
@@ -1703,10 +1831,14 @@ function renderPlans(plans: WeekPlan[]): string {
     .join('\n\n');
 }
 
-function renderDigest(digest: Awaited<ReturnType<typeof buildDigest>>): string {
+function renderDigest(
+  digest: Awaited<ReturnType<typeof buildDigest>> & { fetchedAt: string },
+): string {
   const a = digest.attention;
   const sections = [
-    `Aula digest — last ${digest.window.days} days (generated ${formatWhen(digest.generatedAt)})`,
+    // The time that matters to a reader is when Aula was read, not when this
+    // text was assembled from what was already on disk.
+    `Aula digest — last ${digest.window.days} days (read from Aula ${formatWhen(digest.fetchedAt)})`,
     `Children: ${digest.family.children.map((c) => `${c.name} (${c.institution})`).join(', ')}` +
       (digest.scope.child ? `  <narrowed to --child ${digest.scope.child}>` : ''),
     '',
@@ -1790,7 +1922,7 @@ function renderBrief(result: {
  * and never by `digest`, whose payload is a dozen reads at once.
  */
 function emit<T>(value: T, asText: boolean, render: (value: T) => string, nothing = false): number {
-  console.log(asText ? render(value) : JSON.stringify(value, null, 2));
+  console.log(asText ? render(value) : toJson(value));
   return nothing ? EXIT.NOTHING : EXIT.OK;
 }
 
@@ -1800,14 +1932,30 @@ function emitRows<T>(rows: T[], asText: boolean, render: (rows: T[]) => string):
 }
 
 /**
- * Whether a set of vendor plans amounts to "nothing planned".
+ * Prints a set of vendor plans with the exit their statuses earn.
  *
- * A failed vendor read has the same `items: []` as a quiet week and says so
- * only in `warnings`, so a warning anywhere means this is not known to be
- * empty — and an unknown must never leave as exit 4's "a real, final answer".
+ * A failed vendor read has the same `items: []` as a quiet week, and it left
+ * at exit 0 with the difference in `warnings` — a body that read as "nothing
+ * planned" to anyone who did not check. Now: anything readable is exit 0 with
+ * the body, and `status` says which plans are partial; nothing readable and no
+ * failure is exit 4; nothing readable and a failure is exit 1 with no body —
+ * a read that did not happen is not an answer, however it is dressed.
  */
-function nothingPlanned(plans: WeekPlan[]): boolean {
-  return plans.every((plan) => plan.items.length === 0 && (plan.warnings ?? []).length === 0);
+function emitPlans(plans: WeekPlan[], asText: boolean): number {
+  const anyItems = plans.some((plan) => plan.items.length > 0);
+  const failed = plans.filter((plan) => plan.status === 'failed');
+  if (!anyItems && failed.length > 0) {
+    for (const plan of failed) {
+      for (const warning of plan.warnings ?? []) console.error(`${plan.capability}: ${warning}`);
+    }
+    const capabilities = [...new Set(failed.map((plan) => plan.capability))].join(', ');
+    throw new CliError(
+      'UPSTREAM',
+      `The ${capabilities} could not be read: ${failed[0]?.warnings?.[0] ?? 'the vendor did not answer'}`,
+      'A failed vendor read is never cached, so try again in a few minutes; --child narrows it to one child.',
+    );
+  }
+  return emit(plans, asText, renderPlans, !anyItems);
 }
 
 /**
@@ -1822,11 +1970,15 @@ function nothingPlanned(plans: WeekPlan[]): boolean {
  *
  * `limit` is null when nothing capped the read — `--since` on its own, or a
  * command with no default cap — and `truncated` is then false by construction.
+ *
+ * `fetchedAt` is when the rows were actually read from Aula: responses are
+ * cached for ten minutes, and "did the teacher reply yet?" is a question where
+ * those ten minutes are the answer. `--no-cache` makes it now.
  */
 function emitList<T>(
   key: string,
   rows: T[],
-  cut: { truncated: boolean; limit: number | undefined },
+  cut: { truncated: boolean; limit: number | undefined; fetchedAt: string },
   asText: boolean,
   render: (rows: T[]) => string,
 ): number {
@@ -1835,7 +1987,12 @@ function emitList<T>(
   const code = rows.length === 0 ? EXIT.NOTHING : EXIT.OK;
   if (!asText) {
     console.log(
-      JSON.stringify({ [key]: rows, truncated: cut.truncated, limit: cut.limit ?? null }, null, 2),
+      toJson({
+        [key]: rows,
+        truncated: cut.truncated,
+        limit: cut.limit ?? null,
+        fetchedAt: cut.fetchedAt,
+      }),
     );
     return code;
   }
@@ -1864,7 +2021,8 @@ async function collectCommonFiles(client: AulaClient, family: Family): Promise<C
     });
     expectedTotal ??= page.totalAmount;
     if (page.totalAmount !== expectedTotal) {
-      throw new Error(
+      throw new CliError(
+        'UPSTREAM',
         `Aula changed the shared-file total while paging (${expectedTotal} to ${page.totalAmount}).`,
       );
     }
@@ -1877,11 +2035,12 @@ async function collectCommonFiles(client: AulaClient, family: Family): Promise<C
     }
     if (collected.length >= expectedTotal) break;
     if (page.commonFiles.length === 0) {
-      throw new Error(
+      throw new CliError(
+        'UPSTREAM',
         `Aula reported ${expectedTotal} shared files but returned ${collected.length}.`,
       );
     }
-    if (newRows === 0) throw new Error(`Aula repeated shared-file page ${index}.`);
+    if (newRows === 0) throw new CliError('UPSTREAM', `Aula repeated shared-file page ${index}.`);
   }
   // Newest first: the shelf is dominated by years-old policy documents, and the
   // thing being looked for is almost always what was added most recently.
@@ -1925,46 +2084,37 @@ function reportProblem(message: string): void {
 }
 
 try {
-  process.exitCode = await main();
+  const code = await main();
+  ensureErrorLine(code);
+  process.exitCode = code;
 } catch (err) {
-  if (err instanceof UsageError) {
-    // 2, like every sibling: "fix the command line". This used to be 1, which
-    // the fleet reserves for "a source is down, retry later" — so a typo and
-    // an outage were the same code.
-    reportProblem(err.message);
-    process.exitCode = EXIT.USAGE;
-  } else if (
-    err instanceof AulaAuthError ||
-    err instanceof AulaSessionError ||
-    // The vendored login flow's own hierarchy — a failed refresh-stepup or
-    // token refresh is a credentials problem, not a bug, so no stack trace.
-    err instanceof AulaAuthFlowError
-  ) {
-    // 5, the fleet's "setup required — do not retry unchanged". Expired
-    // credentials are fixed by `aula login`, never by retrying.
-    reportProblem(err.message);
-    process.exitCode = EXIT.SETUP;
-  } else if (err instanceof AulaApiError) {
-    // No "Aula API error:" prefix any more. It labelled the failure without
-    // saying anything about it, and it pushed the part worth reading — which
-    // is now a plain-language headline — into the middle of the line.
-    // 1, the fleet's "a source is down or blocking". An Aula outage is exactly
-    // that; it used to be 3, which every sibling reads as "refine the query
-    // and retry" — advice that cannot help when the server is down.
-    reportProblem(err.message);
-    process.exitCode = EXIT.ERROR;
-  } else if (err instanceof WidgetError) {
+  // The vendored login flow's own hierarchy — a failed refresh-stepup or token
+  // refresh is a credentials problem, not a bug. That package is not ours to
+  // edit, so it is the one failure whose code is decided here rather than on
+  // the class.
+  const isAuthFlow = err instanceof AulaAuthFlowError;
+  // Aula refusing the login is the other thing `status` needs to know, and it
+  // is only ever learnt here.
+  if (err instanceof AulaAuthError) recordSessionSeen({ state: 'rejected', steppedUp: null });
+  if (err instanceof WidgetError) {
     // A third-party school system, not Aula and not us: the vendor is down or
-    // has changed its payload. Same class of "not a bug in this tool" as an
-    // Aula API error, so it gets the same treatment rather than a stack trace.
+    // has changed its payload.
     console.error(`Widget error (${err.widgetId}): ${err.message}`);
-    process.exitCode = EXIT.ERROR;
+  } else if (err instanceof CliError || isAuthFlow) {
+    // Planned-for failures print as a plain message. No "Aula API error:"
+    // prefix: it labelled the failure without saying anything about it, and it
+    // pushed the headline into the middle of the line.
+    reportProblem(err.message);
   } else {
     // An unexpected error is a bug in this client, so the stack is the useful
     // part and it is printed raw rather than dressed up as advice.
     console.error(err instanceof Error ? (err.stack ?? err.message) : String(err));
-    process.exitCode = EXIT.ERROR;
   }
+  // The exit follows from the code, never the other way round: 2 for USAGE —
+  // it was 1 once, the same as an outage; 5 for SETUP, which no retry fixes;
+  // 1 for a source that is down (it was 3, which the fleet reads as "refine
+  // the query"), for a vendor, and for a bug.
+  process.exitCode = failWith(errorLineFor(err, { isAuthFlow }));
 } finally {
   // Written once, here, rather than per response: flat-cache keeps the whole
   // file in memory and rewrites it whole, so saving on every `set` would cost

@@ -11,7 +11,7 @@
 
 import { type WidgetTokens, widgetFetch } from '../widgets.ts';
 import { expectOptionalType, isArrayOf, isOptional, isRecord, isString } from '../validation.ts';
-import { type IntegrationContext, isoDate, type WeekPlan, type WeekPlanItem } from './types.ts';
+import { type IntegrationContext, isoDate, type FetchedPlan, type WeekPlanItem } from './types.ts';
 
 const SYSTEMATIC_URL = 'https://systematic-momo.dk/api/aula/reminders/v1';
 
@@ -69,7 +69,7 @@ export async function getReminders(
   ctx: IntegrationContext,
   tokens: WidgetTokens,
   widgetId: string,
-): Promise<WeekPlan> {
+): Promise<FetchedPlan> {
   const params = new URLSearchParams({
     children: ctx.children.map((c) => c.id).join(','),
     institutions: ctx.institutionCodes.join(','),
