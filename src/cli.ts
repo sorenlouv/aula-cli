@@ -53,6 +53,7 @@ import {
 import { AulaAuthError, AulaClient, AulaMethodError, CALENDAR_MAX_SPAN_DAYS } from './client.ts';
 import { briefSlots, readConfig, updateConfig } from './config.ts';
 import { contractFrame } from './contract.ts';
+import { upstreamDoc } from './upstream.ts';
 import {
   buildDigest,
   collectAlbums,
@@ -117,7 +118,7 @@ import { currentSlotStart } from './slots.ts';
 import { NoProviderError, SUPPORTED_WIDGET_IDS, type WeekPlan } from './integrations/index.ts';
 import { addLocalDays, isoDate, localIsoDate } from './integrations/types.ts';
 import type { CommonFile, Contact, ThreadDetail } from './types.ts';
-import { errorMessage, parseInteger, parseIsoDateParts } from './validation.ts';
+import { errorMessage, isRecord, parseInteger, parseIsoDateParts } from './validation.ts';
 import { type Capability, WidgetError } from './widgets.ts';
 
 /** Upper bound on `--days` where no endpoint imposes its own — a year of history. */
@@ -167,6 +168,8 @@ Everyday:
                                in the frame every sibling prints: what each exit
                                code means, which carry a body, and every command's
                                keys
+  --upstream                   How to read Aula directly for what this tool does
+                               not wrap: the URL grammar, raw, and the traps
 
 Options for new:
   --days <n>                   How much history to read (default 60)
@@ -204,12 +207,13 @@ type them:
                                then generates the overview if this slot needs one
   doctor                       Call every endpoint and report status + timing
   cache status|clear           Inspect or drop the response cache
-  raw <method> [k=v ...]       Any un-wrapped Aula read method
+  raw <method> [k=v ...]       Any un-wrapped Aula read method; --body <json>
+                               for the reads Aula models as a POST
 
   Their options: --text --limit <n> --since <7d|2026-08-01> --child <name|id>
   --days <n> --full --unread --important --week <2026-W33> --next --page <n>
   --widget <id> --group <id> --role <child|guardian> --out <path>
-  --from <date> --to <date> --no-cache --cache-ttl <seconds>
+  --from <date> --to <date> --body <json> --no-cache --cache-ttl <seconds>
 
   Each command takes only the options it acts on, and refuses the rest rather
   than ignoring them; \`aula <command> --help\` is that list. \`doctor\` always
@@ -252,6 +256,15 @@ async function main(): Promise<number> {
   // sibling answers it; here it was `Unknown command "--contract"`, exit 2.
   if (command === '--contract') {
     console.log(toJson(contractFrame()));
+    return 0;
+  }
+
+  // The bypass layer, and the same reasoning again: an agent holding the
+  // compiled binary has no checkout, so `API.md` — accurate, detailed, and the
+  // only place this was written down — resolved to nothing on its machine.
+  // Printing it is what makes it reachable.
+  if (command === '--upstream') {
+    console.log(upstreamDoc());
     return 0;
   }
 
@@ -777,8 +790,9 @@ async function main(): Promise<number> {
     case 'raw': {
       const method = positionals[0];
       if (method === undefined) throw new Error('raw method was not validated');
+      const body = parseJsonBody(values.body);
       const result = await client
-        .getRaw(method, parseKeyValues(positionals.slice(1)))
+        .getRaw(method, parseKeyValues(positionals.slice(1)), body)
         .catch((err: unknown) => {
           // Here the caller typed the method name, so a name the read-only guard
           // refuses, or one Aula has never heard of, is a command line to fix.
@@ -1555,6 +1569,27 @@ function describeThreadAttachments(detail: FullThreadDetail) {
 }
 
 // ------------------------------------------------------------------- parsing
+
+/**
+ * `raw --body '<json>'`: the POST payload, as a JSON object.
+ *
+ * An object rather than any JSON value, because every POST read Aula has is a
+ * filter object — and a bare string or number would be accepted here and come
+ * back as a `40` with no detail, which is the least informative failure this API
+ * has. A malformed body is the caller's command line, so it is a `UsageError`
+ * and exit 2, not the "a source is down, retry later" that exit 1 means.
+ */
+function parseJsonBody(raw: string | undefined): unknown {
+  if (raw === undefined) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err: unknown) {
+    throw new UsageError(`--body must be valid JSON: ${errorMessage(err)}`);
+  }
+  if (!isRecord(parsed)) throw new UsageError('--body must be a JSON object, e.g. \'{"key": 1}\'.');
+  return parsed;
+}
 
 function requireId(raw: string | undefined, usage: string): number {
   const id = parseInteger(raw, { min: 1 });

@@ -20,6 +20,7 @@ import {
   optionNamesFor,
   optionsFor,
   parseCommandLine,
+  TOOL_FLAGS,
 } from './cli-options.ts';
 import { contractFrame } from './contract.ts';
 
@@ -28,9 +29,6 @@ import { contractFrame } from './contract.ts';
  * the scheduler's own entry point, and what SETUP.md drives during install.
  */
 const INTERNAL_OR_SETUP: readonly CliCommand[] = ['scheduled-run', 'install-skill', 'version'];
-
-/** Flags that are not options of any command: the tool-level ones. */
-const TOOL_FLAGS = new Set(['--help', '--contract', '--version', '--json']);
 
 /** Every backticked span in the template, with the code fences' lines too. */
 function spans(): string[] {
@@ -103,14 +101,13 @@ describe('the skill template and the code agree', () => {
     const everyFlag = new Set(
       [...template.matchAll(/--[a-z][a-z-]*/g)].map((m) => m[0]).filter((f) => f !== '--'),
     );
-    const known = new Set([
-      ...TOOL_FLAGS,
-      ...(Object.keys(contractFrame().commands as object) as CliCommand[]).flatMap(optionsFor),
-      ...INTERNAL_OR_SETUP.flatMap(optionsFor),
-      ...(['new', 'open', 'publish', 'schedule', 'login', 'calendars'] as CliCommand[]).flatMap(
-        optionsFor,
-      ),
-    ]);
+    // Every command, off the parser's own table. This was three overlapping
+    // lists — the contract's commands, the internal ones, and six more named by
+    // hand — and the hand-written six is what went stale: `raw` was in none of
+    // them, so `--body`, which only `raw` takes, read as a flag no command has.
+    // Whether the command it is SHOWN with accepts it is the test above, which
+    // parses each span for real.
+    const known = new Set([...TOOL_FLAGS, ...CLI_COMMANDS.flatMap(optionsFor)]);
     // `pdftotext -layout` is a single dash and never matches; `--layout` would.
     for (const flag of everyFlag) {
       expect(known.has(flag), `the template mentions ${flag}, which no command takes`).toBe(true);

@@ -37,6 +37,7 @@ const OPTION_DEFINITIONS = {
   png: { type: 'boolean' },
   'no-cache': { type: 'boolean' },
   'cache-ttl': { type: 'string' },
+  body: { type: 'string' },
   debug: { type: 'boolean' },
 } as const;
 
@@ -85,7 +86,7 @@ const COMMAND_OPTIONS = {
   assignments: [...TEXT, ...CACHED, 'week', 'next', 'child', 'widget', 'from', 'to'],
   reminders: [...TEXT, ...CACHED, 'week', 'next', 'child', 'widget', 'from', 'to'],
   homework: [...TEXT, ...CACHED, 'week', 'next', 'child', 'from', 'to'],
-  raw: [...TEXT, ...CACHED],
+  raw: [...TEXT, ...CACHED, 'body'],
   digest: [...TEXT, ...CACHED, 'days', 'limit', 'week', 'next', 'child'],
   new: [
     ...TEXT,
@@ -108,6 +109,24 @@ export type CliCommand = keyof typeof COMMAND_OPTIONS;
 
 /** Every command the parser knows, off the table that enforces it. */
 export const CLI_COMMANDS = Object.keys(COMMAND_OPTIONS) as CliCommand[];
+
+/**
+ * Questions about the tool rather than about Aula: no command, no session, no
+ * request, handled in `cli.ts` before the command parser runs.
+ *
+ * Here rather than duplicated in each test that needs it. Two documents name
+ * these — the skill template and `UPSTREAM.md` — and each had its own copy of
+ * the list, so adding `--upstream` broke a test that was asserting a flag
+ * exists by checking whether some command accepts it. None of these is any
+ * command's option; that is what makes them tool-level.
+ */
+export const TOOL_FLAGS: ReadonlySet<string> = new Set([
+  '--help',
+  '--contract',
+  '--upstream',
+  '--version',
+  '--json',
+]);
 
 /**
  * What each option takes and means, for `aula <command> --help`.
@@ -149,6 +168,10 @@ export const OPTION_HELP: Readonly<Record<OptionName, { value?: string; help: st
   png: { help: 'Also write a PNG' },
   'no-cache': { help: 'Read from Aula even when a cached response is younger than the TTL' },
   'cache-ttl': { value: '<seconds>', help: 'How old a cached response may be' },
+  body: {
+    value: '<json>',
+    help: 'Send this JSON object as a POST body — the only way to reach a read Aula models as POST',
+  },
   debug: { help: 'Write a sanitised wire transcript' },
 };
 
@@ -195,7 +218,7 @@ export const COMMAND_SUMMARY: Readonly<Record<CliCommand, string>> = {
   assignments: 'Homework: assignments (SkolePortal)',
   reminders: 'Homework: reminders (Systematic)',
   homework: 'All three homework sources in one call',
-  raw: 'Any un-wrapped Aula read method, with key=value parameters',
+  raw: 'Any un-wrapped Aula read method, with key=value parameters and an optional JSON body',
   digest: 'Threads with bodies, posts, calendar, presence and weekly plans in one payload',
   new: 'Generate today’s AI overview and open it',
 };
@@ -229,7 +252,7 @@ const POSITIONALS: Partial<Record<CliCommand, { min: number; max?: number; usage
   attachment: { min: 1, max: 2, usage: 'attachment <threadId> [index]' },
   'post-attachment': { min: 1, max: 2, usage: 'post-attachment <postId> [index]' },
   commonfile: { min: 1, max: 1, usage: 'commonfile <id|title>' },
-  raw: { min: 1, usage: 'raw <method> [key=value ...]' },
+  raw: { min: 1, usage: 'raw <method> [key=value ...] [--body <json>]' },
 };
 
 /** Every option `command` acts on — the allow-list above, as the user types it. */

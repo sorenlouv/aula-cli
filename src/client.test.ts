@@ -1119,15 +1119,64 @@ test('the raw escape hatch reaches unwrapped reads but still refuses writes', ()
   }
 });
 
-test('the raw escape hatch cannot POST, not even to an allowlisted read', () => {
-  assert.throws(
-    () => assertReadOnly('gallery.getAlbums', 'POST', { allowAnyGetter: true }),
-    AulaApiError,
+// `raw` was GET-only on top of the name check, which sounds stricter than it
+// was: Aula models some READS as POST because the filter will not fit in a
+// query string, so those reads were unreachable by the wrapper AND by the
+// escape hatch. The name is the guard, not the verb.
+test('the raw escape hatch may POST to a getter-named read', () => {
+  assert.doesNotThrow(() =>
+    assertReadOnly('calendar.getEventsByProfileIdsAndResourceIds', 'POST', {
+      allowAnyGetter: true,
+    }),
   );
-  assert.throws(
-    () => assertReadOnly('messaging.getThreads', 'POST', { allowAnyGetter: true }),
-    AulaApiError,
+  assert.doesNotThrow(() => assertReadOnly('gallery.getAlbums', 'POST', { allowAnyGetter: true }));
+});
+
+test('a raw body is sent as a POST, with the CSRF token the POST reads need', async () => {
+  // The guard is one half; this is the other — that a body actually changes the
+  // verb and carries `Csrfp-Token`, which a POST without is `400`/`40`.
+  const seen: Array<{ method: string; csrf: string | null; body: unknown }> = [];
+  await withFetch(
+    (input, init) => {
+      seen.push({
+        method: init?.method ?? 'GET',
+        csrf: new Headers(init?.headers).get('Csrfp-Token'),
+        body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
+      });
+      void input;
+      return Promise.resolve(jsonResponse({ status: { code: 0 }, data: [] }));
+    },
+    async () => {
+      const client = new AulaClient({ cookie: COOKIE });
+      await client.getRaw(
+        'calendar.getEventsByProfileIdsAndResourceIds',
+        {},
+        { instProfileIds: [11], start: '2026-01-01', end: '2026-01-10' },
+      );
+    },
   );
+  const call = seen.at(-1);
+  assert.equal(call?.method, 'POST');
+  assert.equal(call?.csrf, 'test-csrf');
+  assert.deepEqual(call?.body, {
+    instProfileIds: [11],
+    start: '2026-01-01',
+    end: '2026-01-10',
+  });
+});
+
+test('a POST that is not a getter is refused, through raw and through a wrapper', () => {
+  for (const method of ['messaging.sendMessage', 'posts.createPost', 'calendar.deleteEvent']) {
+    assert.throws(
+      () => assertReadOnly(method, 'POST', { allowAnyGetter: true }),
+      AulaApiError,
+      `${method} must still be refused over POST`,
+    );
+  }
+  // Without `allowAnyGetter` — every typed wrapper — the named POST allowlist
+  // is still the whole permission, so a getter name is not enough there.
+  assert.throws(() => assertReadOnly('gallery.getAlbums', 'POST'), AulaApiError);
+  assert.doesNotThrow(() => assertReadOnly('calendar.getEventsByProfileIdsAndResourceIds', 'POST'));
 });
 
 // ------------------------------------------------------------ new endpoints

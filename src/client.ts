@@ -30,7 +30,13 @@ import { recordSessionSeen } from './session-seen.ts';
 import { errorMessage, isRecord, parseInteger } from './validation.ts';
 import { cmd } from './runtime.ts';
 
-const FALLBACK_API_VERSION = 24;
+/**
+ * Where the version probe starts. Exported because `UPSTREAM.md` prints the URL
+ * an agent would build by hand, version and all, and `upstream.test.ts` holds
+ * the document to this constant — a bumped version that left the document
+ * saying v24 would send that agent to a path where every method answers `10`.
+ */
+export const FALLBACK_API_VERSION = 24;
 /**
  * How far above the version in use the retirement probe searches. Measured from
  * `#version` rather than from the constant: the probe's own warning tells the
@@ -40,7 +46,8 @@ const FALLBACK_API_VERSION = 24;
  */
 const API_VERSION_PROBE_SPAN = 12;
 const MAX_API_VERSION = 99;
-const BASE = 'https://www.aula.dk/api';
+/** Exported for `UPSTREAM.md`'s drift test — see {@link FALLBACK_API_VERSION}. */
+export const AULA_API_BASE = 'https://www.aula.dk/api';
 const USER_AGENT = 'aula-cli/0.1 (+personal read-only client)';
 /** The health probe runs on a path that has already failed — it may not hang. */
 const HEALTH_PROBE_TIMEOUT_MS = 5_000;
@@ -72,9 +79,13 @@ export const READ_ONLY_METHODS = new Set<string>([
 ]);
 
 /**
- * The only endpoint we may call with POST. Aula models this particular *read*
- * as a POST because the filter payload is too big for a query string; it does
- * not mutate anything.
+ * The only endpoint a *typed wrapper* may call with POST. Aula models this
+ * particular read as a POST because the filter payload is too big for a query
+ * string; it does not mutate anything.
+ *
+ * `raw` is not bound by this list — see {@link assertReadOnly}. It is bound by
+ * the getter-name pattern instead, which is the same guard that lets `raw` name
+ * a method at all.
  */
 const POST_ALLOWED = new Set<string>(['calendar.getEventsByProfileIdsAndResourceIds']);
 
@@ -100,14 +111,24 @@ export const READ_METHOD_PATTERN = /^[a-zA-Z]+\.(get|is|has)[A-Z][a-zA-Z0-9]*$/;
  * `allowAnyGetter` widens the check from the named allowlist to "any method
  * whose name is a getter" — used only by the `raw` command, which exists so an
  * un-wrapped read endpoint doesn't require a code change to reach.
+ *
+ * It widens POST the same way, and that is deliberate. `raw` used to be GET-only
+ * on top of the name check, which sounds stricter and was not: Aula models some
+ * *reads* as POST because the filter payload will not fit in a query string —
+ * the calendar is one — so a read the typed wrappers do not expose (a past
+ * window, a wider one) was unreachable by BOTH the wrapper and the escape hatch,
+ * and the answer to "how do I read that" was "you cannot". The verb was never
+ * the guard here. `messaging.sendMessage` is refused over GET and POST alike,
+ * because the name is what says whether a call mutates.
  */
 export function assertReadOnly(
   method: string,
   httpMethod: 'GET' | 'POST',
   opts: { allowAnyGetter?: boolean } = {},
 ): void {
+  const getterNamed = opts.allowAnyGetter === true && READ_METHOD_PATTERN.test(method);
   const known = READ_ONLY_METHODS.has(method);
-  if (!known && !(opts.allowAnyGetter && READ_METHOD_PATTERN.test(method))) {
+  if (!known && !getterNamed) {
     throw new AulaMethodError(
       method,
       -1,
@@ -119,8 +140,14 @@ export function assertReadOnly(
             `[${[...READ_ONLY_METHODS].join(', ')}].`,
     );
   }
-  if (httpMethod === 'POST' && !POST_ALLOWED.has(method)) {
-    throw new AulaMethodError(method, -1, `Refusing to POST to "${method}" — read-only client.`);
+  if (httpMethod === 'POST' && !POST_ALLOWED.has(method) && !getterNamed) {
+    throw new AulaMethodError(
+      method,
+      -1,
+      `Refusing to POST to "${method}" — read-only client. A typed wrapper may ` +
+        `POST only to [${[...POST_ALLOWED].join(', ')}]; \`${cmd('raw')}\` may POST to ` +
+        `any method named like a getter.`,
+    );
   }
 }
 
@@ -515,7 +542,7 @@ export class AulaClient {
     version: number,
     mayRecover = true,
   ): Promise<unknown> {
-    const url = new URL(`${BASE}/v${version}/`);
+    const url = new URL(`${AULA_API_BASE}/v${version}/`);
     url.searchParams.set('method', method);
     for (const [key, value] of Object.entries(opts.query ?? {})) {
       if (value === undefined) continue;
@@ -1184,14 +1211,24 @@ export class AulaClient {
 
   /**
    * Escape hatch for read endpoints that have no typed wrapper here. Still
-   * refuses anything that is not named like a getter, and still GET-only —
-   * see {@link assertReadOnly}.
+   * refuses anything that is not named like a getter — see
+   * {@link assertReadOnly}.
+   *
+   * A `body` makes it a POST, which is the only way to reach the reads Aula
+   * models that way (the calendar's window is the one that comes up). The CSRF
+   * token the POST needs is already in the jar by then: `#ensureSession` runs
+   * first and `getProfilesByLogin` is what mints it.
    */
   async getRaw(
     method: string,
     query: Record<string, QueryValue | undefined> = {},
+    body?: unknown,
   ): Promise<unknown> {
-    return this.#request(method, { query, allowAnyGetter: true });
+    return this.#request(method, {
+      query,
+      allowAnyGetter: true,
+      ...(body === undefined ? {} : { body }),
+    });
   }
 }
 
@@ -1429,7 +1466,7 @@ function describeValue(value: unknown): string {
  * one 5xxes regardless. Anything below 500 therefore means the service is up.
  */
 async function probeServiceReachable(version: number): Promise<boolean | undefined> {
-  const url = new URL(`${BASE}/v${version}/`);
+  const url = new URL(`${AULA_API_BASE}/v${version}/`);
   url.searchParams.set('method', 'profiles.getProfilesByLogin');
   try {
     const res = await fetch(url, {

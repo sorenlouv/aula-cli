@@ -90,6 +90,7 @@ export const SESSION_FREE_COMMANDS: ReadonlyArray<{ command: string; what: strin
   { command: 'status', what: 'what is stored, and whether it is still usable' },
   { command: 'preferences', what: 'what the overview is written to' },
   { command: '--contract', what: 'what this tool emits' },
+  { command: '--upstream', what: 'how to read Aula directly, for what this tool does not wrap' },
 ];
 
 /**
