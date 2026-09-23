@@ -5,10 +5,18 @@
  * element and colour on the page comes from here — so a bad model day costs a
  * dull card, never an unreadable page.
  *
- * Derived from the mockup that was reviewed and approved, including the print
- * rules, which matter more than they look: the PDF is the copy that gets
- * forwarded, and anything collapsed on screen that is *brief content* has to be
- * expanded there. The one exception is `.more`, which holds verbatim source
+ * The look is the hosted login page's, carried onto a long page: its blue
+ * (`THEME_COLOR` in `hosting/pages.ts`, sampled from the family's logo) is a
+ * masthead band with the same two soft radial glows, the day's one-line
+ * summary is a white card that floats over the band's lower edge the way the
+ * login card floats on its stage, and every card below takes a quieter cut of
+ * the same drop shadow. The heading takes the rounded face the login uses.
+ * The child colours, the warm "needs action" edge and the print rules are
+ * this page's own.
+ *
+ * The print rules matter more than they look: the PDF is the copy that gets
+ * forwarded, and anything collapsed on screen that is *brief content* has to
+ * be expanded there. The one exception is `.more`, which holds verbatim source
  * material rather than brief content — see the print block at the bottom.
  */
 
@@ -23,24 +31,33 @@
  * the other theme's background.
  */
 const DARK_TOKENS = `
-  --bg:#16151a; --panel:#1e1d23; --ink:#f0eeea; --ink-2:#b4afa8; --ink-3:#807b74;
-  --line:#302e37; --line-2:#26252c;
-  --c1:#a5a0fb; --c2:#5eead4; --c3:#fda4af;
-  --now:#fb923c; --now-bg:#2e1c10; --soon:#fbbf24; --soon-bg:#2a2210;
+  --bg:#0f1626; --panel:#1a2436; --ink:#eef2f8; --ink-2:#b3bfd2; --ink-3:#8593a9;
+  --line:#2d3a52; --line-2:#26314a;
+  --accent:#8fb0e3;
+  --band:#16243d; --band-glow:rgba(48,87,145,.6); --band-shade:rgba(0,0,0,.35);
+  --c1:#8fb0e3; --c2:#5eead4; --c3:#fda4af;
+  --now:#fb923c; --now-bg:#2e1c10; --soon:#a9c4ee; --soon-bg:#1f2f4d;
   --warn:#fbbf24; --warn-bg:#2a2210;
-  --quote:#26252c;
-  --shadow:0 1px 2px rgba(0,0,0,.3),0 4px 16px -6px rgba(0,0,0,.5);
+  --quote:#141d2c;
+  --shadow:0 1px 2px rgba(0,0,0,.35),0 12px 28px -14px rgba(0,0,0,.6);
+  --shadow-lift:0 30px 60px -24px rgba(0,0,0,.7),0 10px 24px -12px rgba(0,0,0,.5);
 `;
 
 export const BRIEF_CSS = `
 :root{
-  --bg:#faf8f5; --panel:#fff; --ink:#1c1a17; --ink-2:#57534e; --ink-3:#8a837c;
-  --line:#e7e2db; --line-2:#f0ece6;
-  --c1:#4f46e5; --c2:#0d9488; --c3:#be123c;
-  --now:#c2410c; --now-bg:#fff1e7; --soon:#a16207; --soon-bg:#fdf6e3;
+  --bg:#f1f5fb; --panel:#fff; --ink:#16223a; --ink-2:#4f5d75; --ink-3:#7a889e;
+  --line:#dbe3ef; --line-2:#e9eef6;
+  --accent:#305791;
+  --band:#305791; --band-glow:rgba(120,165,230,.45); --band-shade:rgba(10,26,56,.35);
+  --c1:#4f86e0; --c2:#14b8a6; --c3:#e0457b;
+  --now:#c2410c; --now-bg:#fff1e7; --soon:#2b5390; --soon-bg:#e6eefa;
   --warn:#b45309; --warn-bg:#fdf4e7;
-  --quote:#f7f4ef;
-  --shadow:0 1px 2px rgba(28,26,23,.04),0 4px 16px -6px rgba(28,26,23,.10);
+  --quote:#f3f6fb;
+  --shadow:0 1px 2px rgba(16,36,72,.05),0 12px 28px -14px rgba(16,36,72,.22);
+  --shadow-lift:0 30px 60px -24px rgba(10,26,56,.45),0 10px 24px -12px rgba(10,26,56,.28);
+  /* How far the masthead reaches below its text, and so how far the topline
+     card is pulled up over it. */
+  --lift:76px;
 }
 /* System setting: nothing is stamped, so only the OS preference is available. */
 @media (prefers-color-scheme:dark){
@@ -55,36 +72,55 @@ export const BRIEF_CSS = `
 body{margin:0;background:var(--bg);color:var(--ink);
   font:16px/1.55 ui-sans-serif,-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
   -webkit-font-smoothing:antialiased}
-.wrap{max-width:940px;margin:0 auto;padding:40px 24px 80px}
-header{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap;margin-bottom:28px}
-h1{margin:0;font-size:34px;letter-spacing:-.02em;font-weight:650}
-.meta{color:var(--ink-3);font-size:13px;margin-top:4px}
+
+/* The masthead: the login page's blue stage, as a band. The two glows are the
+   login's, drawn on the band's own box rather than as viewport-sized circles,
+   so they scale with the band instead of flattening out across a wide screen. */
+.masthead{color:#fff;padding:calc(30px + env(safe-area-inset-top,0px)) 0 var(--lift);
+  background:
+    radial-gradient(120% 150% at 50% -45%,var(--band-glow) 0%,transparent 60%),
+    radial-gradient(70% 130% at 100% 130%,var(--band-shade) 0%,transparent 62%),
+    var(--band)}
+.masthead-inner{max-width:940px;margin:0 auto;padding:0 24px;
+  display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap}
+.eyebrow{margin:0 0 6px;font-size:12.5px;font-weight:650;letter-spacing:.14em;text-transform:uppercase;
+  color:rgba(255,255,255,.74)}
+h1{margin:0;font:700 38px/1.08 ui-rounded,"SF Pro Rounded","Nunito","Varela Round",system-ui,sans-serif;
+  letter-spacing:-.02em;color:#fff}
 .kids{display:flex;gap:8px;flex-wrap:wrap}
-.kid{display:flex;align-items:center;gap:7px;background:var(--panel);border:1px solid var(--line);
-  border-radius:99px;padding:5px 12px 5px 8px;font-size:12.5px;box-shadow:var(--shadow)}
+.kid{display:flex;align-items:center;gap:7px;background:rgba(255,255,255,.14);
+  border:1px solid rgba(255,255,255,.26);border-radius:99px;padding:5px 12px 5px 8px;font-size:12.5px;color:#fff}
+.kid span{color:rgba(255,255,255,.74)}
 .dot{width:9px;height:9px;border-radius:50%;flex:none;display:inline-block}
-.kid span{color:var(--ink-3)}
+/* On the band a child's colour needs a rim to read as a badge and not a stain. */
+.kid .dot{box-shadow:0 0 0 2px rgba(255,255,255,.85)}
 .c1{background:var(--c1)} .c2{background:var(--c2)} .c3{background:var(--c3)}
-.topline{font-size:20px;line-height:1.5;letter-spacing:-.01em;margin:0 0 34px;padding:20px 22px;
-  background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+
+.wrap{max-width:940px;margin:0 auto;padding:40px 24px 80px}
+/* The day's one line floats over the band's edge — the login card on its
+   stage. Only when it leads the page: a warning that comes first sits above
+   it, and the topline then keeps to the flow. */
+.topline{position:relative;font-size:20px;line-height:1.5;letter-spacing:-.01em;margin:0 0 34px;
+  padding:22px 26px;background:var(--panel);border-radius:18px;box-shadow:var(--shadow-lift)}
+.wrap>.topline:first-child{margin-top:calc(-1 * var(--lift))}
 .overview-warning .panel{background:var(--warn-bg);border-color:var(--warn)}
 .overview-warning .st{font-weight:550}
 .overview-warning .st span{color:var(--ink)}
 section{margin-bottom:34px}
-h2,.timeline-heading{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);
-  font-weight:650;margin:0 0 12px;display:flex;align-items:center;gap:10px}
+h2,.timeline-heading{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);
+  font-weight:700;margin:0 0 12px;display:flex;align-items:center;gap:10px}
 h2::after,.timeline-heading::after{content:"";flex:1;height:1px;background:var(--line)}
 .count{color:var(--ink-3);font-weight:500;letter-spacing:0}
-.card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:14px;
+.card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:16px;
   padding:18px 58px 16px 20px;
-  margin-bottom:10px;box-shadow:var(--shadow);border-left:3px solid var(--line)}
+  margin-bottom:12px;box-shadow:var(--shadow);border-left:3px solid var(--line)}
 /* A card that asks something of the family is drawn with the warm edge — the
    whole of what says so, now that Skal gøres heads the work that can be done
    now and a badge saying the same thing has gone. Cards to merely know keep the
    quiet edge, so the reader's eye finds the work in a list that is by date. */
 .card.act{border-left-color:var(--now)}
 .row{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:7px}
-.chip{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;padding:3px 9px;border-radius:6px}
+.chip{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;padding:3px 9px;border-radius:7px}
 .chip.now{background:var(--now-bg);color:var(--now)}
 .chip.soon{background:var(--soon-bg);color:var(--soon)}
 .chip.recurring{background:var(--quote);color:var(--ink-2);border:1px solid var(--line)}
@@ -109,11 +145,11 @@ h2::after,.timeline-heading::after{content:"";flex:1;height:1px;background:var(-
 .more{margin-top:10px;background:transparent;border:0;border-radius:0;box-shadow:none}
 .more>summary{padding:4px 0;font-size:12.5px;font-weight:550;color:var(--ink-3);
   justify-content:flex-start;gap:6px}
-.more>summary:hover{color:var(--ink-2)}
+.more>summary:hover{color:var(--accent)}
 .more>summary::after{content:"⌄";font-size:14px}
 .more[open]>summary::after{content:"⌃"}
-.more>summary:focus-visible{outline:2px solid var(--c2);outline-offset:3px;border-radius:4px}
-.more .body{margin-top:4px;padding:12px 15px;background:var(--quote);border-radius:10px;
+.more>summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
+.more .body{margin-top:4px;padding:12px 15px;background:var(--quote);border-radius:12px;
   font-size:14px;color:var(--ink-2)}
 .more .body>p{margin:0 0 9px}
 .more .body>p:last-child{margin-bottom:0}
@@ -137,9 +173,9 @@ h2::after,.timeline-heading::after{content:"";flex:1;height:1px;background:var(-
 .tick::before{content:"✓"}
 /* A thumb is wider than the circle it is aiming at. */
 .tick::after{content:"";position:absolute;inset:-9px;border-radius:50%}
-.tick:hover{border-color:var(--c2);color:var(--c2)}
-.tick:focus-visible{outline:2px solid var(--c2);outline-offset:2px}
-.tick[aria-pressed="true"]{background:var(--c2);border-color:var(--c2);color:var(--panel)}
+.tick:hover{border-color:var(--accent);color:var(--accent)}
+.tick:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tick[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--panel)}
 /* Hidden, never dropped: the toggle below puts them back. */
 .card.is-done{display:none}
 section.reveal .card.is-done{display:block;opacity:.55}
@@ -155,12 +191,12 @@ section.reveal .card.is-done .calendar-title{text-decoration:line-through}
    however true the count is. While they are on show, the toggle says it. */
 section.reveal [data-empty]{display:none}
 .done-toggle{display:block;width:100%;margin:2px 0 0;padding:9px 13px;text-align:left;
-  border:1px dashed var(--line);border-radius:10px;background:transparent;
+  border:1px dashed var(--line);border-radius:12px;background:transparent;
   color:var(--ink-3);font:inherit;font-size:12.5px;cursor:pointer}
-.done-toggle:hover{color:var(--ink-2);border-color:var(--ink-3)}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow)}
+.done-toggle:hover{color:var(--accent);border-color:var(--accent)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px 18px;box-shadow:var(--shadow)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(272px,1fr));gap:12px}
-.cc{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow)}
+.cc{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px 18px;box-shadow:var(--shadow)}
 .cc h3{margin:0 0 2px;font-size:16.5px;font-weight:650;display:flex;align-items:center;gap:8px}
 .cc .sub{font-size:12.5px;color:var(--ink-3);margin-bottom:12px}
 .cc ul{margin:0;padding:0;list-style:none}
@@ -168,7 +204,7 @@ section.reveal [data-empty]{display:none}
 .cc li:first-child{border-top:0}
 .times{margin-top:11px;padding-top:10px;border-top:1px solid var(--line-2);font-size:12px;
   color:var(--ink-3);font-variant-numeric:tabular-nums}
-details{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+details{background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
 summary{cursor:pointer;padding:15px 18px;font-size:14.5px;font-weight:600;list-style:none;
   display:flex;justify-content:space-between;align-items:center}
 summary::-webkit-details-marker{display:none}
@@ -209,7 +245,7 @@ details.muted summary{font-size:12.5px;font-weight:500;color:var(--ink-3);paddin
    as two things. */
 details.muted .panel{background:transparent;border:0;border-radius:0;box-shadow:none;padding:0 16px 13px}
 .chips{display:flex;gap:9px;flex-wrap:wrap}
-.tile{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:11px 14px;
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:11px 14px;
   font-size:13px;box-shadow:var(--shadow);min-width:172px}
 .tile b{display:block;font-weight:600;margin-bottom:2px}
 .tile span{color:var(--ink-3);font-size:12px}
@@ -218,10 +254,20 @@ details.muted .panel{background:transparent;border:0;border-radius:0;box-shadow:
 .st i{font-style:normal;flex:none}
 .st.bad{color:var(--warn)}
 .st span{color:var(--ink-2)}
-footer{margin-top:26px;text-align:center;color:var(--ink-3);font-size:12px}
+footer{margin-top:34px;text-align:center;color:var(--ink-3);font-size:12px}
 @media print{
   body{background:#fff}
-  .card,.cc,.panel,details,.tile{box-shadow:none}
+  /* The band is screen chrome; on paper the masthead is plain ink, and the
+     topline card takes its place in the flow. */
+  .masthead{background:none;color:var(--ink);padding:0 0 14px}
+  .eyebrow{color:var(--accent)}
+  h1{color:var(--ink)}
+  .kid{background:transparent;border-color:var(--line);color:var(--ink)}
+  .kid span{color:var(--ink-3)}
+  .kid .dot{box-shadow:none}
+  .wrap>.topline:first-child{margin-top:0}
+  .topline{border:1px solid var(--line)}
+  .topline,.card,.cc,.panel,details,.tile{box-shadow:none}
   details{opacity:1}
   summary::after{display:none}
   .card,.cc,.di{break-inside:avoid}
@@ -241,9 +287,12 @@ footer{margin-top:26px;text-align:center;color:var(--ink-3);font-size:12px}
   .done-toggle{border-style:solid;cursor:auto}
 }
 @media (max-width:680px){
+  :root{--lift:64px}
+  .masthead{padding-top:calc(22px + env(safe-area-inset-top,0px))}
+  .masthead-inner{padding:0 16px;gap:16px}
   .wrap{padding:26px 16px 60px;overflow-wrap:anywhere}
-  h1{font-size:27px}
-  .topline{font-size:17.5px}
+  h1{font-size:29px}
+  .topline{font-size:17.5px;padding:18px 20px}
   /* As a flex item, the chip row otherwise keeps its max-content width and
      makes the whole page wider than a narrow phone before its own wrap runs. */
   .kids{width:100%;min-width:0}
