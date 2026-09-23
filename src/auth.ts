@@ -86,7 +86,7 @@ export function tokenStore(): EncryptedFileTokenStore {
  * things that "still work" is only worth printing while it is true.
  */
 export const SESSION_FREE_COMMANDS: ReadonlyArray<{ command: string; what: string }> = [
-  { command: 'open', what: 'the newest overview, already on disk' },
+  { command: 'open', what: 'the newest overview, hosted or on this machine' },
   { command: 'status', what: 'what is stored, and whether it is still usable' },
   { command: 'preferences', what: 'what the overview is written to' },
   { command: '--contract', what: 'what this tool emits' },

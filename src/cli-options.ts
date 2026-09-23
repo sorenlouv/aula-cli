@@ -28,7 +28,7 @@ const OPTION_DEFINITIONS = {
   'no-deploy': { type: 'boolean' },
   'no-open': { type: 'boolean' },
   'catch-up': { type: 'boolean' },
-  web: { type: 'boolean' },
+  local: { type: 'boolean' },
   off: { type: 'boolean' },
   remove: { type: 'boolean' },
   at: { type: 'string' },
@@ -47,7 +47,7 @@ const TEXT = ['text'] as const;
 
 const COMMAND_OPTIONS = {
   cache: [...TEXT, 'cache-ttl'],
-  open: ['web'],
+  open: ['local'],
   publish: ['off'],
   calendars: [],
   remember: [],
@@ -159,7 +159,7 @@ export const OPTION_HELP: Readonly<Record<OptionName, { value?: string; help: st
   'no-deploy': { help: 'Do not update the hosted copy this run' },
   'no-open': { help: 'Do not open a browser' },
   'catch-up': { help: 'Do nothing if this slot’s overview is already complete' },
-  web: { help: 'The hosted copy instead of the local page' },
+  local: { help: 'The page on this machine, even where a hosted copy is configured' },
   off: { help: 'Stop updating the hosted copy and forget it' },
   remove: { help: 'Remove the schedule' },
   at: { value: '<HH:MM,HH:MM>', help: 'The slot times' },
@@ -178,7 +178,7 @@ export const OPTION_HELP: Readonly<Record<OptionName, { value?: string; help: st
 /** One line per command: what it is for. Typed `Record` so no command lacks one. */
 export const COMMAND_SUMMARY: Readonly<Record<CliCommand, string>> = {
   cache: 'What is cached (`status`, the default) or drop it all (`clear`)',
-  open: 'Open the newest overview without regenerating it',
+  open: 'Open the newest overview — the hosted copy where one is configured — without regenerating it',
   publish: 'Keep a hosted copy of the overview at <url>; `--off` stops',
   calendars: 'Which of the family’s own calendars the overview reads; `set` states the whole list',
   remember: 'Record a standing wish about what the overview should highlight',
@@ -238,7 +238,7 @@ export const OPTION_DEFAULTS: Partial<Record<CliCommand, Partial<Record<OptionNa
 
 const POSITIONALS: Partial<Record<CliCommand, { min: number; max?: number; usage: string }>> = {
   cache: { min: 0, max: 1, usage: 'cache [status|clear]' },
-  open: { min: 0, max: 0, usage: 'open [--web]' },
+  open: { min: 0, max: 0, usage: 'open [--local]' },
   publish: { min: 0, max: 1, usage: 'publish [<url>] [--off]' },
   calendars: { min: 0, usage: 'calendars [set <name> ... | set none]' },
   'install-skill': { min: 0, max: 1, usage: 'install-skill [claude|codex] [--out <dir>]' },

@@ -494,7 +494,8 @@ explicitly forbids overlap, conflict and no-conflict claims.
 ## Delivery
 
 Written to `~/.aula/brief/`, dated, plus `latest.html` so a missed day is
-recoverable. An interactive `aula new` opens the page; `aula open` shows the
+recoverable. An interactive `aula new` opens the page — the hosted copy where
+one is configured, since only it shares its ticks; `aula open` shows the
 newest without regenerating.
 
 `--pdf` renders via headless Chrome and is the format to use for forwarding.
