@@ -2,7 +2,7 @@
  * Uploading the hosted copy of the brief.
  *
  * `publish.ts` writes files. This sends the same page to the Worker in
- * `src/hosting/`, which serves it behind Cloudflare Access, so the shared link
+ * `src/hosting/`, which serves it behind the family's own login, so the shared link
  * shows today's brief rather than the day it was first set up. It is a
  * separate module because it is a separate kind of risk: writing to ~/.aula
  * always works, while this leg needs the network — and must never take the
@@ -18,10 +18,10 @@
  *   in `~/.aula/config.json`, and `aula publish <url>` is the only thing that
  *   writes it. The page carries health information about the children, so
  *   hosting has to be asked for — never inherited by cloning the repo.
- * - **It authenticates as a service token, not as a person.** Access checks the
- *   `CF-Access-Client-*` pair before the request reaches the Worker, the same
- *   gate the family's browsers pass with their email code. The pair sits in the
- *   config beside the URL, and that file is written `0600`.
+ * - **It authenticates with a token, not as a person.** The family signs in
+ *   with a code by mail; the upload carries the Worker's `UPLOAD_TOKEN` as a
+ *   bearer token instead, which is the one route that takes it. The token sits
+ *   in the config beside the URL, and that file is written `0600`.
  */
 
 import { CONFIG_PATH, type HostingConfig, readConfig, updateConfig } from '../config.ts';
@@ -43,9 +43,9 @@ const TIMEOUT_MS = 30_000;
 export type DeployResult =
   | { status: 'ok'; url: string }
   /**
-   * `retryable` is false when only a change of configuration can help — Access
-   * refused the token, or the Worker refused the page — so the schedule does
-   * not spend three hours asking again.
+   * `retryable` is false when only a change of configuration can help — the
+   * Worker refused the token or the page — so the schedule does not spend
+   * three hours asking again.
    */
   | { status: 'failed'; reason: string; retryable: boolean }
   /** `--no-deploy`: no hosted copy was wanted this run. Silent by design. */
@@ -108,13 +108,12 @@ export async function deployBrief(
       method: 'PUT',
       headers: {
         'content-type': 'text/html; charset=utf-8',
-        'cf-access-client-id': hosting.clientId,
-        'cf-access-client-secret': hosting.clientSecret,
+        authorization: `Bearer ${hosting.token}`,
       },
       body: html,
-      // Access answers a refused token by redirecting to its login page, and
-      // that page, followed, is a 200 of HTML — a failure that reads as a
-      // success. The redirect is the answer, so it is not followed.
+      // Nothing at the right address redirects an upload, and a login page
+      // somewhere else, followed, is a 200 of HTML — a failure that reads as a
+      // success. So a redirect is the answer, and it is not followed.
       redirect: 'manual',
       signal: AbortSignal.timeout(opts.timeoutMs ?? TIMEOUT_MS),
     });
@@ -132,7 +131,14 @@ export async function deployBrief(
   if (status >= 300 && status < 400) {
     return {
       status: 'failed',
-      reason: `Cloudflare Access afviste service-tokenet (HTTP ${status}, videre til login)`,
+      reason: `${hosting.url} sendte uploaden videre (HTTP ${status}) — er det den rigtige adresse?`,
+      retryable: false,
+    };
+  }
+  if (status === 401) {
+    return {
+      status: 'failed',
+      reason: `${hosting.url} afviste upload-nøglen (HTTP 401)`,
       retryable: false,
     };
   }
@@ -140,9 +146,8 @@ export async function deployBrief(
   return {
     status: 'failed',
     reason: `${hosting.url} svarede HTTP ${status}${detail ? `: ${detail}` : ''}`,
-    // A 403 is Access refusing the token, or the Worker refusing a request
-    // Access never saw; a 4xx is a page or an address that will not change on
-    // its own. Only the server's own trouble is worth another attempt.
+    // A 4xx is a page or an address that will not change on its own. Only
+    // the server's own trouble is worth another attempt.
     retryable: status >= 500 || status === 429 || status === 408,
   };
 }

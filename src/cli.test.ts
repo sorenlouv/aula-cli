@@ -1384,15 +1384,8 @@ test('contact and shared-file commands have no hidden legacy page ceilings', () 
  * The same target and token `fake-aula.ts` admits. Not imported from there:
  * that module replaces `fetch` in whatever process loads it.
  */
-const HOSTED = {
-  url: 'https://aula.eksempel.dk',
-  clientId: 'eksempel-id.access',
-  clientSecret: 'eksempel-secret',
-};
-const HOSTED_TOKEN = {
-  AULA_ACCESS_CLIENT_ID: HOSTED.clientId,
-  AULA_ACCESS_CLIENT_SECRET: HOSTED.clientSecret,
-};
+const HOSTED = { url: 'https://aula.eksempel.dk', token: 'eksempel-upload-token' };
+const HOSTED_TOKEN = { AULA_HOSTING_TOKEN: HOSTED.token };
 
 /** A page for `publish` to upload, as `new` would have left it. */
 function writeOverview(dir: string): void {
@@ -1544,7 +1537,7 @@ test('dropping a saved calendar needs no connector at all', () => {
   assert.equal(none.stderr, '');
 });
 
-test('publish <url> uploads with the service token, saves the target, and records the deploy', () => {
+test('publish <url> uploads with the upload token, saves the target, and records the deploy', () => {
   const box = sandbox(HOSTED_TOKEN);
   writeOverview(box.dir);
 
@@ -1558,8 +1551,7 @@ test('publish <url> uploads with the service token, saves the target, and record
 
   // Configured now, so `publish` alone uploads again — with no token in sight.
   box.reset();
-  delete box.env.AULA_ACCESS_CLIENT_ID;
-  delete box.env.AULA_ACCESS_CLIENT_SECRET;
+  delete box.env.AULA_HOSTING_TOKEN;
   const again = box.run('publish');
   assert.equal(again.code, 0, again.stderr);
   assert.deepEqual(again.requests, ['hosting PUT /api/brief']);
@@ -1576,21 +1568,18 @@ test('publish <url> without a token says which variables to set, and saves nothi
   const result = box.run('publish', HOSTED.url);
   assert.equal(result.code, 5);
   assert.equal(errorLineOf(result.stderr).code, 'SETUP');
-  assert.match(result.stderr, /AULA_ACCESS_CLIENT_SECRET/);
+  assert.match(result.stderr, /AULA_HOSTING_TOKEN/);
   assert.deepEqual(result.requests, []);
   assert.equal(existsSync(join(box.dir, 'config.json')), false);
 });
 
-test('a token Access refuses is setup, not an outage, and leaves no target behind', () => {
+test('a token the Worker refuses is setup, not an outage, and leaves no target behind', () => {
   // Exit 1 would say "a source is down, retry later"; no retry fixes a token.
-  const box = sandbox({
-    AULA_ACCESS_CLIENT_ID: HOSTED.clientId,
-    AULA_ACCESS_CLIENT_SECRET: 'wrong',
-  });
+  const box = sandbox({ AULA_HOSTING_TOKEN: 'wrong' });
   writeOverview(box.dir);
   const result = box.run('publish', HOSTED.url);
   assert.equal(result.code, 5);
-  assert.match(result.stderr, /service-tokenet/);
+  assert.match(result.stderr, /upload-nøglen/);
   assert.equal(existsSync(join(box.dir, 'config.json')), false);
 });
 
@@ -1646,7 +1635,7 @@ test('new with a refused token finishes complete, with the reason in its notes',
   const box = sandbox();
   writeFileSync(
     join(box.dir, 'config.json'),
-    JSON.stringify({ hosting: { ...HOSTED, clientSecret: 'wrong' } }),
+    JSON.stringify({ hosting: { ...HOSTED, token: 'wrong' } }),
   );
   const result = box.run('new', '--no-llm', '--no-open');
   assert.equal(result.code, 0, result.stderr);
@@ -1654,7 +1643,7 @@ test('new with a refused token finishes complete, with the reason in its notes',
   assert.equal(out.deployed, null);
   assert.equal(out.complete, true);
   assert.ok(
-    out.notes.some((note: string) => note.includes('service-tokenet')),
+    out.notes.some((note: string) => note.includes('upload-nøglen')),
     JSON.stringify(out.notes),
   );
 });

@@ -10,8 +10,7 @@
  * it out of the repository: a clone of this project has no `~/.aula`, so it
  * inherits no preferences and — the case that matters — no deploy target.
  * Each installation configures its own. The file is written `0600` because
- * `hosting` holds a credential: the Access service token that may replace the
- * family's page.
+ * `hosting` holds a credential: the token that may replace the family's page.
  *
  * **Reads keep what they do not understand, and writes merge.** This file now
  * holds two unrelated things written by two unrelated commands, and the earlier
@@ -36,13 +35,12 @@ export type ConfiguredCalendar = {
 };
 
 /**
- * The hosted copy: the Worker's origin (`src/hosting/`), and the Cloudflare
- * Access service token that may upload to it.
+ * The hosted copy: the Worker's origin (`src/hosting/`), and the token it
+ * accepts an upload with — its `UPLOAD_TOKEN` secret.
  */
 export type HostingConfig = {
   url: string;
-  clientId: string;
-  clientSecret: string;
+  token: string;
 };
 
 export type AulaConfig = {
@@ -134,14 +132,9 @@ function readHostingConfig(value: unknown, path = CONFIG_PATH): HostingConfig | 
   if (!isRecord(value)) throw configError(path, 'hosting skal være et objekt');
   const url = typeof value.url === 'string' ? hostingOrigin(value.url) : null;
   if (!url) throw configError(path, 'hosting.url skal være en https-adresse uden sti');
-  const { clientId, clientSecret } = value;
-  if (typeof clientId !== 'string' || !clientId.trim()) {
-    throw configError(path, 'hosting.clientId mangler');
-  }
-  if (typeof clientSecret !== 'string' || !clientSecret.trim()) {
-    throw configError(path, 'hosting.clientSecret mangler');
-  }
-  return { url, clientId: clientId.trim(), clientSecret: clientSecret.trim() };
+  const { token } = value;
+  if (typeof token !== 'string' || !token.trim()) throw configError(path, 'hosting.token mangler');
+  return { url, token: token.trim() };
 }
 
 function readSchedule(value: unknown, path = CONFIG_PATH): string[] {

@@ -333,7 +333,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   // the model's extraction ran, its page passed validation, and the hosted copy
   // — where one is configured — was actually refreshed. With `--no-llm` the
   // rules-only page is what was asked for, so it is complete on its own terms.
-  // A refused service token is not retryable for the same reason a missing
+  // A refused upload token is not retryable for the same reason a missing
   // URL is not: the note names it, and asking again for three hours will not.
   const complete = isBriefRunComplete({
     modelWasRequested: opts.useModel !== false,

@@ -27,3 +27,6 @@ data/*
 
 # `wrangler dev` state and bundles, beside src/hosting/wrangler.jsonc.
 .wrangler/
+
+# `wrangler dev` secrets for src/hosting (ALLOWED_EMAILS, MAIL_FROM, UPLOAD_TOKEN).
+.dev.vars

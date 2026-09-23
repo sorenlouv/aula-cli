@@ -6,11 +6,7 @@ import { type HostingConfig, hostingOrigin, readConfig, writeConfig } from '../c
 import { MAX_PAGE_BYTES } from '../hosting/protocol.ts';
 import { deployBrief, readHosting, setHosting } from './deploy.ts';
 
-const HOSTING: HostingConfig = {
-  url: 'https://aula.eksempel.dk',
-  clientId: 'eksempel-id.access',
-  clientSecret: 'eksempel-secret',
-};
+const HOSTING: HostingConfig = { url: 'https://aula.eksempel.dk', token: 'eksempel-upload-token' };
 const PAGE = '<!doctype html><title>Aula AI oversigt</title>';
 
 const dirs: string[] = [];
@@ -27,7 +23,7 @@ function configPath(hosting?: HostingConfig): string {
 
 type Sent = { url: string; method: string; headers: Headers; body: string; redirect: string };
 
-/** Stands in for the Worker behind Access, answering every upload with `answer`. */
+/** Stands in for the Worker, answering every upload with `answer`. */
 function worker(answer: () => Response | Promise<Response>): Sent[] {
   const sent: Sent[] = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -73,8 +69,8 @@ describe('readHosting / setHosting', () => {
 
   test('a hand-edited config without its token is refused rather than half-read', () => {
     const path = configPath();
-    writeFileSync(path, JSON.stringify({ hosting: { url: HOSTING.url, clientId: 'x' } }));
-    expect(() => readHosting(path)).toThrow(/clientSecret/);
+    writeFileSync(path, JSON.stringify({ hosting: { url: HOSTING.url } }));
+    expect(() => readHosting(path)).toThrow(/hosting.token/);
   });
 });
 
@@ -112,7 +108,7 @@ describe('deployBrief', () => {
     expect(sent).toEqual([]);
   });
 
-  test('puts the page with the service token, and does not follow a redirect', async () => {
+  test('puts the page with the upload token, and does not follow a redirect', async () => {
     const sent = worker(() => Response.json({ bytes: PAGE.length }));
     const result = await deployBrief(PAGE, { configPath: configPath(HOSTING) });
 
@@ -122,8 +118,7 @@ describe('deployBrief', () => {
     expect(put?.url).toBe('https://aula.eksempel.dk/api/brief');
     expect(put?.method).toBe('PUT');
     expect(put?.body).toBe(PAGE);
-    expect(put?.headers.get('cf-access-client-id')).toBe(HOSTING.clientId);
-    expect(put?.headers.get('cf-access-client-secret')).toBe(HOSTING.clientSecret);
+    expect(put?.headers.get('authorization')).toBe(`Bearer ${HOSTING.token}`);
     expect(put?.redirect).toBe('manual');
   });
 
@@ -133,24 +128,29 @@ describe('deployBrief', () => {
     expect(result).toEqual({ status: 'ok', url: HOSTING.url });
   });
 
-  test('Access redirecting to its login is a refused token, and no retry helps', async () => {
+  test('a refused token is not worth retrying', async () => {
+    worker(() => new Response('Forkert upload-nøgle.\n', { status: 401 }));
+    const result = await deployBrief(PAGE, { hosting: HOSTING });
+    expect(result).toMatchObject({ status: 'failed', retryable: false });
+    expect(result.status === 'failed' && result.reason).toContain('upload-nøglen');
+  });
+
+  test('a redirect is the answer, not a way to somewhere that says 200', async () => {
     worker(
-      () =>
-        new Response(null, {
-          status: 302,
-          headers: { location: 'https://eksempel.cloudflareaccess.com/cdn-cgi/access/login' },
-        }),
+      () => new Response(null, { status: 302, headers: { location: 'https://eksempel.dk/login' } }),
     );
     const result = await deployBrief(PAGE, { hosting: HOSTING });
     expect(result).toMatchObject({ status: 'failed', retryable: false });
-    expect(result.status === 'failed' && result.reason).toContain('service-tokenet');
+    expect(result.status === 'failed' && result.reason).toContain('den rigtige adresse');
   });
 
-  test('a 403 is not worth retrying, and its first line is kept', async () => {
-    worker(() => new Response('Denne side kræver Cloudflare Access foran sig.\n', { status: 403 }));
+  test('another 4xx keeps its first line and is not retried', async () => {
+    worker(() => new Response('Siden er for stor.\nmere\n', { status: 413 }));
     const result = await deployBrief(PAGE, { hosting: HOSTING });
     expect(result).toMatchObject({ status: 'failed', retryable: false });
-    expect(result.status === 'failed' && result.reason).toContain('kræver Cloudflare Access');
+    expect(result.status === 'failed' && result.reason).toBe(
+      'https://aula.eksempel.dk svarede HTTP 413: Siden er for stor.',
+    );
   });
 
   test('the server having trouble is worth retrying', async () => {

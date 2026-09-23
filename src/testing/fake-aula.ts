@@ -294,15 +294,11 @@ function record(what: string): void {
 }
 
 /**
- * The hosted copy's Worker, behind Access. It takes the one service token
- * below and redirects anything else to a login page, as Access does;
- * `FAKE_HOSTING_DOWN=1` makes it answer 503 instead.
+ * The hosted copy's Worker. It takes the one upload token below and answers
+ * 401 to any other, as the real one does; `FAKE_HOSTING_DOWN=1` makes it
+ * answer 503 instead.
  */
-const FAKE_HOSTING = {
-  url: 'https://aula.eksempel.dk',
-  clientId: 'eksempel-id.access',
-  clientSecret: 'eksempel-secret',
-} as const;
+const FAKE_HOSTING = { url: 'https://aula.eksempel.dk', token: 'eksempel-upload-token' } as const;
 const HOSTING_HOST = new URL(FAKE_HOSTING.url).host;
 
 /** The hosts this stub knows how to answer. Anything else is worth recording. */
@@ -346,15 +342,9 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
     const method = init?.method ?? 'GET';
     record(`hosting ${method} ${url.pathname}`);
     if (process.env.FAKE_HOSTING_DOWN === '1') return new Response('down', { status: 503 });
-    const headers = new Headers(init?.headers);
-    const admitted =
-      headers.get('cf-access-client-id') === FAKE_HOSTING.clientId &&
-      headers.get('cf-access-client-secret') === FAKE_HOSTING.clientSecret;
-    if (!admitted) {
-      return new Response(null, {
-        status: 302,
-        headers: { location: 'https://eksempel.cloudflareaccess.com/cdn-cgi/access/login' },
-      });
+    const bearer = new Headers(init?.headers).get('authorization');
+    if (bearer !== `Bearer ${FAKE_HOSTING.token}`) {
+      return new Response('Forkert upload-nøgle.', { status: 401 });
     }
     if (method === 'PUT' && url.pathname === '/api/brief') {
       return Response.json({ storedAt: new Date().toISOString(), bytes: 1 });

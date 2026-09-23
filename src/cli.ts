@@ -148,8 +148,7 @@ Everyday:
   open --web                   Open the hosted copy instead (readable anywhere)
   publish <url>                Keep a hosted copy, readable on a phone, at the
                                Worker in HOSTING.md: uploads the newest page with
-                               the Access service token in AULA_ACCESS_CLIENT_ID
-                               and AULA_ACCESS_CLIENT_SECRET, and on every run
+                               the token in AULA_HOSTING_TOKEN, and on every run
                                from then on
   publish                      Upload the newest page to the configured copy now
   publish --off                Stop updating the hosted copy and forget it
@@ -1049,11 +1048,11 @@ function runOpen(web: boolean): number {
  * `publish <url>` / `publish` / `publish --off` — the hosted copy, configured.
  *
  * The Worker in `src/hosting/` is deployed once, by hand (HOSTING.md); this
- * points the CLI at it. `publish <url>` takes the Access service token from
- * `AULA_ACCESS_CLIENT_ID` and `AULA_ACCESS_CLIENT_SECRET`, uploads the newest
- * page with it, and saves the three only once that upload worked — so the
- * command ends with a link that works, not with a promise about tomorrow's run.
- * `publish` alone uploads again to what is saved.
+ * points the CLI at it. `publish <url>` takes the Worker's upload token from
+ * `AULA_HOSTING_TOKEN`, uploads the newest page with it, and saves both only
+ * once that upload worked — so the command ends with a link that works, not
+ * with a promise about tomorrow's run. `publish` alone uploads again to what
+ * is saved.
  *
  * The preference lives in `~/.aula/config.json`, per installation: nothing a
  * clone of this repository inherits, and nothing another user of the tool can
@@ -1077,7 +1076,7 @@ async function runPublish(url: string | undefined, off: boolean): Promise<number
     throw new CliError(
       'SETUP',
       'No hosted copy is configured.',
-      `Deploy the Worker (HOSTING.md in the aula-cli repository), then run \`${cmd('publish <url>')}\` with its Access service token in AULA_ACCESS_CLIENT_ID and AULA_ACCESS_CLIENT_SECRET.`,
+      `Deploy the Worker (HOSTING.md in the aula-cli repository), then run \`${cmd('publish <url>')}\` with its upload token in AULA_HOSTING_TOKEN.`,
     );
   }
   const htmlPath = join(BRIEF_DIR, 'latest.html');
@@ -1096,8 +1095,8 @@ async function runPublish(url: string | undefined, off: boolean): Promise<number
     const retryable = result.status === 'failed' && result.retryable;
     throw new CliError(retryable ? 'UPSTREAM' : 'SETUP', `Publishing failed: ${result.reason}`);
   }
-  // Saved only after an upload that worked, so a mistyped address or a token
-  // Access refuses never replaces a configuration that was working.
+  // Saved only after an upload that worked, so a mistyped address or a
+  // refused token never replaces a configuration that was working.
   if (url !== undefined) setHosting(hosting);
   const state = loadState();
   recordDeploy(state, result.url);
@@ -1118,15 +1117,14 @@ function hostingFrom(url: string, current: HostingConfig | null): HostingConfig 
       'An https address with no path, such as https://aula.eksempel.dk.',
     );
   }
-  const clientId = process.env.AULA_ACCESS_CLIENT_ID?.trim();
-  const clientSecret = process.env.AULA_ACCESS_CLIENT_SECRET?.trim();
-  if (clientId && clientSecret) return { url: origin, clientId, clientSecret };
+  const token = process.env.AULA_HOSTING_TOKEN?.trim();
+  if (token) return { url: origin, token };
   // Naming the address already configured keeps the token already stored.
   if (current?.url === origin) return current;
   throw new CliError(
     'SETUP',
-    'The Access service token is missing.',
-    'Set AULA_ACCESS_CLIENT_ID and AULA_ACCESS_CLIENT_SECRET to the service token Cloudflare Access issued for uploads, then run this again.',
+    'The upload token is missing.',
+    'Set AULA_HOSTING_TOKEN to the Worker’s UPLOAD_TOKEN secret, then run this again.',
   );
 }
 
