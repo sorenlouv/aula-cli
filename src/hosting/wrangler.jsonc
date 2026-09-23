@@ -1,0 +1,26 @@
+// The hosted copy of the brief. `HOSTING.md` is the runbook; `worker.ts` says
+// why it is shaped this way. Nothing in this file is per-installation: no
+// account id, no resource id, no email address. Wrangler takes the account
+// from `wrangler login`, and who may read the page is the Access policy's
+// business, set in the dashboard.
+{
+  "name": "aula-brief",
+  "main": "worker.ts",
+  "compatibility_date": "2026-09-01",
+
+  // The one hostname, and Access goes in front of it. Preview URLs would be a
+  // second hostname for the same data.
+  "workers_dev": true,
+  "preview_urls": false,
+
+  "durable_objects": {
+    "bindings": [{ "name": "BRIEF_STORE", "class_name": "BriefStore" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BriefStore"] }],
+
+  // `wrangler dev` only: stands in for Access so `ctx.access` exists locally.
+  // A deployed Worker ignores it and gets the real thing or nothing.
+  "access": { "dev": { "aud": "aula-brief-dev" } },
+
+  "observability": { "enabled": true },
+}

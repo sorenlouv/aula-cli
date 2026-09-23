@@ -24,3 +24,6 @@ data/*
 !data/README.md
 
 .DS_Store
+
+# `wrangler dev` state and bundles, beside src/hosting/wrangler.jsonc.
+.wrangler/
