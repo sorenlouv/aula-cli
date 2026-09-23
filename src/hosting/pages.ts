@@ -23,11 +23,37 @@ const BRAND = 'Aula AI oversigt';
 export const THEME_COLOR = '#305791';
 const THEME_COLOR_DARK = '#16243d';
 
+/**
+ * What makes the site an app on a phone's home screen: the manifest (its
+ * name, colours and standalone display), the icon iOS takes, and the blue for
+ * the status bar. Every page the Worker serves carries it — the login pages
+ * here, and the brief, into which `withAppHead` puts it — so it can be added
+ * from whichever page someone is on.
+ */
+export const APP_HEAD = `<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.png" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Overblik">
+<meta name="theme-color" content="${THEME_COLOR}" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="${THEME_COLOR_DARK}" media="(prefers-color-scheme: dark)">`;
+
+/**
+ * The brief as uploaded, with `APP_HEAD` in its head. Done here, when it is
+ * served, rather than when it is generated: the head belongs to the hosted
+ * site, and the same page opened from disk has no manifest to point at. A page
+ * with no head to put it in is served as it came.
+ */
+export function withAppHead(page: string): string {
+  const at = page.indexOf('</head>');
+  return at === -1 ? page : `${page.slice(0, at)}${APP_HEAD}\n${page.slice(at)}`;
+}
+
 /** Stricter than the brief's: these pages run no script at all. */
 export const PAGE_CSP = [
   "default-src 'none'",
   "style-src 'unsafe-inline'",
   "img-src 'self'",
+  "manifest-src 'self'",
   "form-action 'self'",
   "base-uri 'none'",
   "frame-ancestors 'none'",
@@ -131,12 +157,9 @@ function document(title: string, body: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="${THEME_COLOR}" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="${THEME_COLOR_DARK}" media="(prefers-color-scheme: dark)">
 <meta name="robots" content="noindex">
 <title>${escape(title)}</title>
-<link rel="icon" href="/icon.png" type="image/png">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+${APP_HEAD}
 <style>${CSS}</style>
 </head>
 <body>
