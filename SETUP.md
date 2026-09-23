@@ -2,11 +2,13 @@
 
 You are setting this up for someone who is not a developer. When you are done
 they have a daily overview of their children's school and daycare — a page on
-this machine, and, if they want it, a claude.ai address they can bookmark that
-refreshes itself every morning and every evening, so they never have to open
-Claude Code again to read it.
+this machine that refreshes itself every morning and every evening, so they
+never have to open Claude Code again to read it. A copy they can open on their
+phone exists too, but it needs a Cloudflare account and a domain and is set up
+by someone at home in a terminal ([HOSTING.md](HOSTING.md)); it is not part of
+this setup.
 
-Work steps 0–11 in order. Four of them are features the user chooses in step 2
+Work steps 0–11 in order. Three of them are features the user chooses in step 2
 — skip the ones they did not pick, and never turn on one nobody asked for. In a
 minimal run the user is needed twice: the question in step 2, and the login page
 in step 3, where they type their MitID username and approve on their phone.
@@ -132,9 +134,6 @@ description; a control that takes both should be given both.
 
 > **Hvilke funktioner vil du gerne have med?**
 >
-> **Cloud support** *(anbefalet)*
-> Aula Overblikket uploades til claude.ai, hvor kun du kan tilgå det, så du kan læse det på telefonen og andre computere uden at åbne Claude Code.
->
 > **Daglig generering** *(anbefalet)*
 > Et nyt overblik dannes automatisk dagligt kl. 06 hver dag.
 > Er computeren slukket eller i dvale, bliver det genereret når du åbner den igen.
@@ -143,23 +142,23 @@ description; a control that takes both should be given both.
 > Aftaler fra Google Kalender vises sammen med begivenheder fra Aula i
 > overblikket. Kræver, at Google Kalender er forbundet i Claudes indstillinger.
 
-The first two carry *(anbefalet)* in the label — a checkbox control cannot
+The first carries *(anbefalet)* in the label — a checkbox control cannot
 usually be handed to the user pre-ticked, and that word is what does the work
-instead. They are recommended because they are what the tool is for: without
-them the overview is a page on one machine that somebody has to remember to
-regenerate. The other two ask something of the user — a connector, or a
-sentence about their family — so they are offered, not assumed.
+instead. It is recommended because it is what the tool is for: without it the
+overview is a page somebody has to remember to regenerate. The others ask
+something of the user — a connector, or a sentence about their family — so
+they are offered, not assumed.
 
 How to read the answer:
 
-- "Alle" or "bare sæt det hele op" is all four.
-- No answer, or an answer that only says "kom i gang", is the two recommended
-  ones and nothing else. Never the calendar by default: it reads personal data
+- "Alle" or "bare sæt det hele op" is all of them.
+- No answer, or an answer that only says "kom i gang", is the recommended one
+  and nothing else. Never the calendar by default: it reads personal data
   nobody asked you to read.
 - An explicit no to everything is an answer too. Honour it — the overview still
   works as a page on this machine, and step 11 tells them how to add the rest.
 
-Write down what they picked. Steps 6, 8, 9 and 10 each run only if their
+Write down what they picked. Steps 6, 9 and 10 each run only if their
 feature was chosen, and each says so in its heading. Do not raise them again as
 you reach them; they were asked once, here.
 
@@ -323,22 +322,17 @@ aula new
 calls `claude` to write the overview, then opens the page. This is the step
 that fails if `claude` is missing or logged out — see Debugging.
 
-## 8. Put it online — only if they picked it
+## 8. Put it online — not in this setup
 
-```bash
-aula publish
-```
+A copy the family opens on their phones lives on their own Cloudflare account,
+behind a login of its own, and setting it up takes a domain and a terminal:
+[HOSTING.md](HOSTING.md). It is not something to do from here. If they ask for
+it, say so, in these words:
 
-This publishes the overview as an artifact on claude.ai and prints the URL on
-the last line of output. **Keep that URL — step 11 needs it.**
+> En udgave til telefonen kræver en Cloudflare-konto og et domæne, og den
+> sættes op af en, der er vant til en terminal. Overblikket virker fint uden.
 
-The page is private to the user's own claude.ai account. Every later run,
-including every scheduled one, redeploys to that same address, so a bookmark
-never goes stale.
-
-If they did not pick it, run nothing here. The overview stays a page on this
-machine, `aula open` reopens it, and `aula publish` puts it online the day they
-change their mind.
+Run nothing here.
 
 ## 9. Have it run morning and evening — only if they picked it
 
@@ -366,8 +360,8 @@ your user `PATH` and environment instead, and the printed cron lines carry a
 `PATH` of their own — on both, set the `AULA_*` values where the job will see
 them.
 
-Without the hosted copy from step 8 a scheduled run still rebuilds the local
-page, so `aula open` is current without anyone having to ask for it.
+A scheduled run rebuilds the local page, so `aula open` is current without
+anyone having to ask for it.
 
 If they did not pick this, run nothing here, and say plainly what that means:
 the overview is current as of now and stays that way until somebody runs
@@ -399,14 +393,14 @@ mainly the model call.
 
 Lead with where the overview is.
 
-**If it is online (step 8),** lead with the address:
+**If it is online** (`aula open --web` prints an address), lead with that:
 
-> Dit overblik ligger på **[adressen fra trin 8]**. Gem det som bogmærke — også
-> på telefonen. Det opdaterer sig selv hver morgen kl. 06 og hver aften kl. 18,
+> Dit overblik ligger på **[adressen]**. Gem det som bogmærke — også på
+> telefonen. Det opdaterer sig selv hver morgen kl. 06 og hver aften kl. 18,
 > også i weekenden, så det altid er nyt, og du behøver aldrig åbne Claude Code
 > for at læse det. Er computeren slukket eller i dvale på det tidspunkt, bliver
-> det dannet kort efter, du åbner den igen. Du skal være logget ind på claude.ai
-> for at se det; det er privat og kun synligt for dig.
+> det dannet kort efter, du åbner den igen. Første gang logger du ind med din
+> e-mail og en kode, vi sender dig; derefter husker telefonen dig i et år.
 
 Drop the two sentences about the times if they left the schedule off, and say
 instead: *Et nyt overblik er ét `aula new` væk.*
@@ -425,7 +419,6 @@ say to them; the right is what you type:
 
 | Left off — say this                | Turn it on later    |
 | ---------------------------------- | ------------------- |
-| Privat link til din telefon        | `aula publish`      |
 | Opdatering morgen og aften         | `aula schedule`     |
 | Jeres egen kalender                | `aula calendars`    |
 | Fortæl hvad der er vigtigt for jer | `aula remember "…"` |
@@ -460,9 +453,10 @@ say to them; the right is what you type:
   log: `tail -n 20 ~/.aula/logs/brief.jsonl | jq '{at,event,details}'`.
   It records phase times and model attempts, never the prompt or the source
   text.
-- **The online copy is stale** — the `Artifact blev ikke opdateret:` line in
-  `~/.aula/brief/launchd.log` says why; `aula publish` redeploys immediately.
-  (`brief.jsonl` records only whether the deploy succeeded, not why it did not.)
+- **The online copy is stale** — the `Den hostede kopi blev ikke opdateret:`
+  line in `~/.aula/brief/launchd.log` says why; `aula publish` uploads again
+  immediately. (`brief.jsonl` records only whether the upload succeeded, not
+  why it did not.) [HOSTING.md](HOSTING.md) has the rest.
 - **`aula: command not found` after installing** — `~/.local/bin` is not on
   `PATH` in this shell yet (step 1). Use the full `~/.local/bin/aula`, or open
   a new terminal.

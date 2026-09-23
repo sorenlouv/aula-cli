@@ -70,7 +70,7 @@ ranking what actually matters to this family is your job.
 | `commonfile <id\|title>` | Download one shared file |
 | `new` | Generate the daily "Aula AI oversigt" and open it |
 | `open [--web]` | Open the newest overview — the local page, or the hosted copy |
-| `publish [--off]` | Keep a hosted copy of the overview (per installation; `--off` stops) |
+| `publish [<url>] [--off]` | Upload the overview to its hosted copy; `<url>` sets it up (per installation; `--off` stops) |
 | `calendars` | Which of the family's own calendars the overview reads |
 | `calendars set <name> [<name> ...]` | Read exactly these displayed names; `set none` reads none |
 | `remember "<ønske>"` | Record a standing wish about what this family wants highlighted |
@@ -360,9 +360,12 @@ page in `~/.aula/brief/` — and opens it (`--no-open` to skip). It calls
 `claude` itself for extraction; a deterministic local renderer builds the
 layout. `--no-llm` produces a rules-only page. `aula open` shows the
 newest page without regenerating, and
-`open --web` opens the hosted copy where one is configured — `aula
-publish` sets that up (it publishes the newest page and saves the URL in
-`~/.aula/config.json`; `publish --off` stops it). `aula schedule` generates
+`open --web` opens the hosted copy where one is configured: a page on the
+family's own Cloudflare Worker, behind a login by emailed code, where ticks are
+shared between phones. Someone technical sets that up once (HOSTING.md in the
+repository); `aula publish <url>`, with the Worker's upload token in
+`AULA_HOSTING_TOKEN`, then points this installation at it, and every run
+uploads from then on (`publish --off` stops it). `aula schedule` generates
 it automatically at 06:00 and 18:00, every day of the week (`--at HH:MM,HH:MM`
 to change the slot times, `--remove` to stop; launchd on macOS, Task Scheduler
 on Windows); a slot missed because the Mac was off or asleep is caught up
