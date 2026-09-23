@@ -11,7 +11,7 @@
  * Behaviour is chosen per call through the environment, so one installation
  * serves a whole test file:
  *
- *   FAKE_CLAUDE_MODE         ok | error | denied | stall | stall-ignore-term | stall-then-ok |
+ *   FAKE_CLAUDE_MODE         ok | error | stall | stall-ignore-term | stall-then-ok |
  *                            structured-then-stall | structured-unconfirmed-stall | stream
  *   FAKE_CLAUDE_STREAM_FILE  for `stream`: a file of NDJSON copied to stdout verbatim, so a
  *                            caller can hand `parseStream`'s reader a whole session.
@@ -95,10 +95,6 @@ case "$mode" in
   error)
     printf '{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login","permission_denials":[]}\\n'
     exit 1
-    ;;
-  denied)
-    printf '{"type":"result","subtype":"success","is_error":false,"result":"ERROR: the Artifact tool was not permitted","permission_denials":[{"tool_name":"Artifact"}]}\\n'
-    exit 0
     ;;
   *)
     result_json="\${FAKE_CLAUDE_RESULT_JSON:-\\"OK\\"}"

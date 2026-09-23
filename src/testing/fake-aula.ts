@@ -293,8 +293,26 @@ function record(what: string): void {
   if (log) appendFileSync(log, `${what}\n`);
 }
 
+/**
+ * The hosted copy's Worker, behind Access. It takes the one service token
+ * below and redirects anything else to a login page, as Access does;
+ * `FAKE_HOSTING_DOWN=1` makes it answer 503 instead.
+ */
+const FAKE_HOSTING = {
+  url: 'https://aula.eksempel.dk',
+  clientId: 'eksempel-id.access',
+  clientSecret: 'eksempel-secret',
+} as const;
+const HOSTING_HOST = new URL(FAKE_HOSTING.url).host;
+
 /** The hosts this stub knows how to answer. Anything else is worth recording. */
-const KNOWN_HOSTS = new Set(['www.aula.dk', 'app.meebook.com', 'api.minuddannelse.net', FILE_HOST]);
+const KNOWN_HOSTS = new Set([
+  'www.aula.dk',
+  'app.meebook.com',
+  'api.minuddannelse.net',
+  FILE_HOST,
+  HOSTING_HOST,
+]);
 
 async function handle(input: string | Request | URL, init?: RequestInit): Promise<Response> {
   const url = new URL(
@@ -322,6 +340,26 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
     if (url.host === 'broker.unilogin.dk') {
       return new Response('<html><body>Vælg login</body></html>', { status: 200 });
     }
+  }
+
+  if (url.host === HOSTING_HOST) {
+    const method = init?.method ?? 'GET';
+    record(`hosting ${method} ${url.pathname}`);
+    if (process.env.FAKE_HOSTING_DOWN === '1') return new Response('down', { status: 503 });
+    const headers = new Headers(init?.headers);
+    const admitted =
+      headers.get('cf-access-client-id') === FAKE_HOSTING.clientId &&
+      headers.get('cf-access-client-secret') === FAKE_HOSTING.clientSecret;
+    if (!admitted) {
+      return new Response(null, {
+        status: 302,
+        headers: { location: 'https://eksempel.cloudflareaccess.com/cdn-cgi/access/login' },
+      });
+    }
+    if (method === 'PUT' && url.pathname === '/api/brief') {
+      return Response.json({ storedAt: new Date().toISOString(), bytes: 1 });
+    }
+    return new Response('Ikke fundet.', { status: 404 });
   }
 
   if (url.host === FILE_HOST) {

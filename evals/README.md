@@ -24,10 +24,10 @@ pipeline, with its cache disabled, and compare editorial decisions rather than
 exact generated wording. Repeating a case exposes unstable prompt behaviour.
 Reports, including model output, go to gitignored `data/evals/`.
 
-The Google Calendar and Artifact prompts are transport contracts. Their cases
-check the exact requested arguments and safety wording without actually calling
-Google Calendar or publishing anything. Normal unit tests separately verify
-that production rejects missing, additional or changed tool calls.
+The Google Calendar prompt is a transport contract. Its cases check the exact
+requested arguments and safety wording without actually calling Google
+Calendar. Normal unit tests separately verify that production rejects missing,
+additional or changed tool calls.
 
 ## Adding cases from real data
 

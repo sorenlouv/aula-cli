@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { downloadAttachment, listAttachments, type ResolvedAttachment } from './attachments.ts';
 import {
@@ -51,7 +51,13 @@ import {
   resolveConfiguredSelection,
 } from './calendar/selection.ts';
 import { AulaAuthError, AulaClient, AulaMethodError, CALENDAR_MAX_SPAN_DAYS } from './client.ts';
-import { briefSlots, readConfig, updateConfig } from './config.ts';
+import {
+  briefSlots,
+  type HostingConfig,
+  hostingOrigin,
+  readConfig,
+  updateConfig,
+} from './config.ts';
 import { contractFrame } from './contract.ts';
 import { upstreamDoc } from './upstream.ts';
 import {
@@ -76,14 +82,14 @@ import {
   readFullThread,
   withFullMessages,
 } from './digest.ts';
-import { BRIEF_TITLE, runBrief } from './brief/index.ts';
+import { runBrief } from './brief/index.ts';
 import {
   clearExtractionCache,
   extractionCacheStats,
   type ExtractionCacheStats,
 } from './brief/llm.ts';
 import { overviewWindow } from './brief/dates.ts';
-import { deployArtifact, readTarget, setTarget } from './brief/deploy.ts';
+import { deployBrief, readHosting, setHosting } from './brief/deploy.ts';
 import { explain } from './brief/rank.ts';
 import { cmd } from './runtime.ts';
 import { ClaudeMissingError } from './llm/claude.ts';
@@ -140,10 +146,13 @@ Everyday:
                                where configured, the hosted copy — then open it
   open                         Open the newest overview without regenerating
   open --web                   Open the hosted copy instead (readable anywhere)
-  publish                      Keep a hosted copy, readable on a phone: publishes
-                               the newest page as a private artifact and redeploys
-                               to it on every run from then on
-  publish --off                Stop updating the hosted copy and forget its URL
+  publish <url>                Keep a hosted copy, readable on a phone, at the
+                               Worker in HOSTING.md: uploads the newest page with
+                               the Access service token in AULA_ACCESS_CLIENT_ID
+                               and AULA_ACCESS_CLIENT_SECRET, and on every run
+                               from then on
+  publish                      Upload the newest page to the configured copy now
+  publish --off                Stop updating the hosted copy and forget it
   calendars                    Your own calendars, with the ones the overview
                                reads marked — appointments from them show up
                                beside the school's own events
@@ -329,7 +338,7 @@ async function main(): Promise<number> {
 
   if (command === 'cache') return runCache(positionals, asText, ttlMs);
   if (command === 'open') return runOpen(values.web === true);
-  if (command === 'publish') return runPublish(values.off === true);
+  if (command === 'publish') return runPublish(positionals[0], values.off === true);
   // No Aula login needed: this reads the user's own calendars, not the school's.
   if (command === 'calendars') return await runCalendars(positionals);
   if (command === 'remember') return runRemember(positionals);
@@ -847,7 +856,6 @@ async function main(): Promise<number> {
       return emit(
         {
           html: run.published.htmlPath,
-          artifact: run.published.artifactPath,
           pdf: run.published.pdfPath,
           png: run.published.pngPath,
           layout: run.origin,
@@ -995,7 +1003,7 @@ function runCache(positionals: string[], asText: boolean, ttlMs: number): number
  */
 function runOpen(web: boolean): number {
   if (web) {
-    const url = readTarget();
+    const url = readHosting()?.url;
     if (!url) {
       // 5, not 1. Exit 1 says "a source is down, retry later", and no retry
       // configures a hosted copy; "setup required — do not retry unchanged" is
@@ -1038,28 +1046,42 @@ function runOpen(web: boolean): number {
 }
 
 /**
- * `publish` / `publish --off` — the hosted copy, configured.
+ * `publish <url>` / `publish` / `publish --off` — the hosted copy, configured.
+ *
+ * The Worker in `src/hosting/` is deployed once, by hand (HOSTING.md); this
+ * points the CLI at it. `publish <url>` takes the Access service token from
+ * `AULA_ACCESS_CLIENT_ID` and `AULA_ACCESS_CLIENT_SECRET`, uploads the newest
+ * page with it, and saves the three only once that upload worked — so the
+ * command ends with a link that works, not with a promise about tomorrow's run.
+ * `publish` alone uploads again to what is saved.
  *
  * The preference lives in `~/.aula/config.json`, per installation: nothing a
  * clone of this repository inherits, and nothing another user of the tool can
- * see or redeploy. `publish` creates the artifact when none is configured and
- * redeploys to it when one is; either way today's page goes up immediately, so
- * the command ends with a link that works — not with a promise about
- * tomorrow's run.
+ * see or upload to.
  */
-async function runPublish(off: boolean): Promise<number> {
-  const target = readTarget();
+async function runPublish(url: string | undefined, off: boolean): Promise<number> {
+  const current = readHosting();
   if (off) {
-    setTarget(null);
+    if (url !== undefined) throw new UsageError('`publish --off` takes no address.');
+    setHosting(null);
     console.log(
-      target
-        ? `The hosted copy is off — ${target} will not be updated again.`
+      current
+        ? `The hosted copy is off — ${current.url} will not be updated again.`
         : 'No hosted copy was configured.',
     );
     return 0;
   }
-  const artifactPath = join(BRIEF_DIR, 'artifact.html');
-  if (!existsSync(artifactPath)) {
+
+  const hosting = url === undefined ? current : hostingFrom(url, current);
+  if (!hosting) {
+    throw new CliError(
+      'SETUP',
+      'No hosted copy is configured.',
+      `Deploy the Worker (HOSTING.md in the aula-cli repository), then run \`${cmd('publish <url>')}\` with its Access service token in AULA_ACCESS_CLIENT_ID and AULA_ACCESS_CLIENT_SECRET.`,
+    );
+  }
+  const htmlPath = join(BRIEF_DIR, 'latest.html');
+  if (!existsSync(htmlPath)) {
     throw new CliError(
       'SETUP',
       'No overview to publish yet.',
@@ -1067,17 +1089,16 @@ async function runPublish(off: boolean): Promise<number> {
     );
   }
 
-  console.error(
-    target
-      ? `Redeploying the newest overview to ${target}…`
-      : 'Publishing the newest overview as a new artifact (private to your claude.ai account)…',
-  );
-  const result = await deployArtifact(artifactPath, { title: BRIEF_TITLE, create: !target });
+  console.error(`Uploading the newest overview to ${hosting.url}…`);
+  const result = await deployBrief(readFileSync(htmlPath, 'utf8'), { hosting });
   if (result.status !== 'ok') {
-    throw new CliError('UPSTREAM', `Publishing failed: ${result.reason}`);
+    // A refused token is setup, not an outage: exit 1 would say "retry later".
+    const retryable = result.status === 'failed' && result.retryable;
+    throw new CliError(retryable ? 'UPSTREAM' : 'SETUP', `Publishing failed: ${result.reason}`);
   }
-  // Saved only after a deploy that worked — the URL is only known from the reply.
-  if (!target) setTarget(result.url);
+  // Saved only after an upload that worked, so a mistyped address or a token
+  // Access refuses never replaces a configuration that was working.
+  if (url !== undefined) setHosting(hosting);
   const state = loadState();
   recordDeploy(state, result.url);
   saveState(state);
@@ -1086,6 +1107,27 @@ async function runPublish(off: boolean): Promise<number> {
   );
   console.log(result.url);
   return 0;
+}
+
+/** The target `publish <url>` names, with the token it will upload with. */
+function hostingFrom(url: string, current: HostingConfig | null): HostingConfig {
+  const origin = hostingOrigin(url);
+  if (!origin) {
+    throw new UsageError(
+      `Not an address the brief can be hosted at: ${url}`,
+      'An https address with no path, such as https://aula.eksempel.dk.',
+    );
+  }
+  const clientId = process.env.AULA_ACCESS_CLIENT_ID?.trim();
+  const clientSecret = process.env.AULA_ACCESS_CLIENT_SECRET?.trim();
+  if (clientId && clientSecret) return { url: origin, clientId, clientSecret };
+  // Naming the address already configured keeps the token already stored.
+  if (current?.url === origin) return current;
+  throw new CliError(
+    'SETUP',
+    'The Access service token is missing.',
+    'Set AULA_ACCESS_CLIENT_ID and AULA_ACCESS_CLIENT_SECRET to the service token Cloudflare Access issued for uploads, then run this again.',
+  );
 }
 
 /**

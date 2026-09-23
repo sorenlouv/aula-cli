@@ -1,16 +1,18 @@
 // The hosted copy of the brief. `HOSTING.md` is the runbook; `worker.ts` says
 // why it is shaped this way. Nothing in this file is per-installation: no
-// account id, no resource id, no email address. Wrangler takes the account
-// from `wrangler login`, and who may read the page is the Access policy's
-// business, set in the dashboard.
+// account id, no resource id, no hostname, no email address. Wrangler takes
+// the account from `wrangler login`, the hostname from `--domain` at deploy
+// time, and who may read the page is the Access policy's business, set in the
+// dashboard.
 {
   "name": "aula-brief",
   "main": "worker.ts",
   "compatibility_date": "2026-09-01",
 
-  // The one hostname, and Access goes in front of it. Preview URLs would be a
-  // second hostname for the same data.
-  "workers_dev": true,
+  // One hostname, the `--domain` one, with Access in front of it. The
+  // workers.dev and preview URLs would each be another way in to the same
+  // data, needing an Access application of their own.
+  "workers_dev": false,
   "preview_urls": false,
 
   "durable_objects": {

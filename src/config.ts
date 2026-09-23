@@ -3,15 +3,15 @@
  *
  * Everything else under `~/.aula` is state the tool produces — tokens, cache,
  * generated pages. This file is the one place for choices the *user* makes and
- * expects to stick: the URL of the hosted copy of the brief, which of their own
+ * expects to stick: where the hosted copy of the brief lives, which of their own
  * calendars the overview may read, and the times of day it is generated.
  *
  * It lives under `$AULA_DIR` like every other stored path, which is what keeps
  * it out of the repository: a clone of this project has no `~/.aula`, so it
  * inherits no preferences and — the case that matters — no deploy target.
  * Each installation configures its own. The file is written `0600` because
- * the URL of a private artifact is a secret in the practical sense: anyone who
- * has it can read the page once it has been shared.
+ * `hosting` holds a credential: the Access service token that may replace the
+ * family's page.
  *
  * **Reads keep what they do not understand, and writes merge.** This file now
  * holds two unrelated things written by two unrelated commands, and the earlier
@@ -24,7 +24,6 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { AULA_DIR } from './auth.ts';
-import { isArtifactUrl } from './llm/requests/artifact-deploy.ts';
 import { clock, DEFAULT_SLOTS, parseSlots, type Slot, SlotFormatError } from './slots.ts';
 import { isRecord } from './validation.ts';
 
@@ -36,9 +35,19 @@ export type ConfiguredCalendar = {
   name: string;
 };
 
+/**
+ * The hosted copy: the Worker's origin (`src/hosting/`), and the Cloudflare
+ * Access service token that may upload to it.
+ */
+export type HostingConfig = {
+  url: string;
+  clientId: string;
+  clientSecret: string;
+};
+
 export type AulaConfig = {
-  /** Where `aula new` redeploys the brief. Absent means: keep it local. */
-  artifactUrl?: string;
+  /** Where `aula new` uploads the brief. Absent means: keep it local. */
+  hosting?: HostingConfig;
   /** The family's own calendars. Absent or empty means: read none. */
   calendars?: ConfiguredCalendar[];
   /**
@@ -85,13 +94,9 @@ export function readConfig(path = CONFIG_PATH): AulaConfig {
   // hand-edited file is a supported way to configure this.
   const config: AulaConfig = { ...parsed };
 
-  if (parsed.artifactUrl !== undefined && typeof parsed.artifactUrl !== 'string') {
-    throw configError(path, 'artifactUrl skal være tekst');
-  }
-  const url = typeof parsed.artifactUrl === 'string' ? parsed.artifactUrl.trim() : '';
-  if (url && !isArtifactUrl(url)) throw configError(path, 'artifactUrl har et ugyldigt format');
-  if (url) config.artifactUrl = url;
-  else delete config.artifactUrl;
+  const hosting = readHostingConfig(parsed.hosting, path);
+  if (hosting) config.hosting = hosting;
+  else delete config.hosting;
 
   const calendars = readCalendars(parsed.calendars, path);
   if (calendars.length > 0) config.calendars = calendars;
@@ -102,6 +107,41 @@ export function readConfig(path = CONFIG_PATH): AulaConfig {
   else delete config.briefSchedule;
 
   return config;
+}
+
+/**
+ * The origin a hosted copy is served from, or null for anything else.
+ *
+ * An https origin with no path — the Worker serves the page at `/` and its API
+ * beside it, so a path would only be dropped. Plain http is accepted on
+ * loopback alone, which is what `wrangler dev` listens on.
+ */
+export function hostingOrigin(value: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return null;
+  }
+  const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) return null;
+  if (url.username || url.password || url.pathname !== '/' || url.search || url.hash) return null;
+  return url.origin;
+}
+
+function readHostingConfig(value: unknown, path = CONFIG_PATH): HostingConfig | null {
+  if (value === undefined) return null;
+  if (!isRecord(value)) throw configError(path, 'hosting skal være et objekt');
+  const url = typeof value.url === 'string' ? hostingOrigin(value.url) : null;
+  if (!url) throw configError(path, 'hosting.url skal være en https-adresse uden sti');
+  const { clientId, clientSecret } = value;
+  if (typeof clientId !== 'string' || !clientId.trim()) {
+    throw configError(path, 'hosting.clientId mangler');
+  }
+  if (typeof clientSecret !== 'string' || !clientSecret.trim()) {
+    throw configError(path, 'hosting.clientSecret mangler');
+  }
+  return { url, clientId: clientId.trim(), clientSecret: clientSecret.trim() };
 }
 
 function readSchedule(value: unknown, path = CONFIG_PATH): string[] {

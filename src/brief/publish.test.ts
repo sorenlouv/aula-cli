@@ -22,22 +22,18 @@ describe('the printed copy', () => {
         title: 'Aula AI oversigt',
         dir,
       });
-      return {
-        html: readFileSync(result.htmlPath, 'utf8'),
-        artifact: readFileSync(result.artifactPath, 'utf8'),
-      };
+      return { html: readFileSync(result.htmlPath, 'utf8'), document: result.document };
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   };
 
   test('expands the collapsed sections, and only those', async () => {
-    const { html, artifact } = await write();
+    const { html } = await write();
     // Not `querySelectorAll('details')`: that would drag every message thread
     // on the page into the PDF.
     expect(html).toContain("'details:not(.more)'");
     expect(html).toContain('beforeprint');
-    expect(artifact).toContain("'details:not(.more)'");
   });
 
   test('keeps the verbatim source material out of print', async () => {
@@ -47,12 +43,10 @@ describe('the printed copy', () => {
   });
 
   test('hides a fully completed timeline group for print and restores it afterwards', async () => {
-    const { html, artifact } = await write();
-    for (const page of [html, artifact]) {
-      expect(page).toContain("'[data-timeline-group]'");
-      expect(page).toContain("classList.contains('is-done')");
-      expect(page).toContain('group.dataset.wasHidden');
-    }
+    const { html } = await write();
+    expect(html).toContain("'[data-timeline-group]'");
+    expect(html).toContain("classList.contains('is-done')");
+    expect(html).toContain('group.dataset.wasHidden');
   });
 
   // A more-block lives inside the context section, so a descendant selector let the
@@ -64,13 +58,11 @@ describe('the printed copy', () => {
     expect(html).not.toContain('details[open] summary::after');
   });
 
-  test('the fragment for hosting carries the same behaviour as the file', async () => {
-    const { html, artifact } = await write();
-    expect(artifact).not.toContain('<!doctype');
-    expect(artifact.startsWith('<title>')).toBe(true);
-    for (const marker of ['afterprint', 'aula.done.v1']) {
-      expect(html).toContain(marker);
-      expect(artifact).toContain(marker);
-    }
+  test('the hosted copy is sent the very page written to disk', async () => {
+    // The Worker serves what it is sent as a whole document, so there is no
+    // second, hosting-shaped rendering to drift from the file.
+    const { html, document } = await write();
+    expect(document).toBe(html);
+    expect(document.startsWith('<!doctype html>')).toBe(true);
   });
 });
