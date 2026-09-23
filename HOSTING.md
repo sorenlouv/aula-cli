@@ -21,7 +21,13 @@ phone ──GET / ── session? ── no ──▶ login page ── code by 
 - **`worker.ts`** — the routes and the store. One SQLite-backed Durable
   Object, declared by class name, so there is no database id to configure.
 - **`auth.ts`** — codes, sessions, tokens. Pure functions; the tests run them.
-- **`pages.ts`** — the login page and the code mail, in Danish.
+- **`pages.ts`** — the login page and the code mail, in Danish, in the
+  logo's blue.
+- **`public/`** — the logo and the icons, served by Cloudflare's asset layer
+  before the Worker runs, since the login page shows them to someone not yet
+  signed in. iOS fetches `/apple-touch-icon.png` by itself, so a brief added to
+  a phone's home screen gets the logo too. These images are the one exception
+  to the no-family-names rule; see AGENTS.md.
 - **`protocol.ts`** — the paths and limits the CLI, the page and the Worker
   share.
 

@@ -1,6 +1,8 @@
 import { Database, type SQLQueryBindings } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
 import { CODE_ATTEMPTS, SENDS_PER_HOUR, SESSION_COOKIE } from './auth.ts';
+import { THEME_COLOR } from './pages.ts';
 import { KEEP_DAYS, MAX_PAGE_BYTES } from './protocol.ts';
 import * as entry from './worker.ts';
 import worker, {
@@ -259,6 +261,32 @@ describe('signing in', () => {
     // dev`, invisible here, where the tests set the header by hand.
     const response = await household().get('/');
     expect(response.headers.get('referrer-policy')).toBe('same-origin');
+  });
+
+  test('the login wears the logo and its blue, and nothing below the form', async () => {
+    const body = await (await household().get('/')).text();
+    expect(body).toContain('<img class="logo" src="/logo.png"');
+    expect(body).toContain(`<meta name="theme-color" content="${THEME_COLOR}"`);
+    expect(body).not.toContain('Kun for familien');
+  });
+
+  test('every file the pages point at is one Cloudflare serves from public/', async () => {
+    // The assets are served before the Worker runs, so a renamed file would
+    // not fail anything here — only a broken image on the login page.
+    const home = household();
+    const pages = [
+      await (await home.get('/')).text(),
+      await (await home.form('/login', { email: PARENT })).text(),
+    ];
+    const referenced = new Set(
+      pages.flatMap((page) =>
+        [...page.matchAll(/(?:src|href)="(\/[^"?#]+\.\w+)"/g)].map((m) => m[1]),
+      ),
+    );
+    expect([...referenced].sort()).toEqual(['/apple-touch-icon.png', '/icon.png', '/logo.png']);
+    for (const path of referenced) {
+      expect(await Bun.file(join(import.meta.dir, 'public', path ?? '')).exists()).toBe(true);
+    }
   });
 
   test('an address is escaped where the page repeats it', async () => {
