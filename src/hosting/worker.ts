@@ -212,6 +212,21 @@ function fromThisSite(request: Request, url: URL): boolean {
 
 const iso = (ms: number) => new Date(ms).toISOString();
 
+/**
+ * What a parent is told when the Email Service would not send.
+ *
+ * On the free plan it sends only to addresses verified on the account, and a
+ * new address stays unverified until its owner clicks Cloudflare's mail —
+ * which is easy to miss, and which "try again later" never fixes. So that
+ * one refusal says what to do; anything else is worth another try.
+ */
+function sendFailure(reason: unknown): string {
+  if (reason === 'E_RECIPIENT_NOT_ALLOWED') {
+    return 'Din e-mail er ikke bekræftet endnu. Find mailen fra Cloudflare — se også under spam — og klik på linket i den. Prøv så igen.';
+  }
+  return 'Koden kunne ikke sendes. Prøv igen om lidt.';
+}
+
 // ------------------------------------------------------------ the store
 
 type Session = { renewal: string | null };
@@ -237,11 +252,17 @@ export class BriefStore {
       'page (id INTEGER PRIMARY KEY CHECK (id = 1), html TEXT NOT NULL, stored_at TEXT NOT NULL)',
       'done (key TEXT PRIMARY KEY, at TEXT NOT NULL)',
       'login_codes (email TEXT PRIMARY KEY, code_hash TEXT NOT NULL, sent_at TEXT NOT NULL, expires_at TEXT NOT NULL, attempts INTEGER NOT NULL)',
-      'login_sends (email TEXT NOT NULL, at TEXT NOT NULL)',
+      'login_mails (email TEXT NOT NULL, at TEXT NOT NULL)',
       'sessions (token_hash TEXT PRIMARY KEY, email TEXT NOT NULL, expires_at TEXT NOT NULL, renewed_at TEXT NOT NULL)',
     ]) {
       this.#sql(`CREATE TABLE IF NOT EXISTS ${table}`);
     }
+    // The hourly limit used to count attempts in `login_sends`, failed sends
+    // included, so an address Cloudflare would not yet deliver to was locked
+    // out for an hour by the errors themselves. `login_mails` counts mail that
+    // went out; the old count is dropped rather than carried over, since it
+    // cannot tell the two apart.
+    this.#sql('DROP TABLE IF EXISTS login_sends');
   }
 
   #sql<Row = Record<string, unknown>>(query: string, ...bindings: unknown[]): Row[] {
@@ -334,7 +355,7 @@ export class BriefStore {
       return login({ step: 'code', email });
     }
     const [sends] = this.#sql<{ n: number }>(
-      'SELECT count(*) AS n FROM login_sends WHERE email = ? AND at >= ?',
+      'SELECT count(*) AS n FROM login_mails WHERE email = ? AND at >= ?',
       email,
       iso(now - 3_600_000),
     );
@@ -357,18 +378,14 @@ export class BriefStore {
 
     // Stored before the send, so a second request arriving while this one
     // waits on the mail finds it and does not send another.
-    this.#storage.transactionSync(() => {
-      this.#sql(
-        'INSERT INTO login_codes (email, code_hash, sent_at, expires_at, attempts) VALUES (?, ?, ?, ?, 0) ' +
-          'ON CONFLICT (email) DO UPDATE SET code_hash = excluded.code_hash, sent_at = excluded.sent_at, expires_at = excluded.expires_at, attempts = 0',
-        email,
-        digest,
-        iso(now),
-        iso(now + CODE_MINUTES * 60_000),
-      );
-      this.#sql('INSERT INTO login_sends (email, at) VALUES (?, ?)', email, iso(now));
-      this.#sql('DELETE FROM login_sends WHERE at < ?', iso(now - 3_600_000));
-    });
+    this.#sql(
+      'INSERT INTO login_codes (email, code_hash, sent_at, expires_at, attempts) VALUES (?, ?, ?, ?, 0) ' +
+        'ON CONFLICT (email) DO UPDATE SET code_hash = excluded.code_hash, sent_at = excluded.sent_at, expires_at = excluded.expires_at, attempts = 0',
+      email,
+      digest,
+      iso(now),
+      iso(now + CODE_MINUTES * 60_000),
+    );
 
     try {
       await this.#env.EMAIL.send({
@@ -379,13 +396,17 @@ export class BriefStore {
     } catch (error) {
       // The code, the address and the message stay out of the log; the code
       // is what the Email Service reports its reason by.
-      console.error('login: code not sent', (error as { code?: unknown }).code ?? 'unknown');
+      const reason = (error as { code?: unknown }).code ?? 'unknown';
+      console.error('login: code not sent', reason);
       this.#sql('DELETE FROM login_codes WHERE email = ?', email);
-      return login(
-        { step: 'email', email, error: 'Koden kunne ikke sendes. Prøv igen om lidt.' },
-        502,
-      );
+      return login({ step: 'email', email, error: sendFailure(reason) }, 502);
     }
+    // Counted once the mail is out: the limit is on how much mail the page can
+    // make someone receive, and a send that failed made them receive none.
+    this.#storage.transactionSync(() => {
+      this.#sql('INSERT INTO login_mails (email, at) VALUES (?, ?)', email, iso(now));
+      this.#sql('DELETE FROM login_mails WHERE at < ?', iso(now - 3_600_000));
+    });
     return login({ step: 'code', email });
   }
 

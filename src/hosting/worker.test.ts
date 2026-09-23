@@ -40,7 +40,7 @@ function memoryState(): { state: DurableObjectState; db: Database } {
 }
 
 /** One household's Worker, with a mailbox that keeps what it was asked to send. */
-function household(overrides: Partial<Env> & { mailFails?: boolean } = {}) {
+function household(overrides: Partial<Env> & { mailFails?: string } = {}) {
   const { state, db } = memoryState();
   const mail: Sent[] = [];
   const env: Env = {
@@ -48,7 +48,7 @@ function household(overrides: Partial<Env> & { mailFails?: boolean } = {}) {
     EMAIL: {
       send: async (message) => {
         if (overrides.mailFails) {
-          throw Object.assign(new Error('not allowed'), { code: 'E_RECIPIENT_NOT_ALLOWED' });
+          throw Object.assign(new Error('refused'), { code: overrides.mailFails });
         }
         mail.push(message);
         return { messageId: String(mail.length) };
@@ -230,11 +230,50 @@ describe('signing in', () => {
   });
 
   test('a mail that could not be sent says so, and leaves no code behind', async () => {
-    const home = household({ mailFails: true });
+    const home = household({ mailFails: 'E_RATE_LIMIT_EXCEEDED' });
     const response = await home.form('/login', { email: PARENT });
     expect(response.status).toBe(502);
     expect(await response.text()).toContain('kunne ikke sendes');
     expect(home.db.query('SELECT * FROM login_codes').all()).toEqual([]);
+  });
+
+  test('an address Cloudflare has not verified is told to find its mail', async () => {
+    // What a new parent meets until they click Cloudflare's verification mail;
+    // "try again later" never fixes it.
+    const home = household({ mailFails: 'E_RECIPIENT_NOT_ALLOWED' });
+    const body = await (await home.form('/login', { email: PARENT })).text();
+    expect(body).toContain('ikke bekræftet endnu');
+    expect(body).toContain('Cloudflare');
+  });
+
+  test('a send that failed does not count towards the hourly limit', async () => {
+    // Five refusals used to lock the address out for an hour on their own.
+    const home = household({ mailFails: 'E_RECIPIENT_NOT_ALLOWED' });
+    for (let i = 0; i < SENDS_PER_HOUR + 2; i++) {
+      expect((await home.form('/login', { email: PARENT })).status).toBe(502);
+    }
+    expect(home.db.query('SELECT * FROM login_mails').all()).toEqual([]);
+  });
+
+  test('the old attempt count is dropped when the object wakes, and blocks nobody', async () => {
+    // A store as production had it: five refused attempts, and so a lockout.
+    const { state, db } = memoryState();
+    db.query('CREATE TABLE login_sends (email TEXT NOT NULL, at TEXT NOT NULL)').run();
+    for (let i = 0; i < SENDS_PER_HOUR; i++) {
+      db.query('INSERT INTO login_sends VALUES (?, ?)').run(PARENT, new Date().toISOString());
+    }
+    const store = new BriefStore(state, household().env);
+    const tables = db.query("SELECT name FROM sqlite_master WHERE type = 'table'").all();
+    expect(tables).not.toContainEqual({ name: 'login_sends' });
+
+    const response = await store.fetch(
+      new Request(`${ORIGIN}/login`, {
+        method: 'POST',
+        headers: { origin: ORIGIN },
+        body: new URLSearchParams({ email: PARENT }),
+      }),
+    );
+    expect(response.status).toBe(200);
   });
 
   test('a Worker without its sender refuses to pretend it sent anything', async () => {
