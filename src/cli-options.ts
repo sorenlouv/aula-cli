@@ -160,7 +160,7 @@ export const OPTION_HELP: Readonly<Record<OptionName, { value?: string; help: st
   'no-open': { help: 'Do not open a browser' },
   'catch-up': { help: 'Do nothing if this slot’s overview is already complete' },
   web: { help: 'The hosted copy instead of the local page' },
-  off: { help: 'Stop updating the hosted copy and forget its URL' },
+  off: { help: 'Stop updating the hosted copy and forget it' },
   remove: { help: 'Remove the schedule' },
   at: { value: '<HH:MM,HH:MM>', help: 'The slot times' },
   explain: { help: 'Print model priority, date placement and sources' },
@@ -179,7 +179,7 @@ export const OPTION_HELP: Readonly<Record<OptionName, { value?: string; help: st
 export const COMMAND_SUMMARY: Readonly<Record<CliCommand, string>> = {
   cache: 'What is cached (`status`, the default) or drop it all (`clear`)',
   open: 'Open the newest overview without regenerating it',
-  publish: 'Keep a hosted copy of the overview; `--off` stops',
+  publish: 'Keep a hosted copy of the overview at <url>; `--off` stops',
   calendars: 'Which of the family’s own calendars the overview reads; `set` states the whole list',
   remember: 'Record a standing wish about what the overview should highlight',
   preferences: 'List those wishes; `reset` returns to the shipped list',
@@ -239,7 +239,7 @@ export const OPTION_DEFAULTS: Partial<Record<CliCommand, Partial<Record<OptionNa
 const POSITIONALS: Partial<Record<CliCommand, { min: number; max?: number; usage: string }>> = {
   cache: { min: 0, max: 1, usage: 'cache [status|clear]' },
   open: { min: 0, max: 0, usage: 'open [--web]' },
-  publish: { min: 0, max: 0, usage: 'publish [--off]' },
+  publish: { min: 0, max: 1, usage: 'publish [<url>] [--off]' },
   calendars: { min: 0, usage: 'calendars [set <name> ... | set none]' },
   'install-skill': { min: 0, max: 1, usage: 'install-skill [claude|codex] [--out <dir>]' },
   version: { min: 0, max: 0, usage: 'version' },

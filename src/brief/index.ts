@@ -13,7 +13,7 @@ import type { AulaClient } from '../client.ts';
 import { isoWeekString, localIsoDate } from '../integrations/types.ts';
 import { CLAUDE_INSTALL_COMMAND, ClaudeMissingError } from '../llm/claude.ts';
 import { collect, HISTORY_DAYS } from './collect.ts';
-import { deployArtifact, type DeployResult } from './deploy.ts';
+import { deployBrief, type DeployResult } from './deploy.ts';
 import { appendBriefLog, errorForBriefLog, sourceRevision } from './log.ts';
 import { extractCards } from './llm.ts';
 import { publish, type PublishResult } from './publish.ts';
@@ -310,15 +310,15 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   notes.push(...published.warnings);
   phase('publish', publishStartedAt, { warningCount: published.warnings.length });
 
-  // Local first, hosted second. The file on disk is the brief; the artifact is
-  // a convenience on top of it, so a deploy that fails is a note on an
+  // Local first, hosted second. The file on disk is the brief; the hosted copy
+  // is a convenience on top of it, so a deploy that fails is a note on an
   // otherwise good run rather than a failed one.
   let deployment: DeployResult = { status: 'off', reason: 'slået fra med --no-deploy' };
   const deployStartedAt = performance.now();
   if (opts.deploy !== false) {
-    deployment = await deployArtifact(published.artifactPath, { title: BRIEF_TITLE });
+    deployment = await deployBrief(published.document);
     if (deployment.status === 'failed') {
-      notes.push(`Artifact blev ikke opdateret: ${deployment.reason}`);
+      notes.push(`Den hostede kopi blev ikke opdateret: ${deployment.reason}`);
     }
     // Reported, but never a failure: no amount of retrying conjures a URL, so
     // marking the run incomplete would hand the scheduler a condition it cannot
@@ -333,11 +333,13 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   // the model's extraction ran, its page passed validation, and the hosted copy
   // — where one is configured — was actually refreshed. With `--no-llm` the
   // rules-only page is what was asked for, so it is complete on its own terms.
+  // A refused upload token is not retryable for the same reason a missing
+  // URL is not: the note names it, and asking again for three hours will not.
   const complete = isBriefRunComplete({
     modelWasRequested: opts.useModel !== false,
     extractionRan,
     origin,
-    deploymentFailed: deployment.status === 'failed',
+    deploymentFailed: deployment.status === 'failed' && deployment.retryable,
     retryableFetchFailures: input.health.some((note) => note.retryable === true),
     violations,
   });

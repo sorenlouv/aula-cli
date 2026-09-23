@@ -1,0 +1,28 @@
+// The hosted copy of the brief. `HOSTING.md` is the runbook; `worker.ts` says
+// why it is shaped this way. Nothing in this file is per-installation: no
+// account id, no resource id, no hostname, no email address. Wrangler takes
+// the account from `wrangler login` and the hostname from `--domain` at deploy
+// time; who may sign in, the sender and the upload token are Worker secrets
+// (`ALLOWED_EMAILS`, `MAIL_FROM`, `UPLOAD_TOKEN`), set with `wrangler secret
+// put` and, for `wrangler dev`, in a gitignored `.dev.vars` beside this file.
+{
+  "name": "aula-brief",
+  "main": "worker.ts",
+  "compatibility_date": "2026-09-01",
+
+  // One hostname, the `--domain` one. The workers.dev and preview URLs would
+  // each be another address for the same login, which is nothing gained.
+  "workers_dev": false,
+  "preview_urls": false,
+
+  "durable_objects": {
+    "bindings": [{ "name": "BRIEF_STORE", "class_name": "BriefStore" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BriefStore"] }],
+
+  // Login codes. On the free plan it sends only to addresses verified with the
+  // account's Email Routing, which is exactly the two it should send to.
+  "send_email": [{ "name": "EMAIL" }],
+
+  "observability": { "enabled": true },
+}

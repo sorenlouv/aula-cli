@@ -7,7 +7,8 @@ modes, nearly all of which return a successful-looking response;
 [UPSTREAM.md](UPSTREAM.md) is the short version of it that ships inside the
 binary, for an agent with no checkout — `aula --upstream` prints it.
 [BRIEF.md](BRIEF.md) is the daily brief's design; [SETUP.md](SETUP.md) the
-install runbook.
+install runbook; [HOSTING.md](HOSTING.md) the hosted copy — a Cloudflare Worker
+with its own login, in `src/hosting/`.
 
 ## Working agreements
 
@@ -214,6 +215,18 @@ fallback sources.
 
 ## Non-obvious behaviour
 
+- **`src/hosting/` is in `src/` and never in the binary.** It is the hosted
+  copy's Worker, deployed with `wrangler` from a checkout; nothing the CLI
+  imports reaches it, so the compiled binary carries none of it. It lives here
+  so Bun typechecks and tests it, which is why it declares the slice of the
+  Workers runtime it uses instead of loading `@cloudflare/workers-types` — and
+  why its entry module exports nothing but the handler and the Durable Object
+  class: workerd refuses to start on anything else, and a dry-run bundle does
+  not notice. Who may sign in, the sender and the upload token are Worker
+  secrets; no address and no token belongs in a tracked file. Run it under
+  `wrangler dev` before merging a change to a route or a header — the unit
+  tests set request headers by hand, and the two bugs they missed were both
+  headers a real browser sets.
 - **Every `claude` subprocess is started in `~/.aula/cwd`, an empty directory
   of our own.** `claude` treats its working directory as a project, and an
   inherited one is a decision nobody made: under launchd it was `/`, so every

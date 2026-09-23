@@ -1380,7 +1380,22 @@ test('contact and shared-file commands have no hidden legacy page ceilings', () 
 
 // ------------------------------------------------------------- hosted copy
 
-const ARTIFACT = 'https://claude.ai/code/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
+/**
+ * The same target and token `fake-aula.ts` admits. Not imported from there:
+ * that module replaces `fetch` in whatever process loads it.
+ */
+const HOSTED = { url: 'https://aula.eksempel.dk', token: 'eksempel-upload-token' };
+const HOSTED_TOKEN = { AULA_HOSTING_TOKEN: HOSTED.token };
+
+/** A page for `publish` to upload, as `new` would have left it. */
+function writeOverview(dir: string): void {
+  mkdirSync(join(dir, 'brief'), { recursive: true });
+  writeFileSync(join(dir, 'brief', 'latest.html'), '<!doctype html><title>x</title>');
+}
+
+function configOf(dir: string): Record<string, unknown> {
+  return JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8'));
+}
 
 /** A sandbox whose `claude` is the fake, answering as told. */
 function sandboxWithClaude(mode: string, result?: string) {
@@ -1522,62 +1537,115 @@ test('dropping a saved calendar needs no connector at all', () => {
   assert.equal(none.stderr, '');
 });
 
-test('publish creates the artifact, saves its url to config.json, and records the deploy', () => {
-  const box = sandboxWithClaude('ok', `Deployed: ${ARTIFACT}`);
-  mkdirSync(join(box.dir, 'brief'), { recursive: true });
-  writeFileSync(join(box.dir, 'brief', 'artifact.html'), '<title>x</title>');
+test('publish <url> uploads with the upload token, saves the target, and records the deploy', () => {
+  const box = sandbox(HOSTED_TOKEN);
+  writeOverview(box.dir);
 
-  const created = box.run('publish');
+  const created = box.run('publish', `${HOSTED.url}/`);
   assert.equal(created.code, 0, created.stderr);
-  assert.equal(created.stdout.trim(), ARTIFACT);
-  assert.match(created.stderr, /new artifact/);
-  assert.equal(
-    JSON.parse(readFileSync(join(box.dir, 'config.json'), 'utf8')).artifactUrl,
-    ARTIFACT,
-  );
+  assert.equal(created.stdout.trim(), HOSTED.url);
+  assert.deepEqual(created.requests, ['hosting PUT /api/brief']);
+  assert.deepEqual(configOf(box.dir).hosting, HOSTED);
   const state = JSON.parse(readFileSync(join(box.dir, 'brief', 'state.json'), 'utf8'));
-  assert.equal(state.lastDeploy.url, ARTIFACT);
+  assert.equal(state.lastDeploy.url, HOSTED.url);
 
-  // Configured now, so a second publish redeploys rather than creates.
+  // Configured now, so `publish` alone uploads again — with no token in sight.
+  box.reset();
+  delete box.env.AULA_HOSTING_TOKEN;
   const again = box.run('publish');
   assert.equal(again.code, 0, again.stderr);
-  assert.match(again.stderr, /Redeploying/);
+  assert.deepEqual(again.requests, ['hosting PUT /api/brief']);
 
   const off = box.run('publish', '--off');
   assert.equal(off.code, 0);
   assert.match(off.stdout, /off/);
-  assert.equal(
-    JSON.parse(readFileSync(join(box.dir, 'config.json'), 'utf8')).artifactUrl,
-    undefined,
-  );
+  assert.equal(configOf(box.dir).hosting, undefined);
 });
 
-test('publish takes no arguments — there is one way to get a url, and it is publish itself', () => {
-  const box = sandboxWithClaude('ok', ARTIFACT);
-  const result = box.run('publish', ARTIFACT);
-  assert.notEqual(result.code, 0);
-  assert.match(result.stderr, /takes no arguments/);
+test('publish <url> without a token says which variables to set, and saves nothing', () => {
+  const box = sandbox();
+  writeOverview(box.dir);
+  const result = box.run('publish', HOSTED.url);
+  assert.equal(result.code, 5);
+  assert.equal(errorLineOf(result.stderr).code, 'SETUP');
+  assert.match(result.stderr, /AULA_HOSTING_TOKEN/);
+  assert.deepEqual(result.requests, []);
   assert.equal(existsSync(join(box.dir, 'config.json')), false);
+});
+
+test('a token the Worker refuses is setup, not an outage, and leaves no target behind', () => {
+  // Exit 1 would say "a source is down, retry later"; no retry fixes a token.
+  const box = sandbox({ AULA_HOSTING_TOKEN: 'wrong' });
+  writeOverview(box.dir);
+  const result = box.run('publish', HOSTED.url);
+  assert.equal(result.code, 5);
+  assert.match(result.stderr, /upload-nøglen/);
+  assert.equal(existsSync(join(box.dir, 'config.json')), false);
+});
+
+test('a Worker that is down is an outage worth retrying', () => {
+  const box = sandbox({ ...HOSTED_TOKEN, FAKE_HOSTING_DOWN: '1' });
+  writeOverview(box.dir);
+  const result = box.run('publish', HOSTED.url);
+  assert.equal(result.code, 1);
+  assert.equal(errorLineOf(result.stderr).code, 'UPSTREAM');
+});
+
+test('publish refuses an address it would have to change', () => {
+  const box = sandbox(HOSTED_TOKEN);
+  writeOverview(box.dir);
+  const result = box.run('publish', `${HOSTED.url}/brief`);
+  assert.equal(result.code, 2);
+  assert.deepEqual(result.requests, []);
+});
+
+test('publish with nothing configured names the command that configures it', () => {
+  const box = sandbox();
+  writeOverview(box.dir);
+  const result = box.run('publish');
+  assert.equal(result.code, 5);
+  assert.ok(result.stderr.includes(cmd('publish <url>')), result.stderr);
 });
 
 test('publish with no overview yet says what to do first', () => {
-  const box = sandboxWithClaude('ok', ARTIFACT);
-  const result = box.run('publish');
-  // 5, "setup required — do not retry unchanged". It was 1, which says a source
-  // is down and a retry may help; no retry writes the overview `publish` needs.
+  const box = sandbox(HOSTED_TOKEN);
+  const result = box.run('publish', HOSTED.url);
+  // 5, "setup required — do not retry unchanged". No retry writes the overview
+  // `publish` needs.
   assert.equal(result.code, 5);
   assert.equal(errorLineOf(result.stderr).code, 'SETUP');
   assert.ok(result.stderr.includes(cmd('new')), result.stderr);
+  assert.deepEqual(result.requests, []);
 });
 
-test('a failed publish leaves no url behind', () => {
-  const box = sandboxWithClaude('denied');
-  mkdirSync(join(box.dir, 'brief'), { recursive: true });
-  writeFileSync(join(box.dir, 'brief', 'artifact.html'), '<title>x</title>');
-  const result = box.run('publish');
-  assert.equal(result.code, 1);
-  assert.match(result.stderr, /Artifact/);
-  assert.equal(existsSync(join(box.dir, 'config.json')), false);
+test('new uploads to the configured copy and reports where', () => {
+  const box = sandbox();
+  writeFileSync(join(box.dir, 'config.json'), JSON.stringify({ hosting: HOSTED }));
+  const result = box.run('new', '--no-llm', '--no-open');
+  assert.equal(result.code, 0, result.stderr);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.deployed, HOSTED.url);
+  assert.equal(out.complete, true);
+  assert.ok(result.requests.includes('hosting PUT /api/brief'));
+});
+
+test('new with a refused token finishes complete, with the reason in its notes', () => {
+  // Retrying cannot fix a token, so an incomplete run would only hand the
+  // schedule three hours of asking again. The note is the remedy.
+  const box = sandbox();
+  writeFileSync(
+    join(box.dir, 'config.json'),
+    JSON.stringify({ hosting: { ...HOSTED, token: 'wrong' } }),
+  );
+  const result = box.run('new', '--no-llm', '--no-open');
+  assert.equal(result.code, 0, result.stderr);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.deployed, null);
+  assert.equal(out.complete, true);
+  assert.ok(
+    out.notes.some((note: string) => note.includes('upload-nøglen')),
+    JSON.stringify(out.notes),
+  );
 });
 
 test('new --catch-up does nothing — not even a request — once this slot is complete', () => {

@@ -1,7 +1,14 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "extends": ["./oxlint.base.json"],
-  "ignorePatterns": ["node_modules", "dist", "data", "attachments", ".claude/worktrees"],
+  "ignorePatterns": [
+    "node_modules",
+    "dist",
+    "data",
+    "attachments",
+    ".claude/worktrees",
+    "**/.wrangler"
+  ],
   "rules": {
     "unicorn/no-new-array": "off"
   },

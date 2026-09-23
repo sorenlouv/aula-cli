@@ -293,8 +293,22 @@ function record(what: string): void {
   if (log) appendFileSync(log, `${what}\n`);
 }
 
+/**
+ * The hosted copy's Worker. It takes the one upload token below and answers
+ * 401 to any other, as the real one does; `FAKE_HOSTING_DOWN=1` makes it
+ * answer 503 instead.
+ */
+const FAKE_HOSTING = { url: 'https://aula.eksempel.dk', token: 'eksempel-upload-token' } as const;
+const HOSTING_HOST = new URL(FAKE_HOSTING.url).host;
+
 /** The hosts this stub knows how to answer. Anything else is worth recording. */
-const KNOWN_HOSTS = new Set(['www.aula.dk', 'app.meebook.com', 'api.minuddannelse.net', FILE_HOST]);
+const KNOWN_HOSTS = new Set([
+  'www.aula.dk',
+  'app.meebook.com',
+  'api.minuddannelse.net',
+  FILE_HOST,
+  HOSTING_HOST,
+]);
 
 async function handle(input: string | Request | URL, init?: RequestInit): Promise<Response> {
   const url = new URL(
@@ -322,6 +336,20 @@ async function handle(input: string | Request | URL, init?: RequestInit): Promis
     if (url.host === 'broker.unilogin.dk') {
       return new Response('<html><body>Vælg login</body></html>', { status: 200 });
     }
+  }
+
+  if (url.host === HOSTING_HOST) {
+    const method = init?.method ?? 'GET';
+    record(`hosting ${method} ${url.pathname}`);
+    if (process.env.FAKE_HOSTING_DOWN === '1') return new Response('down', { status: 503 });
+    const bearer = new Headers(init?.headers).get('authorization');
+    if (bearer !== `Bearer ${FAKE_HOSTING.token}`) {
+      return new Response('Forkert upload-nøgle.', { status: 401 });
+    }
+    if (method === 'PUT' && url.pathname === '/api/brief') {
+      return Response.json({ storedAt: new Date().toISOString(), bytes: 1 });
+    }
+    return new Response('Ikke fundet.', { status: 404 });
   }
 
   if (url.host === FILE_HOST) {

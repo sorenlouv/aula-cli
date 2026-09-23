@@ -1,230 +1,185 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { afterAll, afterEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { installFakeClaude } from '../testing/fake-claude.ts';
-import { readConfig, writeConfig } from '../config.ts';
-import { deployArtifact, deployPrompt, isArtifactUrl, readTarget, setTarget } from './deploy.ts';
+import { type HostingConfig, hostingOrigin, readConfig, writeConfig } from '../config.ts';
+import { MAX_PAGE_BYTES } from '../hosting/protocol.ts';
+import { deployBrief, readHosting, setHosting } from './deploy.ts';
 
-const VALID = 'https://claude.ai/code/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
-const OTHER = 'https://claude.ai/code/artifact/ffffffff-ffff-ffff-ffff-ffffffffffff';
+const HOSTING: HostingConfig = { url: 'https://aula.eksempel.dk', token: 'eksempel-upload-token' };
+const PAGE = '<!doctype html><title>Aula AI oversigt</title>';
 
 const dirs: string[] = [];
+const ORIGINAL_FETCH = globalThis.fetch;
 
 /** A config path that belongs to the test, never to ~/.aula. */
-function configPath(url?: string): string {
+function configPath(hosting?: HostingConfig): string {
   const dir = mkdtempSync(join(tmpdir(), 'aula-deploy-test-'));
   dirs.push(dir);
   const path = join(dir, 'config.json');
-  if (url !== undefined) writeConfig({ artifactUrl: url }, path);
+  if (hosting) writeConfig({ hosting }, path);
   return path;
 }
 
-const ORIGINAL_PATH = process.env.PATH;
+type Sent = { url: string; method: string; headers: Headers; body: string; redirect: string };
 
-beforeAll(() => {
-  const fakeDir = mkdtempSync(join(tmpdir(), 'aula-fake-claude-'));
-  dirs.push(fakeDir);
-  process.env.PATH = installFakeClaude(fakeDir).path;
-});
+/** Stands in for the Worker, answering every upload with `answer`. */
+function worker(answer: () => Response | Promise<Response>): Sent[] {
+  const sent: Sent[] = [];
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    sent.push({
+      url: String(input),
+      method: init?.method ?? 'GET',
+      headers: new Headers(init?.headers),
+      body: String(init?.body),
+      redirect: init?.redirect ?? 'follow',
+    });
+    return answer();
+  }) as typeof fetch;
+  return sent;
+}
 
 afterEach(() => {
-  delete process.env.FAKE_CLAUDE_MODE;
-  delete process.env.FAKE_CLAUDE_RESULT_JSON;
-  delete process.env.FAKE_CLAUDE_LOG;
-  for (const dir of dirs.splice(1)) rmSync(dir, { recursive: true, force: true });
+  globalThis.fetch = ORIGINAL_FETCH;
 });
 
 afterAll(() => {
-  if (ORIGINAL_PATH !== undefined) process.env.PATH = ORIGINAL_PATH;
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-/** Points the fake at a fresh call log and returns a reader for it. */
-function fakeClaude(mode: string, result?: string) {
-  const dir = mkdtempSync(join(tmpdir(), 'aula-fake-log-'));
-  dirs.push(dir);
-  const log = join(dir, 'calls.log');
-  writeFileSync(log, '');
-  process.env.FAKE_CLAUDE_MODE = mode;
-  process.env.FAKE_CLAUDE_LOG = log;
-  if (result !== undefined) process.env.FAKE_CLAUDE_RESULT_JSON = JSON.stringify(result);
-  return { calls: () => readFileSync(log, 'utf8').split('\n').filter(Boolean) };
-}
-
-describe('readTarget / setTarget', () => {
-  test('is null when nothing is configured — hosting is opt-in', () => {
-    expect(readTarget(configPath())).toBeNull();
+describe('readHosting / setHosting', () => {
+  test('nothing configured means the brief stays local', () => {
+    expect(readHosting(configPath())).toBeNull();
   });
 
-  test('reads what setTarget wrote, and null turns hosting off', () => {
+  test('reads what setHosting wrote, and null turns hosting off', () => {
     const path = configPath();
-    setTarget(VALID, path);
-    expect(readTarget(path)).toBe(VALID);
-    expect(readConfig(path)).toEqual({ artifactUrl: VALID });
-    setTarget(null, path);
-    expect(readTarget(path)).toBeNull();
+    setHosting(HOSTING, path);
+    expect(readHosting(path)).toEqual(HOSTING);
+    setHosting(null, path);
+    expect(readHosting(path)).toBeNull();
+  });
+
+  test('keeps the calendars beside it', () => {
+    const path = configPath();
+    writeConfig({ calendars: [{ id: 'familien@eksempel.dk', name: 'Familien' }] }, path);
+    setHosting(HOSTING, path);
+    expect(readConfig(path).calendars).toEqual([{ id: 'familien@eksempel.dk', name: 'Familien' }]);
+  });
+
+  test('a hand-edited config without its token is refused rather than half-read', () => {
+    const path = configPath();
+    writeFileSync(path, JSON.stringify({ hosting: { url: HOSTING.url } }));
+    expect(() => readHosting(path)).toThrow(/hosting.token/);
   });
 });
 
-describe('isArtifactUrl', () => {
-  test('accepts exactly the artifact shape and nothing glued on', () => {
-    expect(isArtifactUrl(VALID)).toBe(true);
-    expect(isArtifactUrl(`${VALID}/../../evil`)).toBe(false);
-    expect(isArtifactUrl('https://example.com/somewhere-else')).toBe(false);
-    expect(isArtifactUrl(`${VALID}?x=1`)).toBe(false);
-  });
-});
-
-describe('deployArtifact', () => {
-  test('reports an unconfigured target rather than skipping quietly', async () => {
-    // A lost `artifactUrl` used to be indistinguishable from `--no-deploy`, so
-    // the brief kept reporting success while the shared link went stale. The
-    // status has to say which of the two happened, and the reason has to name
-    // the command that fixes it.
-    const result = await deployArtifact('/tmp/artifact.html', {
-      title: 'T',
-      configPath: configPath(),
-    });
-    expect(result.status).toBe('unconfigured');
-    expect(result.status === 'unconfigured' && result.reason).toContain('publish');
+describe('hostingOrigin', () => {
+  test('an https origin, with or without its slash', () => {
+    expect(hostingOrigin('https://aula.eksempel.dk')).toBe('https://aula.eksempel.dk');
+    expect(hostingOrigin(' https://aula.eksempel.dk/ ')).toBe('https://aula.eksempel.dk');
   });
 
-  test('refuses a target that is not an artifact url', async () => {
-    // Without this the prompt would carry an arbitrary URL into a subprocess
-    // holding a publishing tool.
-    const result = await deployArtifact('/tmp/artifact.html', {
-      title: 'T',
-      configPath: configPath('https://example.com/somewhere-else'),
-    });
-    expect(result.status).toBe('failed');
-    expect(result.status === 'failed' && result.reason).toContain('ugyldig');
+  test('http only for `wrangler dev` on loopback', () => {
+    expect(hostingOrigin('http://127.0.0.1:8787')).toBe('http://127.0.0.1:8787');
+    expect(hostingOrigin('http://aula.eksempel.dk')).toBeNull();
   });
 
-  test('succeeds only when the reply names the target url', async () => {
-    const fake = fakeClaude('ok', VALID);
-    const result = await deployArtifact('/tmp/artifact.html', {
-      title: 'T',
-      configPath: configPath(VALID),
-    });
-    expect(result).toEqual({ status: 'ok', url: VALID });
-    const [call] = fake.calls();
-    expect(call).toContain('--tools Artifact Read');
-    // Read is permitted for the artifact alone, spelled as an absolute-path rule.
-    expect(call).toContain('--allowedTools Artifact Read(//tmp/artifact.html)');
-    expect(call).not.toMatch(/Read\(\/\/tmp\/artifact\.html\)\s+\S*Read/);
-    expect(call).toContain('--output-format json');
-    expect(call).toContain('read it if you need to');
-  });
-
-  test('a reply naming some other url is a failure, not a success', async () => {
-    fakeClaude('ok', OTHER);
-    const result = await deployArtifact('/tmp/artifact.html', {
-      title: 'T',
-      configPath: configPath(VALID),
-    });
-    expect(result.status).toBe('failed');
-  });
-
-  test('a refused Artifact tool is reported as such', async () => {
-    fakeClaude('denied');
-    const result = await deployArtifact('/tmp/artifact.html', {
-      title: 'T',
-      configPath: configPath(VALID),
-    });
-    expect(result.status === 'failed' && result.reason).toContain('Artifact');
-  });
-
-  test('an error envelope surfaces its text', async () => {
-    fakeClaude('error');
-    const result = await deployArtifact('/tmp/artifact.html', {
-      title: 'T',
-      configPath: configPath(VALID),
-    });
-    expect(result.status === 'failed' && result.reason).toContain('Not logged in');
-  });
-
-  test('a stalled process is killed and tried once more in a fresh one', async () => {
-    const fake = fakeClaude('stall-then-ok', VALID);
-    const started = Date.now();
-    const result = await deployArtifact('/tmp/artifact.html', {
-      title: 'T',
-      configPath: configPath(VALID),
-      timeoutMs: 300,
-      graceMs: 200,
-    });
-    expect(result).toEqual({ status: 'ok', url: VALID });
-    expect(fake.calls()).toHaveLength(2);
-    // The stall cost the timeout plus the drain grace, not the orphan's lifetime.
-    expect(Date.now() - started).toBeLessThan(5_000);
-  });
-
-  test('two stalls are a bounded failure, even when the process ignores SIGTERM', async () => {
-    const fake = fakeClaude('stall-ignore-term');
-    const started = Date.now();
-    const result = await deployArtifact('/tmp/artifact.html', {
-      title: 'T',
-      configPath: configPath(VALID),
-      timeoutMs: 300,
-      graceMs: 200,
-    });
-    expect(result.status).toBe('failed');
-    expect(result.status === 'failed' && result.reason).toContain('2 forsøg');
-    expect(fake.calls()).toHaveLength(2);
-    expect(Date.now() - started).toBeLessThan(8_000);
-  });
-
-  test('with `create`, the reply is where the url comes from', async () => {
-    const fake = fakeClaude('ok', `Published: ${VALID}`);
-    const result = await deployArtifact('/tmp/artifact.html', {
-      title: 'T',
-      configPath: configPath(),
-      create: true,
-    });
-    expect(result).toEqual({ status: 'ok', url: VALID });
-    // And the prompt asked for a new artifact, not an update.
-    expect(fake.calls()[0]).not.toContain('force: true');
-  });
-
-  test('with `create`, a reply naming two urls is not trusted', async () => {
-    fakeClaude('ok', `${VALID} or maybe ${OTHER}`);
-    const result = await deployArtifact('/tmp/artifact.html', {
-      title: 'T',
-      configPath: configPath(),
-      create: true,
-    });
-    expect(result.status).toBe('failed');
-  });
-});
-
-describe('deployPrompt', () => {
-  test('names the file and the target, and grants nothing else', () => {
-    const prompt = deployPrompt('/Users/x/.aula/brief/artifact.html', VALID, 'Aula AI oversigt');
-    expect(prompt).toContain('/Users/x/.aula/brief/artifact.html');
-    expect(prompt).toContain(VALID);
-    expect(prompt).toContain('force: true');
-    expect(prompt).toContain('exactly one Artifact tool call');
-    expect(prompt).toContain('do not call any other tool');
-  });
-
-  test('without a target it asks for a new artifact and no force', () => {
-    const prompt = deployPrompt('/tmp/artifact.html', null, 'Aula AI oversigt');
-    expect(prompt).toContain('new artifact');
-    expect(prompt).not.toContain('url:');
-    expect(prompt).not.toContain('force');
-  });
-
-  test('carries no text read out of Aula', () => {
-    // The whole page is other people's prose. If any of it reached the prompt,
-    // a school post would be able to steer what gets published — so the only
-    // interpolated values are ones this module produced.
-    for (const url of [VALID, null]) {
-      const prompt = deployPrompt('/tmp/artifact.html', url, 'Aula AI oversigt');
-      const interpolated = ['/tmp/artifact.html', VALID, 'Aula AI oversigt'];
-      for (const line of prompt.split('\n')) {
-        const stripped = interpolated.reduce((acc, value) => acc.replaceAll(value, ''), line);
-        expect(stripped).not.toMatch(/[ÆØÅæøå]/);
-      }
+  test('nothing the Worker would silently drop', () => {
+    for (const url of [
+      'https://aula.eksempel.dk/brief',
+      'https://aula.eksempel.dk/?x=1',
+      'https://user:pw@aula.eksempel.dk',
+      'aula.eksempel.dk',
+    ]) {
+      expect(hostingOrigin(url)).toBeNull();
     }
+  });
+});
+
+describe('deployBrief', () => {
+  test('with nothing configured, says so and sends nothing', async () => {
+    // A lost target used to be indistinguishable from `--no-deploy`, so an
+    // installation whose config went missing published nothing and said so
+    // nowhere.
+    const sent = worker(() => new Response(null, { status: 200 }));
+    const result = await deployBrief(PAGE, { configPath: configPath() });
+    expect(result.status).toBe('unconfigured');
+    expect(sent).toEqual([]);
+  });
+
+  test('puts the page with the upload token, and does not follow a redirect', async () => {
+    const sent = worker(() => Response.json({ bytes: PAGE.length }));
+    const result = await deployBrief(PAGE, { configPath: configPath(HOSTING) });
+
+    expect(result).toEqual({ status: 'ok', url: HOSTING.url });
+    expect(sent).toHaveLength(1);
+    const [put] = sent;
+    expect(put?.url).toBe('https://aula.eksempel.dk/api/brief');
+    expect(put?.method).toBe('PUT');
+    expect(put?.body).toBe(PAGE);
+    expect(put?.headers.get('authorization')).toBe(`Bearer ${HOSTING.token}`);
+    expect(put?.redirect).toBe('manual');
+  });
+
+  test('an explicit target is used without reading the config', async () => {
+    worker(() => Response.json({}));
+    const result = await deployBrief(PAGE, { hosting: HOSTING, configPath: configPath() });
+    expect(result).toEqual({ status: 'ok', url: HOSTING.url });
+  });
+
+  test('a refused token is not worth retrying', async () => {
+    worker(() => new Response('Forkert upload-nøgle.\n', { status: 401 }));
+    const result = await deployBrief(PAGE, { hosting: HOSTING });
+    expect(result).toMatchObject({ status: 'failed', retryable: false });
+    expect(result.status === 'failed' && result.reason).toContain('upload-nøglen');
+  });
+
+  test('a redirect is the answer, not a way to somewhere that says 200', async () => {
+    worker(
+      () => new Response(null, { status: 302, headers: { location: 'https://eksempel.dk/login' } }),
+    );
+    const result = await deployBrief(PAGE, { hosting: HOSTING });
+    expect(result).toMatchObject({ status: 'failed', retryable: false });
+    expect(result.status === 'failed' && result.reason).toContain('den rigtige adresse');
+  });
+
+  test('another 4xx keeps its first line and is not retried', async () => {
+    worker(() => new Response('Siden er for stor.\nmere\n', { status: 413 }));
+    const result = await deployBrief(PAGE, { hosting: HOSTING });
+    expect(result).toMatchObject({ status: 'failed', retryable: false });
+    expect(result.status === 'failed' && result.reason).toBe(
+      'https://aula.eksempel.dk svarede HTTP 413: Siden er for stor.',
+    );
+  });
+
+  test('the server having trouble is worth retrying', async () => {
+    worker(() => new Response('upstream', { status: 503 }));
+    expect(await deployBrief(PAGE, { hosting: HOSTING })).toMatchObject({
+      status: 'failed',
+      retryable: true,
+    });
+  });
+
+  test('no network is a failure worth retrying, not a throw', async () => {
+    worker(() => {
+      throw new TypeError('fetch failed');
+    });
+    const result = await deployBrief(PAGE, { hosting: HOSTING });
+    expect(result).toMatchObject({ status: 'failed', retryable: true });
+    expect(result.status === 'failed' && result.reason).toContain('fetch failed');
+  });
+
+  test('a page the Worker could not store is refused before it is sent', async () => {
+    const sent = worker(() => Response.json({}));
+    const result = await deployBrief('x'.repeat(MAX_PAGE_BYTES + 1), { hosting: HOSTING });
+    expect(result).toMatchObject({ status: 'failed', retryable: false });
+    expect(sent).toEqual([]);
+  });
+
+  test('a config that cannot be read is a failure, not a throw', async () => {
+    const path = configPath();
+    writeFileSync(path, '{');
+    expect(await deployBrief(PAGE, { configPath: path })).toMatchObject({ status: 'failed' });
   });
 });

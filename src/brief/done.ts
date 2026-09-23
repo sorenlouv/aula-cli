@@ -5,28 +5,24 @@
  * one that never asked: you stop reading the section. So every full or compact
  * card in the timeline carries a tick, and a ticked one stays ticked tomorrow.
  *
- * **The store is the browser's, not the pipeline's.** The page is read on a
- * phone, and nothing on a phone can write to `~/.aula`. So the record lives in
- * `localStorage` on the origin the page is served from, and each morning's
- * fresh page hides what has already been ticked. `state.json` never learns —
- * which means the ranker still ranks a done item, the model still plans around
- * it, and the topline may still count it. That is the price of the reader
- * being the one who knows, and it is worth paying: the alternative is reading
- * the hosted page back over the network on every run, in the one leg of the
- * pipeline that already needs the network, a model and claude.ai credentials.
+ * **The record is the hosted copy's, and it is shared.** Two parents read the
+ * same page on two phones, and a thing one of them did is done for both. So on
+ * the hosted page a tick goes to the Worker behind it (`src/hosting/worker.ts`),
+ * which keeps one row per key, and every answer carries the whole set back: the
+ * page learns the other phone's ticks whenever it sends its own, loads, or
+ * comes back into view. `localStorage` is only a cache in front of that. It
+ * paints the last known state before the first answer arrives, so a done card
+ * does not flash back into the list on every open, and the answer replaces it.
  *
- * Two things make this survive the daily republish:
+ * A page opened from disk has no server to ask, and there `localStorage` is the
+ * record, as it always was. Either way the pipeline never learns: `state.json`
+ * does not read the ticks, so the ranker still ranks a done item and the
+ * topline may still count it.
  *
- * - **The origin is per-artifact and stable.** The page runs in a sandboxed
- *   frame on `<artifact-uuid>.frame.claudeusercontent.com`, with
- *   `allow-same-origin` set — measured on the real deployment, not assumed,
- *   because without that flag the frame gets an opaque origin and every
- *   `localStorage` access throws. Storage is keyed by origin and not by
- *   version, so `force: true` replacing the whole page each morning leaves it
- *   untouched.
- * - **The key is not the card id.** See `doneKeys`.
+ * **The key is not the card id.** See `doneKeys`.
  */
 
+import { DONE_PATH, KEEP_DAYS } from '../hosting/protocol.ts';
 import type { Card } from './types.ts';
 
 /**
@@ -92,11 +88,12 @@ export function doneKeys(card: Pick<Card, 'sourceKeys' | 'date'>): string[] {
 export const DONE_SCRIPT = `
 (function () {
   var STORE = 'aula.done.v1';
-  // Long enough that a fortnight's window can never outlive a tick, short
-  // enough that the store cannot grow forever. Nothing depends on the exact
-  // number: an entry that expires early re-shows an item, which is the safe
-  // direction to fail in.
-  var KEEP_DAYS = 45;
+  var KEEP_DAYS = ${KEEP_DAYS};
+
+  // The hosted copy serves this page and its API from one origin. A page
+  // opened from disk has nothing to ask, and its own storage is the record.
+  var API =
+    typeof location !== 'undefined' && /^https?:$/.test(location.protocol) ? '${DONE_PATH}' : null;
 
   // Private browsing, a blocked frame and Safari on file:// throw on access
   // rather than returning null, so both ends are wrapped. Nothing is done
@@ -127,15 +124,6 @@ export const DONE_SCRIPT = `
       tick.setAttribute('aria-pressed', done ? 'true' : 'false');
       tick.setAttribute('aria-label', done ? 'Fortryd — vis igen' : 'Markér som klaret');
     }
-  }
-
-  function setDone(card, done) {
-    var stamp = new Date().toISOString();
-    keysOf(card).forEach(function (key) {
-      if (done) state[key] = stamp; else delete state[key];
-    });
-    save();
-    markDone(card, done);
   }
 
   function refresh(section) {
@@ -169,15 +157,68 @@ export const DONE_SCRIPT = `
     });
   }
 
-  [].slice.call(document.querySelectorAll('[data-section]')).forEach(function (section) {
+  var sections = [].slice.call(document.querySelectorAll('[data-section]'));
+
+  // Restoring a visual state must not renew its timestamp or add keys from a
+  // card that the model grouped differently today. Only a click writes.
+  function paint() {
+    sections.forEach(function (section) {
+      [].slice.call(section.querySelectorAll('[data-done-keys]')).forEach(function (card) {
+        markDone(card, keysOf(card).some(function (key) { return !!state[key]; }));
+      });
+      refresh(section);
+    });
+  }
+
+  // Every answer is the whole set, and replaces the cache whole. Only the
+  // newest request's answer is applied: a load still in flight when a tick is
+  // sent answers with the world as it was before the tick.
+  //
+  // A failure changes nothing on screen. A tick that did not arrive stays
+  // ticked until the server's next answer says otherwise — the same bargain as
+  // storage that forgets, and better than a button that ignores the press. An
+  // expired Access login fails here too (its redirect to the login page is
+  // cross-origin); the next load of the page is what signs in again.
+  var latest = 0;
+  function sync(init) {
+    if (!API) return;
+    var ticket = ++latest;
+    fetch(API, init)
+      .then(function (response) {
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        return response.json();
+      })
+      .then(function (body) {
+        if (ticket !== latest || !body || !body.done || typeof body.done !== 'object') return;
+        state = body.done;
+        save();
+        paint();
+      })
+      .catch(function () {});
+  }
+
+  function setDone(card, done) {
+    var stamp = new Date().toISOString();
+    var keys = keysOf(card);
+    keys.forEach(function (key) {
+      if (done) state[key] = stamp; else delete state[key];
+    });
+    save();
+    sync({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ keys: keys, done: done }),
+    });
+  }
+
+  sections.forEach(function (section) {
     [].slice.call(section.querySelectorAll('[data-done-keys]')).forEach(function (card) {
-      // Restoring a visual state must not renew its timestamp or add keys from
-      // a card that the model grouped differently today. Only a click writes.
-      if (keysOf(card).some(function (key) { return !!state[key]; })) markDone(card, true);
       var tick = card.querySelector('.tick');
       if (!tick) return;
       tick.addEventListener('click', function () {
-        setDone(card, !card.classList.contains('is-done'));
+        var done = !card.classList.contains('is-done');
+        setDone(card, done);
+        markDone(card, done);
         refresh(section);
       });
     });
@@ -189,8 +230,14 @@ export const DONE_SCRIPT = `
         refresh(section);
       });
     }
+  });
 
-    refresh(section);
+  paint();
+  sync();
+  // A phone keeps the tab open for days, and coming back to it is when the
+  // other parent's ticks matter — so that is when to ask again.
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') sync();
   });
 })();
 `;

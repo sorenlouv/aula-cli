@@ -4,7 +4,8 @@ Built and running. `bun src/cli.ts new` writes a self-contained HTML page to
 `~/.aula/brief/`; `aula schedule` runs it every day at 06:00 and 18:00, retries
 through the slot, and catches up shortly after a wake if the machine missed
 one. PDF and PNG exist behind `--pdf`/`--png` but the scheduled run produces
-HTML only. The hosted copy is off unless `aula publish` configures it.
+HTML only. The hosted copy is off unless `aula publish <url>` configures it
+(see [HOSTING.md](HOSTING.md)).
 
 The goal is not "Aula, but nicer" — it is that not opening Aula stops costing
 anything. See [GOALS.md](GOALS.md).
@@ -213,20 +214,24 @@ Folded entries in *Øvrigt fra Aula* are not tickable: they are compact source
 entries, not cards, so the ticking invariant covers only cards displayed on the
 page (plus the calendar rows).
 
-**The store is the browser's.** The page is read on a phone and nothing there
-can write to `~/.aula`, so the record is `localStorage` on the page's origin
-(pruned after `KEEP_DAYS`). `state.json` never learns: the model still writes
-a done item and may still count it in the topline — the honest price of the
-reader being the one who knows.
+**The store is the hosted copy's, and both parents share it.** Two phones
+read one page, and a thing one parent did is done for the other. On the hosted
+page a tick goes to the Worker (`POST /api/done`), which keeps one row per key,
+and every answer carries the whole set back — so a page learns the other
+phone's ticks whenever it sends its own, loads, or comes back into view.
+`localStorage` is only a cache in front of it: it paints the last known state
+before the first answer arrives, so a done card does not flash back into the
+list on each open, and the answer replaces it whole. A page opened from disk
+has no server, and there `localStorage` is the record. Both prune after
+`KEEP_DAYS`. `state.json` never learns: the model still writes a done item and
+may still count it in the topline.
 
-Two things make it survive the daily republish:
+Two things make it survive the daily regeneration:
 
-- **The origin is per-artifact and stable.** The hosted page runs in a sandboxed
-  frame on `<artifact-uuid>.frame.claudeusercontent.com` with
-  `allow-same-origin` — without that flag every `localStorage` access would
-  throw. Storage is keyed by origin, not version, so republishing with `force`
-  leaves it untouched. Where storage is unavailable the tick still works and
-  forgets on reload, which beats an inert button.
+- **The store outlives the page.** The Worker replaces the page on each upload
+  and keeps the ticks beside it, and the page is served from one origin, so its
+  cache survives too. Where neither server nor storage answers, the tick still
+  works and forgets on reload, which beats an inert button.
 - **The key is not the card id.** Model cards are numbered by position, so
   yesterday's `model:3` is tomorrow's something else. The key is
   `sourceKey|date` — Aula's own id plus a grounded date, one per source the card
@@ -266,7 +271,8 @@ aula new [--days 60] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 | `brief/validate.ts` | The invariant table above |
 | `brief/styles.ts` | Tokens and components |
 | `brief/publish.ts` | HTML/PDF/PNG and file layout |
-| `brief/deploy.ts` | Redeploying the hosted copy |
+| `brief/deploy.ts` | Uploading to the hosted copy |
+| `hosting/` | The hosted copy's Worker: login, page, ticks ([HOSTING.md](HOSTING.md)) |
 | `brief/state.ts` | `state.json` — what has been shown, and `lastRun.complete` |
 | `brief/done.ts` | Tick keys and the client-side store |
 
@@ -277,7 +283,7 @@ four-and-a-half-minute call. It was 300, which left about thirty seconds of
 headroom and turned two slow mornings into rules-only pages. A date-only repair defaults separately to
 Haiku at low effort (`AULA_BRIEF_REPAIR_MODEL` and
 `AULA_BRIEF_REPAIR_EFFORT`), because it may only rewrite one rejected card
-against its existing sources. Calendar and publishing calls only transport
+against its existing sources. Calendar calls only transport
 deterministic tool arguments and default to Haiku at low effort; override them
 separately with `AULA_TOOL_MODEL` and `AULA_TOOL_EFFORT`. Aula's `important`
 flag travels with the source as a strong cue; code does not reorder a valid
@@ -499,32 +505,26 @@ cannot disappear in the PDF.
 ### The hosted copy
 
 Local files do not answer "what do I need to know" on a phone, and a `file://`
-link cannot be sent. Where a URL is configured the run also redeploys
-`artifact.html` to it, so the shared link always shows today's brief.
+link cannot be sent. Where one is configured, the run also uploads the page to
+a Cloudflare Worker the family signs in to, so the shared link always shows
+today's brief. [HOSTING.md](HOSTING.md) is the runbook and says why it is
+shaped the way it is.
 
-`aula publish` writes the target URL to `~/.aula/config.json`; `publish --off`
-removes it. Later brief runs redeploy to the configured URL.
+`aula publish <url>` takes the Worker's upload token from `AULA_HOSTING_TOKEN`,
+uploads once to prove both, and only then writes them to `~/.aula/config.json`;
+`publish --off` removes them. Later runs upload to what is saved.
 
-Three things about this leg are not obvious:
+The upload is one `PUT` with a bearer token, and its status is the evidence.
+It used to be a `claude -p` session asked to call the Artifact tool — the only
+way a launchd job could reach claude.ai hosting — which needed an undocumented
+entrypoint variable, a `force` on every publish, and a model's prose as the
+only proof that anything had happened.
 
-- **It has to go through `claude -p`.** The Artifact publisher is a Claude tool,
-  not an HTTP endpoint; a launchd job can only spawn `claude` and let it call.
-  That is also why `deploy.ts` is separate from `publish.ts` — writing files
-  always works, this needs network, a model and claude.ai credentials, and must
-  degrade to a note rather than fail the run.
-- **The tool is offered only to a session announcing
-  `CLAUDE_CODE_ENTRYPOINT=claude-desktop`.** `deploy.ts` sets it on that
-  subprocess. This is undocumented and may stop working after a `claude`
-  update; failure leaves the local brief intact and adds a note to the run.
-- **It publishes with `force`.** Every run is a fresh session that has by
-  definition never seen the version it replaces, so without `force` the deploy
-  would fail every day rather than occasionally. The brief is generated whole
-  and wholly replaces the day before; there is no edit to preserve.
-
-The reply is treated as a report, not proof: the deploy counts as successful
-only if the target URL comes back with no error beside it. The exit code gets no
-veto, because `claude` runs plugin hooks after the turn and a hook that cannot
-start kills the process long after the publish landed.
+A failure is a note on the run, never a failed brief. Only the server's own
+trouble — no answer, a 5xx, a 429 — leaves the run incomplete for the
+schedule to retry; a refused token or a page too large for the store is
+setup, which three hours of retrying cannot change, so the run completes and
+the note says what to fix.
 
 ### Sleeping Macs
 
@@ -552,8 +552,9 @@ Every generation passes `--catch-up`, which is what makes both the retries and
 the quarter-hourly wake-up heartbeat free: `slotIsComplete` compares
 `state.json`'s `lastRun` against the start of the slot the clock is in and
 answers from that one file, without opening a socket. Retryable fetch failures,
-model/deploy degradation and any rendered invariant violation keep `complete`
-false. Persistent problems remain visible in *Datastatus*.
+model degradation, an upload that may yet succeed and any rendered invariant
+violation keep `complete` false. Persistent problems remain visible in
+*Datastatus*.
 
 A spent window is written down too, as `exhaustedSlot`. Without it the
 heartbeat that exists to restart the coordinator would hand a permanent failure

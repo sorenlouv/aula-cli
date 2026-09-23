@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { type HTMLElement, Window } from 'happy-dom';
 import { briefInput, card, rankedBrief, sourceItem } from '../testing/brief-fixtures.ts';
 import { DONE_SCRIPT, doneKeys } from './done.ts';
 import { renderPage } from './render.ts';
@@ -96,127 +97,205 @@ describe('the rendered page', () => {
 });
 
 describe('the page behaviour', () => {
-  test('viewing a regrouped done card does not renew or widen its stored keys', () => {
-    const originalStamp = new Date().toISOString();
-    let stored = JSON.stringify({ 'post:13311009|2026-08-17': originalStamp });
-    const listeners = new Map<string, () => void>();
-    const classes = new Set<string>();
-    const classList = {
-      contains: (name: string) => classes.has(name),
-      remove: (name: string) => classes.delete(name),
-      toggle: (name: string, force?: boolean) => {
-        const enabled = force ?? !classes.has(name);
-        if (enabled) classes.add(name);
-        else classes.delete(name);
-        return enabled;
-      },
-    };
-    const tick = {
-      addEventListener: (name: string, listener: () => void) => listeners.set(name, listener),
-      setAttribute: () => undefined,
-    };
-    const card = {
-      classList,
-      getAttribute: () => 'post:13311009|2026-08-17 thread:88|2026-08-17',
-      querySelector: () => tick,
-    };
-    const empty = { hidden: true };
-    const group = {
-      hidden: false,
-      querySelectorAll: (selector: string) => (selector === '[data-done-keys]' ? [card] : []),
-    };
-    const section = {
-      classList: {
-        contains: () => false,
-        remove: () => undefined,
-        toggle: () => undefined,
-      },
-      querySelectorAll: (selector: string) =>
-        selector === '[data-done-keys]'
-          ? [card]
-          : selector === '[data-timeline-group]'
-            ? [group]
-            : [],
-      querySelector: (selector: string) => (selector === '[data-empty]' ? empty : null),
-    };
-    const document = { querySelectorAll: () => [section] };
-    const localStorage = {
-      getItem: () => stored,
-      setItem: (_key: string, value: string) => {
-        stored = value;
-      },
+  const HOSTED = 'https://aula-brief.eksempel.workers.dev/';
+  const ON_DISK = 'file:///Users/eksempel/.aula/brief/latest.html';
+  const STORE = 'aula.done.v1';
+  const stamp = () => new Date().toISOString();
+
+  /** Two date groups: one card that gathers two sources, and a mixed pair. */
+  const MARKUP = `
+    <section data-section="cards">
+      <div class="panel" data-empty hidden>Ingen punkter i dag.</div>
+      <button class="done-toggle" type="button" data-done-toggle hidden></button>
+      <div class="timeline-group" data-timeline-group="2026-08-17">
+        <div class="card" id="meeting" data-done-keys="post:1|2026-08-17 thread:88|2026-08-17"><button class="tick" type="button"></button></div>
+      </div>
+      <div class="timeline-group" data-timeline-group="2026-08-18">
+        <div class="card" id="aula" data-done-keys="post:2|2026-08-18"><button class="tick" type="button"></button></div>
+        <div class="card" id="personal" data-done-keys="cal:family:1|2026-08-18"><button class="tick" type="button"></button></div>
+      </div>
+    </section>`;
+
+  type Call = { url: string; method: string; body: unknown };
+  type Answer = Record<string, string> | 'offline' | Promise<Record<string, string>>;
+
+  /**
+   * Runs the brief's own script against a real DOM. happy-dom supplies the
+   * document, storage and location; `fetch` is the Worker, answering each
+   * call with `answer(call)` — the whole set, as the real one does.
+   */
+  function load(opts: {
+    url: string;
+    markup?: string;
+    cached?: Record<string, string>;
+    answer?: (call: Call) => Answer;
+  }) {
+    const window = new Window({ url: opts.url });
+    const document = window.document;
+    document.body.innerHTML = opts.markup ?? MARKUP;
+    if (opts.cached) window.localStorage.setItem(STORE, JSON.stringify(opts.cached));
+
+    const calls: Call[] = [];
+    const fetch = async (url: string, init?: RequestInit): Promise<Response> => {
+      const call = {
+        url,
+        method: init?.method ?? 'GET',
+        body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
+      };
+      calls.push(call);
+      const answer = opts.answer ? opts.answer(call) : {};
+      if (answer === 'offline') throw new TypeError('Failed to fetch');
+      return Response.json({ done: await answer });
     };
 
-    // Running the brief's own client-side script against a fake DOM is the
-    // entire point of this test — there is no other way to prove DONE_SCRIPT
-    // behaves, short of a browser.
+    // Running the brief's own client-side script is the entire point of these
+    // tests — there is no other way to prove DONE_SCRIPT behaves, short of a
+    // browser.
     // oxlint-disable-next-line typescript/no-implied-eval
-    new Function('document', 'localStorage', DONE_SCRIPT)(document, localStorage);
+    new Function('document', 'localStorage', 'location', 'fetch', DONE_SCRIPT)(
+      document,
+      window.localStorage,
+      window.location,
+      fetch,
+    );
 
-    expect(JSON.parse(stored)).toEqual({ 'post:13311009|2026-08-17': originalStamp });
-    expect(classes.has('is-done')).toBe(true);
-    expect(group.hidden).toBe(true);
-    expect(listeners.has('click')).toBe(true);
+    const card = (id: string) => document.getElementById(id)!;
+    return {
+      window,
+      document,
+      calls,
+      card,
+      isDone: (id: string) => card(id).classList.contains('is-done'),
+      tick: (id: string) => (card(id).querySelector('.tick') as HTMLElement).click(),
+      group: (key: string) =>
+        document.querySelector(`[data-timeline-group="${key}"]`) as HTMLElement,
+      cached: () =>
+        JSON.parse(window.localStorage.getItem(STORE) ?? '{}') as Record<string, string>,
+    };
+  }
+
+  /** Lets the fetch promise chains run to the end. */
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  test('viewing a regrouped done card does not renew or widen its stored keys', () => {
+    // Opened from disk, where the page's own storage is the record.
+    const original = { 'post:1|2026-08-17': stamp() };
+    const page = load({ url: ON_DISK, cached: original });
+
+    expect(page.cached()).toEqual(original);
+    expect(page.isDone('meeting')).toBe(true);
+    expect(page.group('2026-08-17').hidden).toBe(true);
   });
 
   test('a live personal card keeps a mixed date group visible', () => {
-    const classSet = () => {
-      const names = new Set<string>();
-      return {
-        names,
-        classList: {
-          contains: (name: string) => names.has(name),
-          toggle: (name: string, force?: boolean) => {
-            const enabled = force ?? !names.has(name);
-            if (enabled) names.add(name);
-            else names.delete(name);
-            return enabled;
-          },
-        },
-      };
-    };
-    const aula = classSet();
-    const personal = classSet();
-    const card = (classes: ReturnType<typeof classSet>, keys: string) => ({
-      classList: classes.classList,
-      getAttribute: () => keys,
-      querySelector: () => null,
+    const page = load({ url: ON_DISK, cached: { 'post:2|2026-08-18': stamp() } });
+    expect(page.isDone('aula')).toBe(true);
+    expect(page.isDone('personal')).toBe(false);
+    expect(page.group('2026-08-18').hidden).toBe(false);
+  });
+
+  test('a page opened from disk never asks a server', async () => {
+    const page = load({ url: ON_DISK });
+    page.tick('aula');
+    await settle();
+    expect(page.calls).toEqual([]);
+    expect(Object.keys(page.cached())).toEqual(['post:2|2026-08-18']);
+  });
+
+  test('the hosted page paints from its cache, then the shared set replaces it', async () => {
+    // Cached: this phone ticked the meeting. Shared: the other parent unticked
+    // it since, and ticked the Aula card.
+    const shared = { 'post:2|2026-08-18': stamp() };
+    const page = load({
+      url: HOSTED,
+      cached: { 'post:1|2026-08-17': stamp() },
+      answer: () => shared,
     });
-    const aulaCard = card(aula, 'post:1|2026-08-17');
-    const personalCard = card(personal, 'cal:family:1|2026-08-17');
-    const cards = [aulaCard, personalCard];
-    const group = {
-      hidden: false,
-      querySelectorAll: (selector: string) => (selector === '[data-done-keys]' ? cards : []),
-    };
-    const section = {
-      classList: {
-        contains: () => false,
-        remove: () => undefined,
-        toggle: () => undefined,
-      },
-      querySelectorAll: (selector: string) =>
-        selector === '[data-done-keys]'
-          ? cards
-          : selector === '[data-timeline-group]'
-            ? [group]
-            : [],
-      querySelector: () => null,
-    };
-    const document = { querySelectorAll: () => [section] };
-    const localStorage = {
-      getItem: () => JSON.stringify({ 'post:1|2026-08-17': new Date().toISOString() }),
-      setItem: () => undefined,
-    };
+    expect(page.isDone('meeting')).toBe(true);
 
-    // Running the brief's own client-side script against a fake DOM is the
-    // entire point of this test — there is no other way to prove DONE_SCRIPT
-    // behaves, short of a browser.
-    // oxlint-disable-next-line typescript/no-implied-eval
-    new Function('document', 'localStorage', DONE_SCRIPT)(document, localStorage);
+    await settle();
+    expect(page.calls).toEqual([{ url: '/api/done', method: 'GET', body: null }]);
+    expect(page.isDone('meeting')).toBe(false);
+    expect(page.isDone('aula')).toBe(true);
+    expect(page.cached()).toEqual(shared);
+  });
 
-    expect(aula.names.has('is-done')).toBe(true);
-    expect(personal.names.has('is-done')).toBe(false);
-    expect(group.hidden).toBe(false);
+  test("a tick sends every key the card carries and takes the other parent's ticks back", async () => {
+    const theirs = { 'cal:family:1|2026-08-18': stamp() };
+    const page = load({
+      url: HOSTED,
+      answer: (call) =>
+        call.method === 'POST' ? { ...theirs, 'post:1|2026-08-17': stamp() } : theirs,
+    });
+    await settle();
+    page.tick('meeting');
+    expect(page.isDone('meeting')).toBe(true);
+    await settle();
+
+    expect(page.calls[1]).toEqual({
+      url: '/api/done',
+      method: 'POST',
+      body: { keys: ['post:1|2026-08-17', 'thread:88|2026-08-17'], done: true },
+    });
+    expect(page.isDone('personal')).toBe(true);
+    expect(page.isDone('meeting')).toBe(true);
+  });
+
+  test('a slow load answering after a tick does not undo the tick', async () => {
+    let answerLoad: (done: Record<string, string>) => void = () => undefined;
+    const page = load({
+      url: HOSTED,
+      answer: (call) =>
+        call.method === 'GET'
+          ? new Promise((resolve) => (answerLoad = resolve))
+          : { 'post:2|2026-08-18': stamp() },
+    });
+    page.tick('aula');
+    await settle();
+    expect(page.isDone('aula')).toBe(true);
+
+    // The load left before the tick, so its answer is the world without it.
+    answerLoad({});
+    await settle();
+    expect(page.isDone('aula')).toBe(true);
+    expect(Object.keys(page.cached())).toEqual(['post:2|2026-08-18']);
+  });
+
+  test('with the server unreachable a tick still takes', async () => {
+    const page = load({ url: HOSTED, answer: () => 'offline' });
+    page.tick('aula');
+    await settle();
+    expect(page.isDone('aula')).toBe(true);
+    expect(Object.keys(page.cached())).toEqual(['post:2|2026-08-18']);
+  });
+
+  test('coming back to the tab asks again', async () => {
+    const page = load({ url: HOSTED });
+    await settle();
+    page.document.dispatchEvent(new page.window.Event('visibilitychange'));
+    await settle();
+    expect(page.calls.map((call) => call.method)).toEqual(['GET', 'GET']);
+  });
+
+  test('drives the markup the renderer actually writes', async () => {
+    const input = briefInput({ today: '2026-08-13', items: [SOURCE] });
+    const html = renderPage(rankedBrief(input, [CARD]));
+    const page = load({
+      url: HOSTED,
+      markup: html,
+      answer: (call) => (call.method === 'POST' ? { 'post:13311009|2026-08-17': stamp() } : {}),
+    });
+    await settle();
+
+    const card = page.document.querySelector('[data-done-keys="post:13311009|2026-08-17"]')!;
+    (card.querySelector('.tick') as HTMLElement).click();
+    await settle();
+
+    expect(card.classList.contains('is-done')).toBe(true);
+    expect(card.querySelector('.tick')!.getAttribute('aria-pressed')).toBe('true');
+    expect(page.document.querySelector('[data-done-toggle]')!.textContent).toBe('1 klaret · vis');
+    expect(page.document.querySelector('[data-empty]')!.hasAttribute('hidden')).toBe(false);
   });
 });

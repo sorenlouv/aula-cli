@@ -75,25 +75,10 @@ ${SCRIPTS}
 `;
 }
 
-/**
- * The same page, shaped for hosting rather than for the filesystem.
- *
- * A published artifact supplies its own `<!doctype>`, `<html>`, `<head>` and
- * `<body>`, so this contributes only what goes *inside* them. The `<title>` is
- * kept at the top because only the first 8KB is scanned for it.
- */
-function artifactDocument(bodyHtml: string, title: string): string {
-  return `<title>${title}</title>
-<style>${BRIEF_CSS}</style>
-${bodyHtml}
-${SCRIPTS}
-`;
-}
-
 export type PublishResult = {
   htmlPath: string;
-  /** Fragment form, ready to hand to the Artifact publisher. */
-  artifactPath: string;
+  /** The page itself, as written — what the hosted copy is sent. */
+  document: string;
   pdfPath: string | null;
   pngPath: string | null;
   warnings: string[];
@@ -132,11 +117,6 @@ export async function publish(
   writeFileSync(htmlPath, document);
   writeFileSync(join(dir, 'latest.html'), document);
 
-  // Stable path on purpose: republishing the same file redeploys to the same
-  // URL, so the link that has been shared keeps working.
-  const artifactPath = join(dir, 'artifact.html');
-  writeFileSync(artifactPath, artifactDocument(body, opts.title));
-
   const warnings: string[] = [];
   let pdfPath: string | null = null;
   let pngPath: string | null = null;
@@ -172,5 +152,5 @@ export async function publish(
     }
   }
 
-  return { htmlPath, artifactPath, pdfPath, pngPath, warnings };
+  return { htmlPath, document, pdfPath, pngPath, warnings };
 }
