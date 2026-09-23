@@ -154,6 +154,22 @@ describe('signing in', () => {
     }
   });
 
+  test('the brief is served with the app head in its head, and the upload kept as it was', async () => {
+    // Added to a home screen from the brief itself, the page has to name the
+    // manifest too — and the brief is generated knowing nothing of hosting.
+    const home = household();
+    const cookie = await home.signIn();
+    const withHead = '<!doctype html><html><head><title>x</title></head><body>b</body></html>';
+    await home.upload(withHead);
+    const served = await (await home.get('/', cookie)).text();
+    expect(served).toContain(
+      '<link rel="manifest" href="/manifest.webmanifest">\n<link rel="icon" href="/icon.png" type="image/png">',
+    );
+    expect(served.indexOf('rel="manifest"')).toBeLessThan(served.indexOf('</head>'));
+    expect(served.replace(/<link rel="manifest"[\s\S]*?(?=<\/head>)/, '')).toBe(withHead);
+    expect(home.db.query('SELECT html FROM page').get()).toEqual({ html: withHead });
+  });
+
   test('a signed-in visitor gets the brief', async () => {
     const home = household();
     const cookie = await home.signIn();
@@ -322,10 +338,48 @@ describe('signing in', () => {
         [...page.matchAll(/(?:src|href)="(\/[^"?#]+\.\w+)"/g)].map((m) => m[1]),
       ),
     );
-    expect([...referenced].sort()).toEqual(['/apple-touch-icon.png', '/icon.png', '/logo.png']);
+    expect([...referenced].sort()).toEqual([
+      '/apple-touch-icon.png',
+      '/icon.png',
+      '/logo.png',
+      '/manifest.webmanifest',
+    ]);
     for (const path of referenced) {
       expect(await Bun.file(join(import.meta.dir, 'public', path ?? '')).exists()).toBe(true);
     }
+  });
+
+  test('the manifest makes a home-screen app in the logo’s blue, from icons that exist', async () => {
+    const manifest = (await Bun.file(
+      join(import.meta.dir, 'public', 'manifest.webmanifest'),
+    ).json()) as {
+      display: string;
+      start_url: string;
+      short_name: string;
+      theme_color: string;
+      background_color: string;
+      icons: { src: string }[];
+    };
+    expect(manifest.display).toBe('standalone');
+    expect(manifest.start_url).toBe('/');
+    expect(manifest.short_name.length).toBeLessThanOrEqual(12);
+    expect(manifest.theme_color).toBe(THEME_COLOR);
+    expect(manifest.background_color).toBe(THEME_COLOR);
+    for (const { src } of manifest.icons) {
+      expect(await Bun.file(join(import.meta.dir, 'public', src)).exists()).toBe(true);
+    }
+  });
+
+  test('the pages allow the manifest their own CSP would otherwise block', async () => {
+    const home = household();
+    const cookie = await home.signIn();
+    await home.upload(PAGE);
+    for (const response of [await home.get('/'), await home.get('/', cookie)]) {
+      expect(response.headers.get('content-security-policy')).toContain("manifest-src 'self'");
+    }
+    expect(await (await household().get('/')).text()).toContain(
+      '<link rel="manifest" href="/manifest.webmanifest">',
+    );
   });
 
   test('an address is escaped where the page repeats it', async () => {

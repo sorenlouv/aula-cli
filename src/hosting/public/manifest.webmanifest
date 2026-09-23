@@ -1,0 +1,14 @@
+{
+  "name": "Aula AI oversigt",
+  "short_name": "Overblik",
+  "lang": "da",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#305791",
+  "theme_color": "#305791",
+  "icons": [
+    { "src": "/icon.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "any" }
+  ]
+}

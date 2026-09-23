@@ -46,7 +46,7 @@ import {
   sessionCookie,
   sha256,
 } from './auth.ts';
-import { codeMail, emptyPage, type LoginState, loginPage, PAGE_CSP } from './pages.ts';
+import { codeMail, emptyPage, type LoginState, loginPage, PAGE_CSP, withAppHead } from './pages.ts';
 import { BRIEF_PATH, DONE_PATH, KEEP_DAYS, MAX_PAGE_BYTES } from './protocol.ts';
 
 // A Worker's entry module may export its handler and its Durable Object classes
@@ -113,6 +113,7 @@ const BRIEF_CSP = [
   "script-src 'unsafe-inline'",
   "style-src 'unsafe-inline'",
   "img-src 'self' data:",
+  "manifest-src 'self'",
   "connect-src 'self'",
   "base-uri 'none'",
   "form-action 'self'",
@@ -491,7 +492,7 @@ export class BriefStore {
 
   #page(): Response {
     const [row] = this.#sql<{ html: string }>('SELECT html FROM page WHERE id = 1');
-    return row ? html(200, row.html, BRIEF_CSP) : html(200, emptyPage());
+    return row ? html(200, withAppHead(row.html), BRIEF_CSP) : html(200, emptyPage());
   }
 
   async #putPage(request: Request): Promise<Response> {
