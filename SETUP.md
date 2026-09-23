@@ -393,7 +393,7 @@ mainly the model call.
 
 Lead with where the overview is.
 
-**If it is online** (`aula open --web` prints an address), lead with that:
+**If it is online** (`aula open` prints an address, not a file), lead with that:
 
 > Dit overblik ligger på **[adressen]**. Gem det som bogmærke — også på
 > telefonen. Det opdaterer sig selv hver morgen kl. 06 og hver aften kl. 18,

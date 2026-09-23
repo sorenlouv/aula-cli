@@ -143,9 +143,11 @@ Usage: aula <command> [options]
 
 Everyday:
   new                          Generate today's AI overview — the local page and,
-                               where configured, the hosted copy — then open it
-  open                         Open the newest overview without regenerating
-  open --web                   Open the hosted copy instead (readable anywhere)
+                               where configured, the hosted copy — then open it:
+                               the hosted copy where there is one
+  open                         Open the newest overview without regenerating:
+                               the hosted copy where one is configured
+  open --local                 The page on this machine instead
   publish <url>                Keep a hosted copy, readable on a phone, at the
                                Worker in HOSTING.md: uploads the newest page with
                                the token in AULA_HOSTING_TOKEN, and on every run
@@ -235,7 +237,7 @@ Login options:
 Examples:
   aula new
   aula remember "beskeder fra John (Hjaltes far) er altid vigtige"
-  aula open --web
+  aula open
   aula digest --days 14 --text
   aula messages --limit 30 --full --since 30d
   aula weekly-plan --next --text
@@ -336,7 +338,7 @@ async function main(): Promise<number> {
   const ttlMs = parseCacheTtl(values['cache-ttl']);
 
   if (command === 'cache') return runCache(positionals, asText, ttlMs);
-  if (command === 'open') return runOpen(values.web === true);
+  if (command === 'open') return runOpen(values.local === true);
   if (command === 'publish') return runPublish(positionals[0], values.off === true);
   // No Aula login needed: this reads the user's own calendars, not the school's.
   if (command === 'calendars') return await runCalendars(positionals);
@@ -849,8 +851,9 @@ async function main(): Promise<number> {
       }
       // Opens in a terminal, stays quiet everywhere else: the launchd agent
       // runs this exact command through a pipe and must not pop a browser.
-      if (process.stdout.isTTY && values['no-open'] !== true && run.published.htmlPath) {
-        openInBrowser(run.published.htmlPath);
+      // The hosted copy where this run uploaded one — see `runOpen` for why.
+      if (process.stdout.isTTY && values['no-open'] !== true) {
+        openInBrowser(run.deployment.status === 'ok' ? run.deployment.url : run.published.htmlPath);
       }
       return emit(
         {
@@ -993,26 +996,22 @@ function runCache(positionals: string[], asText: boolean, ttlMs: number): number
 }
 
 /**
- * `open` / `open --web` — show the overview that already exists.
+ * `open` / `open --local` — show the overview that already exists.
  *
  * The scheduled run refreshes `latest.html` (and, where configured, the hosted
- * copy) each weekday morning, so this is the "just show me today's page"
+ * copy) morning and evening, so this is the "just show me today's page"
  * command. It needs no credentials, so it works even when the login has
  * expired.
+ *
+ * **The hosted copy wins wherever there is one.** The two are the same page,
+ * but only the hosted one keeps its ticks where both parents see them: the
+ * file, opened from disk, has no server to ask and keeps them in that one
+ * browser. Opening the file by default made the Mac the one place a tick went
+ * unshared. `--local` is still there for when the network is not.
  */
-function runOpen(web: boolean): number {
-  if (web) {
-    const url = readHosting()?.url;
-    if (!url) {
-      // 5, not 1. Exit 1 says "a source is down, retry later", and no retry
-      // configures a hosted copy; "setup required — do not retry unchanged" is
-      // what this is.
-      throw new CliError(
-        'SETUP',
-        'No hosted copy is configured.',
-        `\`${cmd('publish')}\` sets one up; \`${cmd('open')}\` shows the local page.`,
-      );
-    }
+function runOpen(local: boolean): number {
+  const url = local ? null : (readHosting()?.url ?? null);
+  if (url) {
     // Same courtesy as the local page below: say when the link is stale rather
     // than let a day-old brief read as today's.
     const deploy = loadState().lastDeploy;

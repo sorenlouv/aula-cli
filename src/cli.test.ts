@@ -409,10 +409,49 @@ test('schedule refuses a malformed --at before touching the system', () => {
   assert.match(result.stderr, /--at wants/);
 });
 
-test('open --web without a configured hosted copy says how to get one', () => {
-  const result = sandbox().run('open', '--web');
-  assert.notEqual(result.code, 0);
-  assert.ok(result.stderr.includes(cmd('publish')), result.stderr);
+/**
+ * A sandbox whose `open` and `xdg-open` do nothing, so a test can let the CLI
+ * open a page without a browser appearing on whoever runs the suite.
+ */
+function quietOpener(box: ReturnType<typeof sandbox>): void {
+  const dir = join(box.dir, 'fake-opener');
+  mkdirSync(dir, { recursive: true });
+  for (const name of ['open', 'xdg-open']) {
+    writeFileSync(join(dir, name), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  }
+  box.env.PATH = `${dir}:${process.env.PATH ?? ''}`;
+}
+
+test('open shows the hosted copy where one is configured, and --local the file', () => {
+  // Only the hosted copy shares its ticks, so it is the one to open.
+  const box = sandbox();
+  quietOpener(box);
+  writeFileSync(
+    join(box.dir, 'config.json'),
+    JSON.stringify({
+      hosting: { url: 'https://aula.eksempel.dk', token: 'eksempel-upload-token' },
+    }),
+  );
+  mkdirSync(join(box.dir, 'brief'), { recursive: true });
+  writeFileSync(join(box.dir, 'brief', 'latest.html'), '<!doctype html><title>x</title>');
+
+  const hosted = box.run('open');
+  assert.equal(hosted.code, 0, hosted.stderr);
+  assert.equal(hosted.stdout.trim(), 'https://aula.eksempel.dk');
+
+  const local = box.run('open', '--local');
+  assert.equal(local.code, 0, local.stderr);
+  assert.equal(local.stdout.trim(), join(box.dir, 'brief', 'latest.html'));
+});
+
+test('open with no hosted copy shows the file, as it always did', () => {
+  const box = sandbox();
+  quietOpener(box);
+  mkdirSync(join(box.dir, 'brief'), { recursive: true });
+  writeFileSync(join(box.dir, 'brief', 'latest.html'), '<!doctype html><title>x</title>');
+  const result = box.run('open');
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout.trim(), join(box.dir, 'brief', 'latest.html'));
 });
 
 // The reported bug this guards against: SkolePortal answered HTTP 500 for the
