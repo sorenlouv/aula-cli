@@ -397,11 +397,11 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
 
   const rest = [...brief.folded, ...brief.rest];
 
-  return `<div class="wrap">
-  <header>
+  return `<header class="masthead">
+  <div class="masthead-inner">
     <div>
+      <p class="eyebrow">Aula AI oversigt · uge ${escapeHtml(input.isoWeek)}${opts.note ? ` · ${escapeHtml(opts.note)}` : ''}</p>
       <h1>${escapeHtml(capitalise(danishDate(today)))}</h1>
-      <div class="meta">Aula AI oversigt · uge ${escapeHtml(input.isoWeek)}${opts.note ? ` · ${escapeHtml(opts.note)}` : ''}</div>
     </div>
     <div class="kids">
       ${input.family.children
@@ -411,7 +411,9 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
         )
         .join('')}
     </div>
-  </header>
+  </div>
+</header>
+<main class="wrap">
   ${
     opts.overviewWarning
       ? `<section class="overview-warning" data-block="overview-warning"><h2>Vigtigt om denne oversigt</h2><div class="panel"><div class="st bad"><i>⚠</i><span>${escapeHtml(opts.overviewWarning)}</span></div></div></section>`
@@ -478,5 +480,5 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
   ${hasHealthWarning ? '' : `<details class="muted"><summary>${escapeHtml(datastatusSummary)}</summary>${datastatus}</details>`}
 
   <footer>Genereret ${escapeHtml(generatedWhen(opts.generatedAt ?? new Date()))}</footer>
-</div>`;
+</main>`;
 }

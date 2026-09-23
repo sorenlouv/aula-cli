@@ -63,7 +63,8 @@ function wrapDocument(bodyHtml: string, title: string): string {
 <html lang="da">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
 <title>${title}</title>
 <style>${BRIEF_CSS}</style>
 </head>
