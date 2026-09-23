@@ -166,6 +166,13 @@ to a crash. `parseCommandLine` wraps it.
   tracked file against the list (from a worktree too) and prints file and line
   only; run it before committing anything that touched a fixture, a test, a doc
   or an example.
+
+  **One exception, the user's own decision (2026-09-23):** the images in
+  `src/hosting/public/` — the hosted login page's logo and the site icons —
+  are the family's own wordmark, which is built from its name. The exception
+  is those image files and nothing else: the name stays out of text, `alt`
+  attributes, file names and commit messages, and a new image is not covered
+  by it without asking.
 - **Preferences are the model's to read.** The model interprets the prose in
   `preferences.md` and returns a typed relevance verdict; ranking code acts on
   that verdict. Do not parse preference wording in code.

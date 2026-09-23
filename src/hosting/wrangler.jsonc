@@ -15,6 +15,11 @@
   "workers_dev": false,
   "preview_urls": false,
 
+  // The logo and the icons, served by Cloudflare before the Worker runs: public
+  // on purpose, since the login page shows them to someone not yet signed in.
+  // A path with no file here — every other one — falls through to the Worker.
+  "assets": { "directory": "./public" },
+
   "durable_objects": {
     "bindings": [{ "name": "BRIEF_STORE", "class_name": "BriefStore" }],
   },
