@@ -26,8 +26,10 @@ phone ──GET / ── session? ── no ──▶ login page ── code by 
 - **`public/`** — the logo and the icons, served by Cloudflare's asset layer
   before the Worker runs, since the login page shows them to someone not yet
   signed in. iOS fetches `/apple-touch-icon.png` by itself, so a brief added to
-  a phone's home screen gets the logo too. These images are the one exception
-  to the no-family-names rule; see AGENTS.md.
+  a phone's home screen gets the logo too. The brief's masthead shows the logo
+  before the week number, drawn by a rule the Worker adds to the page's head as
+  it serves it — so a brief opened from disk has none. These images are the one
+  exception to the no-family-names rule; see AGENTS.md.
 - **`protocol.ts`** — the paths and limits the CLI, the page and the Worker
   share.
 

@@ -146,6 +146,12 @@ export function isoWeekToMonday(isoWeek: string): Date {
   return monday;
 }
 
+/** The week's number alone — 39 for `2026-W39` — or undefined for anything else. */
+export function isoWeekNumber(isoWeek: string): number | undefined {
+  const match = /^\d{4}-W(\d{2})$/.exec(isoWeek);
+  return match ? Number(match[1]) : undefined;
+}
+
 /** `YYYY-MM-DD` in UTC. */
 export function isoDate(date: Date): string {
   return date.toISOString().slice(0, 10);
