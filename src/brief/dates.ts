@@ -16,7 +16,7 @@
  * rarer than plain invention.
  */
 
-import { isoWeekString, localIsoDate } from '../integrations/types.ts';
+import { isoWeekNumber, isoWeekString, localIsoDate } from '../integrations/types.ts';
 import { isValidCalendarDate, parseIsoDateParts } from '../validation.ts';
 import { extractDates } from './rules.ts';
 import type { BriefInput, Card, SourceItem } from './types.ts';
@@ -407,8 +407,8 @@ export function buildDateSupport(input: BriefInput): DateSupport {
     windowEnd.setDate(windowEnd.getDate() + Math.max(input.windowDays, 7));
     support.windowEnd = localIsoDate(windowEnd);
   }
-  const week = Number(/-W(\d{1,2})$/.exec(input.isoWeek)?.[1]);
-  if (Number.isFinite(week)) support.weeks.add(week);
+  const week = isoWeekNumber(input.isoWeek);
+  if (week !== undefined) support.weeks.add(week);
   const routines = planRoutineWeekdays(input.items);
 
   for (const item of input.items) {

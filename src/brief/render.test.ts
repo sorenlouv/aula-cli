@@ -515,6 +515,11 @@ describe('the rest of the page', () => {
     expect(html).toContain('<b>Viggo</b><span>Sommerfuglene</span>');
   });
 
+  test('the header names the week by its number and keeps no title of its own', () => {
+    // The page's name is in the tab; the hosted copy draws its logo here.
+    expect(page([SIGNUP]).html).toContain('<p class="eyebrow">Uge 33</p>');
+  });
+
   test('a failed fetch hoists datastatus above the cards; a clean day folds it at the foot', () => {
     const warn = {
       ...INPUT,
@@ -570,6 +575,8 @@ describe('the rest of the page', () => {
   });
 
   test('the note for a day without a model lands in the header meta', () => {
-    expect(page([SIGNUP], { note: 'kun reglerne' }).html).toContain('uge 2026-W33 · kun reglerne');
+    expect(page([SIGNUP], { note: 'kun reglerne' }).html).toContain(
+      '<p class="eyebrow">Uge 33 · kun reglerne</p>',
+    );
   });
 });

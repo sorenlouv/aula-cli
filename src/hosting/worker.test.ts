@@ -2,7 +2,9 @@ import { Database, type SQLQueryBindings } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { CODE_ATTEMPTS, SENDS_PER_HOUR, SESSION_COOKIE } from './auth.ts';
-import { THEME_COLOR } from './pages.ts';
+import { renderPage } from '../brief/render.ts';
+import { briefInput, rankedBrief } from '../testing/brief-fixtures.ts';
+import { BRIEF_LOGO, THEME_COLOR } from './pages.ts';
 import { KEEP_DAYS, MAX_PAGE_BYTES } from './protocol.ts';
 import * as entry from './worker.ts';
 import worker, {
@@ -168,6 +170,22 @@ describe('signing in', () => {
     expect(served.indexOf('rel="manifest"')).toBeLessThan(served.indexOf('</head>'));
     expect(served.replace(/<link rel="manifest"[\s\S]*?(?=<\/head>)/, '')).toBe(withHead);
     expect(home.db.query('SELECT html FROM page').get()).toEqual({ html: withHead });
+  });
+
+  test('the brief is served with the logo drawn before the week, on markup the page has', async () => {
+    // The rule aims at classes another module writes, and a rule that matches
+    // nothing fails without a word — so the target is checked on a real render.
+    const home = household();
+    const cookie = await home.signIn();
+    await home.upload('<!doctype html><html><head></head><body></body></html>');
+    const served = await (await home.get('/', cookie)).text();
+    expect(served).toContain(BRIEF_LOGO);
+    expect(served.indexOf(BRIEF_LOGO)).toBeLessThan(served.indexOf('</head>'));
+    expect(BRIEF_LOGO).toContain('.masthead .eyebrow::before');
+    expect(BRIEF_LOGO).toContain('url(/logo.png)');
+    expect(renderPage(rankedBrief(briefInput(), []))).toMatch(
+      /<header class="masthead">[\s\S]*?<p class="eyebrow">Uge 33<\/p>/,
+    );
   });
 
   test('a signed-in visitor gets the brief', async () => {

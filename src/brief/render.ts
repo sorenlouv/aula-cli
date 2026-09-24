@@ -13,6 +13,7 @@
  */
 
 import { escapeHtml } from '../html.ts';
+import { isoWeekNumber } from '../integrations/types.ts';
 import { DA_MONTHS, DA_WEEKDAYS, intervalLabel, overviewWindow } from './dates.ts';
 import { doneKeys } from './done.ts';
 import type {
@@ -400,7 +401,7 @@ export function renderPage(brief: RankedBrief, opts: PageOptions = {}): string {
   return `<header class="masthead">
   <div class="masthead-inner">
     <div>
-      <p class="eyebrow">Aula AI oversigt · uge ${escapeHtml(input.isoWeek)}${opts.note ? ` · ${escapeHtml(opts.note)}` : ''}</p>
+      <p class="eyebrow">Uge ${isoWeekNumber(input.isoWeek) ?? escapeHtml(input.isoWeek)}${opts.note ? ` · ${escapeHtml(opts.note)}` : ''}</p>
       <h1>${escapeHtml(capitalise(danishDate(today)))}</h1>
     </div>
     <div class="kids">

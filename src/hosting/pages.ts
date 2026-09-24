@@ -27,7 +27,7 @@ const THEME_COLOR_DARK = '#16243d';
  * What makes the site an app on a phone's home screen: the manifest (its
  * name, colours and standalone display), the icon iOS takes, and the blue for
  * the status bar. Every page the Worker serves carries it — the login pages
- * here, and the brief, into which `withAppHead` puts it — so it can be added
+ * here, and the brief, into which `withHostedHead` puts it — so it can be added
  * from whichever page someone is on.
  */
 export const APP_HEAD = `<link rel="manifest" href="/manifest.webmanifest">
@@ -38,14 +38,27 @@ export const APP_HEAD = `<link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="${THEME_COLOR_DARK}" media="(prefers-color-scheme: dark)">`;
 
 /**
- * The brief as uploaded, with `APP_HEAD` in its head. Done here, when it is
- * served, rather than when it is generated: the head belongs to the hosted
- * site, and the same page opened from disk has no manifest to point at. A page
- * with no head to put it in is served as it came.
+ * The logo at the head of the brief's masthead, before the week number. Drawn
+ * by a rule rather than put in the markup, so that the head is still the only
+ * part of the upload rewritten on the way out. The masthead's band is blue in
+ * both themes, so the white mark reads on either; on paper the band is gone
+ * and the mark would be a white gap, so print leaves it out.
  */
-export function withAppHead(page: string): string {
+export const BRIEF_LOGO = `<style>
+.masthead .eyebrow::before{content:"";display:inline-block;width:82px;height:21px;
+  margin-right:12px;vertical-align:-2px;background:url(/logo.png) center/contain no-repeat}
+@media print{.masthead .eyebrow::before{display:none}}
+</style>`;
+
+/**
+ * The brief as uploaded, with `APP_HEAD` and `BRIEF_LOGO` in its head. Done
+ * here, when it is served, rather than when it is generated: both belong to the
+ * hosted site, and the same page opened from disk has no manifest to point at
+ * and no logo to draw. A page with no head to put them in is served as it came.
+ */
+export function withHostedHead(page: string): string {
   const at = page.indexOf('</head>');
-  return at === -1 ? page : `${page.slice(0, at)}${APP_HEAD}\n${page.slice(at)}`;
+  return at === -1 ? page : `${page.slice(0, at)}${APP_HEAD}\n${BRIEF_LOGO}\n${page.slice(at)}`;
 }
 
 /** Stricter than the brief's: these pages run no script at all. */
