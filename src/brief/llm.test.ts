@@ -213,7 +213,7 @@ describe('model cost controls', () => {
     try {
       for (const name of OVERRIDES) delete process.env[name];
       expect(modelEffortArgs()).toEqual(['--model', 'claude-opus-5-5', '--effort', 'high']);
-      expect(modelEffortArgs('repair')).toEqual(['--model', 'haiku', '--effort', 'low']);
+      expect(modelEffortArgs('repair')).toEqual(['--model', 'claude-opus-5-5', '--effort', 'low']);
       expect(modelEffortArgs('transport')).toEqual(['--model', 'haiku', '--effort', 'low']);
 
       process.env.AULA_BRIEF_MODEL = 'sonnet';
@@ -861,7 +861,7 @@ describe('the claude subprocess', () => {
         attempts: [{ code: 0 }],
       });
       expect(f.calls()).toHaveLength(2);
-      expect(f.calls()[1]).toContain('--model haiku --effort low');
+      expect(f.calls()[1]).toContain('--model claude-opus-5-5 --effort low');
     });
 
     test('rejects a repair that widens the card beyond its original citations', async () => {
