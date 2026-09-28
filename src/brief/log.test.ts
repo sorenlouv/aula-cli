@@ -22,8 +22,8 @@ test('appends private JSONL diagnostics outside the overview', () => {
       event: 'brief.model.failed',
       day: '2026-08-24',
       isoWeek: '2026-W35',
-      model: null,
-      effort: null,
+      model: 'claude-opus-5-5',
+      effort: 'high',
       useCache: true,
       details: { message: 'overloaded' },
     },
@@ -74,8 +74,8 @@ test('reports when the logged revision has uncommitted changes', () => {
 test('preserves Claude process output and the stack for after-the-fact debugging', () => {
   const error = new ClaudeRunError('claude -p exited 1: overloaded', {
     timeoutMs: 240_000,
-    model: null,
-    effort: null,
+    model: 'claude-opus-5-5',
+    effort: 'high',
     schemaRequested: true,
     attempts: [
       {

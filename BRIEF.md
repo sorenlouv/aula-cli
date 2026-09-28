@@ -276,8 +276,13 @@ aula new [--days 60] [--no-open] [--pdf] [--no-llm] [--explain] [--out <path>]
 | `brief/state.ts` | `state.json` — what has been shown, and `lastRun.complete` |
 | `brief/done.ts` | Tick keys and the client-side store |
 
-`AULA_BRIEF_MODEL` and `AULA_BRIEF_EFFORT` override extraction, where stronger
-judgment can improve the answer. `AULA_BRIEF_TIMEOUT` (seconds) overrides how
+Extraction runs on Opus 5.5 at high effort (`claude-opus-5-5`), where stronger
+judgment improves the answer; `AULA_BRIEF_MODEL` and `AULA_BRIEF_EFFORT`
+override it. Opus 5.5 needs Claude Code 2.1.280 or newer — an older `claude`
+answers with a 400 naming the version, and the page is built by the rules
+alone. Until 2026-09-28 extraction pinned neither flag and silently ran on
+whatever the user had last chosen for interactive work: Opus 5 at `xhigh`,
+read off the wire. `AULA_BRIEF_TIMEOUT` (seconds) overrides how
 long one extraction call may take; the default is 600, against a typical
 four-and-a-half-minute call. It was 300, which left about thirty seconds of
 headroom and turned two slow mornings into rules-only pages. A date-only repair defaults separately to

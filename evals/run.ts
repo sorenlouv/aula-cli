@@ -3,6 +3,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { extractCards, type ExtractionTelemetry } from '../src/brief/llm.ts';
+import { modelSettings } from '../src/llm/claude.ts';
 import { briefExtractionRequest } from '../src/llm/requests/brief-extraction.ts';
 import { assertBriefExtraction } from './assert-brief-extraction.ts';
 import { briefExtractionCases } from './cases/brief-extraction.ts';
@@ -79,8 +80,7 @@ function writeReport(records: RunRecord[]): string {
     `${JSON.stringify(
       {
         createdAt: new Date().toISOString(),
-        model: process.env.AULA_BRIEF_MODEL ?? null,
-        effort: process.env.AULA_BRIEF_EFFORT ?? null,
+        ...modelSettings('brief'),
         records,
       },
       null,

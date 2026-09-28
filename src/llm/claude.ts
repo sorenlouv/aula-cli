@@ -41,29 +41,57 @@ const CLAUDE_CWD = join(AULA_DIR, 'cwd');
 
 type ModelPurpose = 'brief' | 'repair' | 'transport';
 
-function modelSettings(purpose: ModelPurpose): {
-  model: string | undefined;
-  effort: string | undefined;
-} {
-  const model =
-    purpose === 'brief'
-      ? process.env.AULA_BRIEF_MODEL
-      : purpose === 'repair'
-        ? (process.env.AULA_BRIEF_REPAIR_MODEL ?? 'haiku')
-        : (process.env.AULA_TOOL_MODEL ?? 'haiku');
-  const effort =
-    purpose === 'brief'
-      ? process.env.AULA_BRIEF_EFFORT
-      : purpose === 'repair'
-        ? (process.env.AULA_BRIEF_REPAIR_EFFORT ?? 'low')
-        : (process.env.AULA_TOOL_EFFORT ?? 'low');
-  return { model, effort };
+/**
+ * The model and effort for each purpose, and the variable that overrides each.
+ *
+ * Every purpose pins both, because an unpinned `claude -p` does not fall back
+ * to anything neutral: it takes the account's default model and the
+ * `effortLevel` in `~/.claude/settings.json`, and `--safe-mode` disables
+ * neither. The brief pinned nothing until 2026-09-28, when its request was read
+ * off the wire: Opus 5 at `xhigh`, because that is what the user had chosen for
+ * interactive coding — and it would have moved the next time they chose again.
+ *
+ * Opus 5.5 needs Claude Code 2.1.280 or newer. An older CLI answers the
+ * extraction with a 400 that names the version, and the page is built by the
+ * rules alone.
+ */
+const MODEL_SETTINGS: Record<
+  ModelPurpose,
+  { model: string; effort: string; modelEnv: string; effortEnv: string }
+> = {
+  brief: {
+    model: 'claude-opus-5-5',
+    effort: 'high',
+    modelEnv: 'AULA_BRIEF_MODEL',
+    effortEnv: 'AULA_BRIEF_EFFORT',
+  },
+  repair: {
+    model: 'haiku',
+    effort: 'low',
+    modelEnv: 'AULA_BRIEF_REPAIR_MODEL',
+    effortEnv: 'AULA_BRIEF_REPAIR_EFFORT',
+  },
+  transport: {
+    model: 'haiku',
+    effort: 'low',
+    modelEnv: 'AULA_TOOL_MODEL',
+    effortEnv: 'AULA_TOOL_EFFORT',
+  },
+};
+
+/** `||`, not `??`: an empty variable is unset, not a request to inherit the CLI's default. */
+export function modelSettings(purpose: ModelPurpose): { model: string; effort: string } {
+  const settings = MODEL_SETTINGS[purpose];
+  return {
+    model: process.env[settings.modelEnv] || settings.model,
+    effort: process.env[settings.effortEnv] || settings.effort,
+  };
 }
 
 /** Extraction, bounded repair, and deterministic tool transport have separate cost dials. */
 export function modelEffortArgs(purpose: ModelPurpose = 'brief'): string[] {
   const { model, effort } = modelSettings(purpose);
-  return [...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])];
+  return ['--model', model, '--effort', effort];
 }
 
 /** How a `claude -p` subprocess ended, before any interpretation of what it said. */
@@ -86,8 +114,8 @@ type ClaudeExitDiagnostic = ClaudeExit & {
 
 export type ClaudeFailureDetails = {
   timeoutMs: number;
-  model: string | null;
-  effort: string | null;
+  model: string;
+  effort: string;
   schemaRequested: boolean;
   attempts: ClaudeExitDiagnostic[];
 };
@@ -398,8 +426,7 @@ export async function runClaude(
   const failure = (message: string) =>
     new ClaudeRunError(message, {
       timeoutMs,
-      model: settings.model ?? null,
-      effort: settings.effort ?? null,
+      ...settings,
       schemaRequested: opts.schema !== undefined,
       attempts: attempts.map(diagnosticExit),
     });

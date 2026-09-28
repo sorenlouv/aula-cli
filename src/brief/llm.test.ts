@@ -199,33 +199,38 @@ describe('independent Aula actions', () => {
 });
 
 describe('model cost controls', () => {
-  test('uses a small low-effort model for deterministic tool transport', () => {
-    const previous = {
-      briefModel: process.env.AULA_BRIEF_MODEL,
-      briefEffort: process.env.AULA_BRIEF_EFFORT,
-      toolModel: process.env.AULA_TOOL_MODEL,
-      toolEffort: process.env.AULA_TOOL_EFFORT,
-    };
+  const OVERRIDES = [
+    'AULA_BRIEF_MODEL',
+    'AULA_BRIEF_EFFORT',
+    'AULA_BRIEF_REPAIR_MODEL',
+    'AULA_BRIEF_REPAIR_EFFORT',
+    'AULA_TOOL_MODEL',
+    'AULA_TOOL_EFFORT',
+  ];
+
+  test('pins a model and an effort for every purpose, whatever the CLI would default to', () => {
+    const previous = OVERRIDES.map((name) => [name, process.env[name]] as const);
     try {
-      delete process.env.AULA_BRIEF_MODEL;
-      delete process.env.AULA_BRIEF_EFFORT;
-      delete process.env.AULA_TOOL_MODEL;
-      delete process.env.AULA_TOOL_EFFORT;
+      for (const name of OVERRIDES) delete process.env[name];
+      expect(modelEffortArgs()).toEqual(['--model', 'claude-opus-5-5', '--effort', 'high']);
+      expect(modelEffortArgs('repair')).toEqual(['--model', 'haiku', '--effort', 'low']);
       expect(modelEffortArgs('transport')).toEqual(['--model', 'haiku', '--effort', 'low']);
 
       process.env.AULA_BRIEF_MODEL = 'sonnet';
-      process.env.AULA_BRIEF_EFFORT = 'high';
-      expect(modelEffortArgs()).toEqual(['--model', 'sonnet', '--effort', 'high']);
+      process.env.AULA_BRIEF_EFFORT = 'max';
+      expect(modelEffortArgs()).toEqual(['--model', 'sonnet', '--effort', 'max']);
       expect(modelEffortArgs('transport')).toEqual(['--model', 'haiku', '--effort', 'low']);
+
+      // An empty variable is unset: it must not drop the flag and hand the
+      // choice back to the user's interactive Claude Code settings.
+      process.env.AULA_BRIEF_MODEL = '';
+      process.env.AULA_BRIEF_EFFORT = '';
+      expect(modelEffortArgs()).toEqual(['--model', 'claude-opus-5-5', '--effort', 'high']);
     } finally {
-      const restore = (name: string, value: string | undefined) => {
+      for (const [name, value] of previous) {
         if (value === undefined) delete process.env[name];
         else process.env[name] = value;
-      };
-      restore('AULA_BRIEF_MODEL', previous.briefModel);
-      restore('AULA_BRIEF_EFFORT', previous.briefEffort);
-      restore('AULA_TOOL_MODEL', previous.toolModel);
-      restore('AULA_TOOL_EFFORT', previous.toolEffort);
+      }
     }
   });
 });
