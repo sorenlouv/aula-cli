@@ -18,6 +18,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { SESSION_FREE_COMMANDS } from './auth.ts';
+import { HISTORY_DAYS } from './brief/collect.ts';
+import { DA_MONTHS } from './brief/dates.ts';
+import { addLocalDays, localIsoDate } from './integrations/types.ts';
 import { cmd } from './runtime.ts';
 import { currentSlotStart } from './slots.ts';
 import { installFakeClaude } from './testing/fake-claude.ts';
@@ -2107,14 +2110,24 @@ test('a reused layout says so, and --no-cache forces a fresh one', () => {
 });
 
 test('a partial model response is supplemented by rule-grounded obligations', () => {
+  // A date no source states, and it moves with the clock because the fake Aula
+  // does. It was a literal 2026-09-24, which thread 5001 grounded by itself
+  // from the 25th to the 28th of September 2026: the thread's messages are
+  // stamped one to four days ago, and a message's send date grounds a card
+  // citing its thread. It is also further ahead than a weekday reaches — the
+  // brief resolves one up to HISTORY_DAYS out, so the "mandag" and "tirsdag"
+  // the thread names would ground any Monday or Tuesday nearer than that.
+  const invented = addLocalDays(new Date(), HISTORY_DAYS + 30);
+  const iso = localIsoDate(invented);
+  const written = `${invented.getDate()}. ${DA_MONTHS[invented.getMonth()]} ${invented.getFullYear()}`;
   const answer = JSON.stringify({
     topline: 'Ufuldstændigt svar.',
     cards: [
       {
         title: 'Opdigtet dato',
-        summary: 'Dette står ikke i kilden den 24. september 2026.',
+        summary: `Dette står ikke i kilden den ${written}.`,
         children: ['Alma'],
-        date: '2026-09-24',
+        date: iso,
         needsAction: true,
         reason: 'Test.',
         sourceKeys: ['thread:5001'],
@@ -2126,8 +2139,12 @@ test('a partial model response is supplemented by rule-grounded obligations', ()
   });
   const box = sandboxWithClaude('ok', answer);
   const result = box.run('new', '--no-deploy', '--no-open', '--explain');
-  assert.equal(result.code, 0, result.stderr);
-  assert.equal(JSON.parse(result.stdout).complete, false);
+  const run = json(result);
+  // Refused for its date, by name. `complete` alone is what this test used to
+  // check, and a card the validator accepted failed it as `true !== false`,
+  // with nothing to say which card had got through or why.
+  assert.match(run.notes.join('\n'), new RegExp(`Udtræk afvist: .*date ${iso} har ikke belæg`));
+  assert.equal(run.complete, false);
   assert.match(result.stderr, /rule-made/);
   const page = readFileSync(join(box.dir, 'brief', 'latest.html'), 'utf8');
   assert.match(page, /Husk regntøj/);
