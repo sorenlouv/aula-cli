@@ -286,9 +286,10 @@ read off the wire. `AULA_BRIEF_TIMEOUT` (seconds) overrides how
 long one extraction call may take; the default is 600, against a typical
 four-and-a-half-minute call. It was 300, which left about thirty seconds of
 headroom and turned two slow mornings into rules-only pages. A date-only repair defaults separately to
-Haiku at low effort (`AULA_BRIEF_REPAIR_MODEL` and
-`AULA_BRIEF_REPAIR_EFFORT`), because it may only rewrite one rejected card
-against its existing sources. Calendar calls only transport
+Opus 5.5 at low effort (`AULA_BRIEF_REPAIR_MODEL` and
+`AULA_BRIEF_REPAIR_EFFORT`): the extraction's model, at the lowest effort,
+because it may only rewrite one rejected card against its existing sources.
+It ran on Haiku until 2026-09-28. Calendar calls only transport
 deterministic tool arguments and default to Haiku at low effort; override them
 separately with `AULA_TOOL_MODEL` and `AULA_TOOL_EFFORT`. Aula's `important`
 flag travels with the source as a strong cue; code does not reorder a valid

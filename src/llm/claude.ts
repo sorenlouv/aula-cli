@@ -66,7 +66,7 @@ const MODEL_SETTINGS: Record<
     effortEnv: 'AULA_BRIEF_EFFORT',
   },
   repair: {
-    model: 'haiku',
+    model: 'claude-opus-5-5',
     effort: 'low',
     modelEnv: 'AULA_BRIEF_REPAIR_MODEL',
     effortEnv: 'AULA_BRIEF_REPAIR_EFFORT',
