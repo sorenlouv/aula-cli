@@ -11,7 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AulaClient } from '../client.ts';
 import { isoWeekString, localIsoDate } from '../integrations/types.ts';
-import { CLAUDE_INSTALL_COMMAND, ClaudeMissingError } from '../llm/claude.ts';
+import { CLAUDE_INSTALL_COMMAND, ClaudeMissingError, modelSettings } from '../llm/claude.ts';
 import { collect, HISTORY_DAYS } from './collect.ts';
 import { deployBrief, type DeployResult } from './deploy.ts';
 import { appendBriefLog, errorForBriefLog, sourceRevision } from './log.ts';
@@ -116,6 +116,7 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
   const revision = sourceRevision();
   const startedAt = performance.now();
   const phaseMs: Record<string, number> = {};
+  const { model, effort } = modelSettings('brief');
   const log = (event: Parameters<typeof appendBriefLog>[0]['event'], details: unknown) =>
     appendBriefLog(
       {
@@ -123,8 +124,8 @@ export async function runBrief(client: AulaClient, opts: BriefOptions = {}): Pro
         event,
         day: localIsoDate(now),
         isoWeek,
-        model: process.env.AULA_BRIEF_MODEL ?? null,
-        effort: process.env.AULA_BRIEF_EFFORT ?? null,
+        model,
+        effort,
         useCache: opts.useCache !== false,
         details: { runId, ...(details as Record<string, unknown>) },
       },

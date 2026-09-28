@@ -243,6 +243,17 @@ fallback sources.
   was in. `spawnClaude` sets it, rather than the plist, because that fixes the
   interactive case too. The directory must stay empty — that is what makes it
   boring — and `src/llm/claude.test.ts` fails if anything writes there.
+- **Every `claude` subprocess pins `--model` and `--effort`.** Leave one out and
+  the call does not fall back to anything neutral: it takes the account's
+  default model and the `effortLevel` in `~/.claude/settings.json`, and
+  `--safe-mode` disables neither — the same decision-nobody-made as the working
+  directory above. The brief ran that way until 2026-09-28, on Opus 5 at
+  `xhigh` because that was the user's setting for interactive coding; the
+  request was read off the wire through a loopback proxy on
+  `ANTHROPIC_BASE_URL`, because neither the stream-json `init` line nor
+  `ANTHROPIC_LOG=debug` prints the effort. `MODEL_SETTINGS` in `claude.ts` is
+  the one table, and a model newer than the installed `claude` fails with a 400
+  that names the minimum version.
 - **`--allowedTools` pre-approves; `--tools` is what removes a tool.** Measured
   twice now: an allow-list alone still let a session read any file. `--tools`
   strips the *built-in* set only — every tool of every connected MCP server

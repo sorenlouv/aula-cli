@@ -36,8 +36,8 @@ export type BriefLogEvent = {
     | 'brief.model.adjusted';
   day: string;
   isoWeek: string;
-  model: string | null;
-  effort: string | null;
+  model: string;
+  effort: string;
   useCache: boolean;
   details: unknown;
 };
